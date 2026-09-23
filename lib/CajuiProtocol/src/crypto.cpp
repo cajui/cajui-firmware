@@ -8,20 +8,20 @@
 
 namespace cajui {
 namespace {
-bool crypt(bool sealing, const Key& key, const uint8_t nonce[NonceSize],
-           const uint8_t* aad, size_t aadSize, const uint8_t* input,
-           size_t size, uint8_t* output, uint8_t tag[TagSize]) {
+bool crypt(bool sealing, const Key& key, const uint8_t nonce[NonceSize], const uint8_t* aad,
+           size_t aadSize, const uint8_t* input, size_t size, uint8_t* output,
+           uint8_t tag[TagSize]) {
     if (aadSize > MaxFrame || size > MaxPayload) return false;
     bool ok = false;
 #ifdef ARDUINO
     mbedtls_gcm_context ctx;
     mbedtls_gcm_init(&ctx);
     if (mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key.data(), KeySize * 8) == 0) {
-        const int result = sealing ?
-            mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, size, nonce, NonceSize,
-                                     aad, aadSize, input, output, TagSize, tag) :
-            mbedtls_gcm_auth_decrypt(&ctx, size, nonce, NonceSize, aad, aadSize, tag, TagSize,
-                                    input, output);
+        const int result =
+            sealing ? mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, size, nonce, NonceSize,
+                                                aad, aadSize, input, output, TagSize, tag)
+                    : mbedtls_gcm_auth_decrypt(&ctx, size, nonce, NonceSize, aad, aadSize, tag,
+                                               TagSize, input, output);
         ok = result == 0;
     }
     mbedtls_gcm_free(&ctx);

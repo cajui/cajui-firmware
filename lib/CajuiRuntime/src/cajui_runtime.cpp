@@ -12,11 +12,11 @@ bool SendController::active() const {
 bool SendController::validPolicy() const {
     // Bound all intervals below the unsigned half-range for wrap-safe subtraction.
     const auto cycle = policy_.cycleTimeoutMs;
-    return cycle && cycle <= INT32_MAX && policy_.initialJitterMs < cycle &&
-           policy_.ackTimeoutMs && policy_.ackTimeoutMs < cycle &&
-           policy_.channelTimeoutMs && policy_.channelTimeoutMs < cycle &&
-           policy_.transmitTimeoutMs && policy_.transmitTimeoutMs < cycle &&
-           policy_.firstBackoffMinMs && policy_.firstBackoffMinMs <= policy_.firstBackoffMaxMs &&
+    return cycle && cycle <= INT32_MAX && policy_.initialJitterMs < cycle && policy_.ackTimeoutMs &&
+           policy_.ackTimeoutMs < cycle && policy_.channelTimeoutMs &&
+           policy_.channelTimeoutMs < cycle && policy_.transmitTimeoutMs &&
+           policy_.transmitTimeoutMs < cycle && policy_.firstBackoffMinMs &&
+           policy_.firstBackoffMinMs <= policy_.firstBackoffMaxMs &&
            policy_.firstBackoffMaxMs < cycle && policy_.secondBackoffMinMs &&
            policy_.secondBackoffMinMs <= policy_.secondBackoffMaxMs &&
            policy_.secondBackoffMaxMs < cycle;
@@ -66,8 +66,10 @@ void SendController::wait(uint32_t minimum, uint32_t maximum) {
 }
 
 void SendController::backoff() {
-    if (sender_.attempts() < 2) wait(policy_.firstBackoffMinMs, policy_.firstBackoffMaxMs);
-    else wait(policy_.secondBackoffMinMs, policy_.secondBackoffMaxMs);
+    if (sender_.attempts() < 2)
+        wait(policy_.firstBackoffMinMs, policy_.firstBackoffMaxMs);
+    else
+        wait(policy_.secondBackoffMinMs, policy_.secondBackoffMaxMs);
 }
 
 void SendController::poll() {
@@ -78,39 +80,52 @@ void SendController::poll() {
         return;
     }
     switch (state_) {
-    case SendState::Starting:
-        wait(0, policy_.initialJitterMs);
-        break;
+    case SendState::Starting: wait(0, policy_.initialJitterMs); break;
     case SendState::Waiting:
         if (uint32_t(now - phaseStart_) < waitMs_) break;
-        if (!radio_.startChannelCheck()) { finish(Completion::RadioError); break; }
+        if (!radio_.startChannelCheck()) {
+            finish(Completion::RadioError);
+            break;
+        }
         phaseStart_ = now;
         state_ = SendState::CheckingChannel;
         break;
     case SendState::CheckingChannel: {
         if (uint32_t(now - phaseStart_) >= policy_.channelTimeoutMs) {
-            finish(Completion::RadioTimeout); break;
+            finish(Completion::RadioTimeout);
+            break;
         }
         const auto status = radio_.channelStatus();
         if (status == ChannelStatus::Pending) break;
-        if (status == ChannelStatus::Busy) { backoff(); break; }
-        if (status != ChannelStatus::Clear) { finish(Completion::RadioError); break; }
+        if (status == ChannelStatus::Busy) {
+            backoff();
+            break;
+        }
+        if (status != ChannelStatus::Clear) {
+            finish(Completion::RadioError);
+            break;
+        }
         const auto* frame = sender_.nextAttempt();
-        if (!frame || !radio_.startTransmit(*frame)) { finish(Completion::RadioError); break; }
+        if (!frame || !radio_.startTransmit(*frame)) {
+            finish(Completion::RadioError);
+            break;
+        }
         phaseStart_ = now;
         state_ = SendState::Transmitting;
         break;
     }
     case SendState::Transmitting: {
         if (uint32_t(now - phaseStart_) >= policy_.transmitTimeoutMs) {
-            finish(Completion::RadioTimeout); break;
+            finish(Completion::RadioTimeout);
+            break;
         }
         uint32_t completedAt = 0;
         const auto status = radio_.transmitStatus(completedAt);
         if (status == TransmitStatus::Pending) break;
         if (status != TransmitStatus::Complete ||
             uint32_t(completedAt - phaseStart_) > uint32_t(now - phaseStart_)) {
-            finish(Completion::RadioError); break;
+            finish(Completion::RadioError);
+            break;
         }
         phaseStart_ = completedAt;
         state_ = SendState::AwaitingAck;
@@ -119,16 +134,23 @@ void SendController::poll() {
     case SendState::AwaitingAck: {
         // Deadlines precede packet processing: even a stream of junk cannot extend RX.
         if (uint32_t(now - phaseStart_) >= policy_.ackTimeoutMs) {
-            if (sender_.attempts() >= Sender::MaxAttempts) finish(Completion::AttemptsExhausted);
-            else backoff();
+            if (sender_.attempts() >= Sender::MaxAttempts)
+                finish(Completion::AttemptsExhausted);
+            else
+                backoff();
             break;
         }
         Frame frame{};
         const auto status = radio_.receive(frame);
         if (status == ReceiveStatus::Empty) break;
-        if (status != ReceiveStatus::Received) { finish(Completion::RadioError); break; }
-        if (sender_.acknowledge(frame) == Result::Ok) finish(Completion::Acknowledged);
-        else if (report_.rejectedAcks != UINT32_MAX) ++report_.rejectedAcks;
+        if (status != ReceiveStatus::Received) {
+            finish(Completion::RadioError);
+            break;
+        }
+        if (sender_.acknowledge(frame) == Result::Ok)
+            finish(Completion::Acknowledged);
+        else if (report_.rejectedAcks != UINT32_MAX)
+            ++report_.rejectedAcks;
         break;
     }
     case SendState::Idle:

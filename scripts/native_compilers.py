@@ -1,4 +1,5 @@
 """Apply compiler overrides after the native platform loads its GCC tool defaults."""
+
 import os
 
 Import("env", "projenv")  # noqa: F821 -- SCons/PlatformIO

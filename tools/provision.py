@@ -4,6 +4,7 @@
 # dependencies = ["pyserial==3.5"]
 # ///
 """Enroll devices over local USB. Recovery files contain secrets; never publish them."""
+
 import argparse
 import json
 import os
@@ -16,7 +17,17 @@ import time
 
 
 # Storage health reported by HELLO when it is not "ready"; see docs/provisioning.md.
-STORAGE_FAILURES = {"unmounted", "identity", "read", "corrupt", "format", "role", "device", "invalid", "write"}
+STORAGE_FAILURES = {
+    "unmounted",
+    "identity",
+    "read",
+    "corrupt",
+    "format",
+    "role",
+    "device",
+    "invalid",
+    "write",
+}
 
 
 class ProvisioningError(Exception):
@@ -24,7 +35,11 @@ class ProvisioningError(Exception):
 
 
 def identifier(value, digits=16):
-    if not isinstance(value, str) or len(value) != digits or any(c not in "0123456789abcdef" for c in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != digits
+        or any(c not in "0123456789abcdef" for c in value)
+    ):
         raise ProvisioningError("Invalid identifier or credential encoding")
     return value
 
@@ -32,6 +47,7 @@ def identifier(value, digits=16):
 class SerialLink:
     def __init__(self, port):
         import serial  # Optional during unit tests; pinned in the script metadata.
+
         self.serial = serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2)
         self.serial.dtr = False
         self.serial.rts = False
@@ -53,7 +69,12 @@ class SerialLink:
                 continue
             fields = response.decode("ascii", errors="replace").strip().split()
             if len(fields) >= 3 and fields[:2] == ["CJ1", "ERR"]:
-                code = fields[2] if fields[2] in {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED"} else "UNKNOWN"
+                code = (
+                    fields[2]
+                    if fields[2]
+                    in {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED"}
+                    else "UNKNOWN"
+                )
                 raise ProvisioningError("Device rejected request: " + code)
             if len(fields) >= 3 and fields[:2] == ["CJ1", "OK"] and fields[2] == command.split()[0]:
                 return fields[3:]
@@ -70,8 +91,15 @@ def hello(link):
         raise ProvisioningError("Device storage is unavailable: " + reason)
     if not fields[6].isascii() or not fields[6].isdigit() or not 0 <= int(fields[6]) <= 128:
         raise ProvisioningError("Invalid queue status")
-    return {"device": identifier(fields[0]), "role": fields[1], "network": identifier(fields[3]),
-            "receiver": identifier(fields[4]), "profile": identifier(fields[5], 4), "queued": int(fields[6]), "boot": identifier(fields[7], 8)}
+    return {
+        "device": identifier(fields[0]),
+        "role": fields[1],
+        "network": identifier(fields[3]),
+        "receiver": identifier(fields[4]),
+        "profile": identifier(fields[5], 4),
+        "queued": int(fields[6]),
+        "boot": identifier(fields[7], 8),
+    }
 
 
 def ready(link):
@@ -117,34 +145,58 @@ def load(path):
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with os.fdopen(fd, "r") as source:
         info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid() or info.st_size > 4096:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o077
+            or info.st_uid != os.getuid()
+            or info.st_size > 4096
+        ):
             raise ProvisioningError("Recovery file must be an owner-only regular file (mode 0600)")
         try:
             transaction = json.load(source)
         except (ValueError, TypeError):
             raise ProvisioningError("Invalid recovery file") from None
     required = {"version", "network", "receiver", "node", "generation", "key", "profile", "phase"}
-    if not isinstance(transaction, dict) or set(transaction) != required or transaction["version"] != 1:
+    if (
+        not isinstance(transaction, dict)
+        or set(transaction) != required
+        or transaction["version"] != 1
+    ):
         raise ProvisioningError("Unsupported recovery file")
     for name in ("network", "receiver", "node", "generation"):
         if int(identifier(transaction[name]), 16) == 0:
             raise ProvisioningError("Recovery identifiers must not be zero")
     if not int(identifier(transaction["key"], 32), 16) or transaction["profile"] != "0001":
         raise ProvisioningError("Invalid credential or radio profile")
-    if transaction["phase"] not in {"new", "receiver_prepared", "both_prepared", "receiver_active", "configured"}:
+    if transaction["phase"] not in {
+        "new",
+        "receiver_prepared",
+        "both_prepared",
+        "receiver_active",
+        "configured",
+    }:
         raise ProvisioningError("Invalid enrollment phase")
     return transaction
 
 
 def check_devices(tx, rx, transaction=None):
     transmitter, receiver = ready(tx), ready(rx)
-    if transmitter["role"] != "tx" or receiver["role"] != "rx" or transmitter["device"] == receiver["device"]:
+    if (
+        transmitter["role"] != "tx"
+        or receiver["role"] != "rx"
+        or transmitter["device"] == receiver["device"]
+    ):
         raise ProvisioningError("Expected two distinct devices with tx/rx administration firmware")
     if transaction:
-        if transmitter["device"] != transaction["node"] or receiver["device"] != transaction["receiver"]:
+        if (
+            transmitter["device"] != transaction["node"]
+            or receiver["device"] != transaction["receiver"]
+        ):
             raise ProvisioningError("Device identity changed; select the intended USB ports")
         for device in (transmitter, receiver):
-            if device["network"] != "0" * 16 and any(device[field] != transaction[field] for field in ("network", "receiver", "profile")):
+            if device["network"] != "0" * 16 and any(
+                device[field] != transaction[field] for field in ("network", "receiver", "profile")
+            ):
                 raise ProvisioningError("Device belongs to a different network/profile")
     return transmitter, receiver
 
@@ -167,31 +219,53 @@ def enroll(tx, rx, path, resume=False):
             get_info(tx, transaction["node"], transaction)
     else:
         transmitter, receiver = check_devices(tx, rx)
-        network = receiver["network"] if int(receiver["network"], 16) else f"{secrets.randbelow((1 << 64) - 1) + 1:016x}"
-        transaction = {"version": 1, "network": network, "receiver": receiver["device"],
-                       "node": transmitter["device"], "generation": f"{secrets.randbelow((1 << 64) - 1) + 1:016x}",
-                       "key": secrets.token_hex(16), "profile": "0001", "phase": "new"}
+        network = (
+            receiver["network"]
+            if int(receiver["network"], 16)
+            else f"{secrets.randbelow((1 << 64) - 1) + 1:016x}"
+        )
+        transaction = {
+            "version": 1,
+            "network": network,
+            "receiver": receiver["device"],
+            "node": transmitter["device"],
+            "generation": f"{secrets.randbelow((1 << 64) - 1) + 1:016x}",
+            "key": secrets.token_hex(16),
+            "profile": "0001",
+            "phase": "new",
+        }
         check_devices(tx, rx, transaction)
         save(path, transaction, create=True)  # Persist the secret BEFORE mutating either device.
-    for link, device, phase in ((rx, transaction["receiver"], "receiver_prepared"),
-                                 (tx, transaction["node"], "both_prepared")):
-        link.request(f"PREPARE {device} {transaction['network']} {transaction['receiver']} "
-                     f"{transaction['node']} {transaction['generation']} {transaction['key']} {transaction['profile']}")
+    for link, device, phase in (
+        (rx, transaction["receiver"], "receiver_prepared"),
+        (tx, transaction["node"], "both_prepared"),
+    ):
+        link.request(
+            f"PREPARE {device} {transaction['network']} {transaction['receiver']} "
+            f"{transaction['node']} {transaction['generation']} {transaction['key']} {transaction['profile']}"
+        )
         # Never roll recovery metadata back when replaying earlier steps.
         order = ["new", "receiver_prepared", "both_prepared", "receiver_active", "configured"]
         if order.index(phase) > order.index(transaction["phase"]):
             transaction["phase"] = phase
             save(path, transaction)
-    for link, device, phase in ((rx, transaction["receiver"], "receiver_active"),
-                                 (tx, transaction["node"], "configured")):
+    for link, device, phase in (
+        (rx, transaction["receiver"], "receiver_active"),
+        (tx, transaction["node"], "configured"),
+    ):
         link.request(f"ACTIVATE {device} {transaction['node']} {transaction['generation']}")
         if get_info(link, device, transaction)[0] != 2:
             raise ProvisioningError("Device did not activate the enrollment")
         if phase == "configured" or transaction["phase"] != "configured":
             transaction["phase"] = phase
             save(path, transaction)
-    return {"node": transaction["node"], "receiver": transaction["receiver"],
-            "network": transaction["network"], "configured": True, "radio_validated": False}
+    return {
+        "node": transaction["node"],
+        "receiver": transaction["receiver"],
+        "network": transaction["network"],
+        "configured": True,
+        "radio_validated": False,
+    }
 
 
 def verify_restart(tx, rx, path):
@@ -218,32 +292,53 @@ def verify_restart(tx, rx, path):
     after = int(identifier(tx.request(command)[0]), 16)
     if after <= before:
         raise ProvisioningError("Counter did not advance across restart")
-    return {"configured": True, "restart_verified": True, "counter_before": before,
-            "counter_after": after, "radio_validated": False}
+    return {
+        "configured": True,
+        "restart_verified": True,
+        "counter_before": before,
+        "counter_after": after,
+        "radio_validated": False,
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    status = sub.add_parser("status"); status.add_argument("--port", required=True)
+    status = sub.add_parser("status")
+    status.add_argument("--port", required=True)
     for action in ("enroll", "resume", "verify-restart"):
         cmd = sub.add_parser(action)
-        cmd.add_argument("--transmitter", required=True); cmd.add_argument("--receiver", required=True)
-        cmd.add_argument("--state", type=Path, required=True, help="Private recovery file, outside version control")
-    revoke = sub.add_parser("revoke"); revoke.add_argument("--receiver", required=True)
+        cmd.add_argument("--transmitter", required=True)
+        cmd.add_argument("--receiver", required=True)
+        cmd.add_argument(
+            "--state",
+            type=Path,
+            required=True,
+            help="Private recovery file, outside version control",
+        )
+    revoke = sub.add_parser("revoke")
+    revoke.add_argument("--receiver", required=True)
     revoke.add_argument("--state", type=Path, required=True)
     args = parser.parse_args()
     links = []
     try:
+
         def connect(port):
-            link = SerialLink(port); links.append(link); return link
+            link = SerialLink(port)
+            links.append(link)
+            return link
+
         if args.action == "status":
             output = ready(connect(args.port))
         elif args.action == "revoke":
-            transaction = load(args.state); rx = connect(args.receiver); device = ready(rx)
+            transaction = load(args.state)
+            rx = connect(args.receiver)
+            device = ready(rx)
             if device["device"] != transaction["receiver"] or device["role"] != "rx":
                 raise ProvisioningError("Wrong receiver")
-            rx.request(f"REVOKE {device['device']} {transaction['node']} {transaction['generation']}")
+            rx.request(
+                f"REVOKE {device['device']} {transaction['node']} {transaction['generation']}"
+            )
             output = {"revoked": True, "node": transaction["node"]}
         else:
             tx, rx = connect(args.transmitter), connect(args.receiver)

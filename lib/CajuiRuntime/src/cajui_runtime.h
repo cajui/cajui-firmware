@@ -52,11 +52,25 @@ struct SendPolicy {
     uint32_t cycleTimeoutMs = 10000;
 };
 
-enum class SendState { Idle, Starting, Waiting, CheckingChannel, Transmitting, AwaitingAck, Finished };
+enum class SendState {
+    Idle,
+    Starting,
+    Waiting,
+    CheckingChannel,
+    Transmitting,
+    AwaitingAck,
+    Finished
+};
 enum class StartResult { Started, Busy, InvalidPolicy, ProtocolRejected, RadioUnavailable };
 enum class Completion {
-    None, Acknowledged, AttemptsExhausted, Deadline, RadioError, RadioTimeout,
-    RandomError, Cancelled
+    None,
+    Acknowledged,
+    AttemptsExhausted,
+    Deadline,
+    RadioError,
+    RadioTimeout,
+    RandomError,
+    Cancelled
 };
 
 struct SendReport {

@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location("provision", Path(__file__).resolve().parents[1] / "tools/provision.py")
+spec = importlib.util.spec_from_file_location(
+    "provision", Path(__file__).resolve().parents[1] / "tools/provision.py"
+)
 provision = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(provision)
 
@@ -28,7 +30,16 @@ class Device:
             self.fail = None
             raise provision.ProvisioningError("Simulated disconnect")
         if verb == "HELLO":
-            return [self.identity, self.role, "ready", self.network, self.receiver, self.profile, "0", f"{self.boot:08x}"]
+            return [
+                self.identity,
+                self.role,
+                "ready",
+                self.network,
+                self.receiver,
+                self.profile,
+                "0",
+                f"{self.boot:08x}",
+            ]
         if words[1] != self.identity:
             raise provision.ProvisioningError("Wrong device identity")
         if verb == "PREPARE":
@@ -75,11 +86,19 @@ class ProvisionTests(unittest.TestCase):
         self.assertEqual(0o600, self.path.stat().st_mode & 0o777)
         self.assertNotIn(transaction["key"], json.dumps(output))
         mutations = [item for item in self.events if item[1] in {"PREPARE", "ACTIVATE"}]
-        self.assertEqual([("rx", "PREPARE"), ("tx", "PREPARE"), ("rx", "ACTIVATE"), ("tx", "ACTIVATE")], mutations)
+        self.assertEqual(
+            [("rx", "PREPARE"), ("tx", "PREPARE"), ("rx", "ACTIVATE"), ("tx", "ACTIVATE")],
+            mutations,
+        )
         self.assertEqual("configured", transaction["phase"])
 
     def test_each_interruption_can_resume_without_resetting_counter(self):
-        for role, verb in (("rx", "PREPARE"), ("tx", "PREPARE"), ("rx", "ACTIVATE"), ("tx", "ACTIVATE")):
+        for role, verb in (
+            ("rx", "PREPARE"),
+            ("tx", "PREPARE"),
+            ("rx", "ACTIVATE"),
+            ("tx", "ACTIVATE"),
+        ):
             with self.subTest(role=role, verb=verb), tempfile.TemporaryDirectory() as folder:
                 tx, rx = Device("tx", self.tx.identity, []), Device("rx", self.rx.identity, [])
                 path = Path(folder) / "recovery.json"
@@ -95,10 +114,12 @@ class ProvisionTests(unittest.TestCase):
 
     def test_recovery_file_exists_before_first_device_write(self):
         original = self.rx.request
+
         def inspect(command):
             if command.startswith("PREPARE"):
                 self.assertEqual("new", provision.load(self.path)["phase"])
             return original(command)
+
         self.rx.request = inspect
         provision.enroll(self.tx, self.rx, self.path)
 
@@ -153,10 +174,12 @@ class ProvisionTests(unittest.TestCase):
     def test_counter_reset_on_reboot_fails_verification(self):
         provision.enroll(self.tx, self.rx, self.path)
         original = self.tx.request
+
         def resetting(command):
             if command.startswith("REBOOT"):
                 self.tx.counter = 0
             return original(command)
+
         self.tx.request = resetting
         with self.assertRaises(provision.ProvisioningError):
             provision.verify_restart(self.tx, self.rx, self.path)
@@ -167,9 +190,15 @@ class ProvisionTests(unittest.TestCase):
                 provision.identifier(value)
         provision.enroll(self.tx, self.rx, self.path)
         transaction = provision.load(self.path)
-        for field, bad in (("version", 9), ("generation", "0" * 16), ("key", "0" * 32),
-                           ("profile", "0002"), ("phase", "invalid")):
-            changed = dict(transaction); changed[field] = bad
+        for field, bad in (
+            ("version", 9),
+            ("generation", "0" * 16),
+            ("key", "0" * 32),
+            ("profile", "0002"),
+            ("phase", "invalid"),
+        ):
+            changed = dict(transaction)
+            changed[field] = bad
             provision.save(self.path, changed)
             with self.assertRaises(provision.ProvisioningError):
                 provision.load(self.path)
@@ -179,10 +208,18 @@ class FakeSerial:
     def __init__(self, lines):
         self.lines = list(lines)
         self.sent = []
-    def reset_input_buffer(self): pass
-    def write(self, data): self.sent.append(data)
-    def flush(self): pass
-    def readline(self, limit): return self.lines.pop(0) if self.lines else b""
+
+    def reset_input_buffer(self):
+        pass
+
+    def write(self, data):
+        self.sent.append(data)
+
+    def flush(self):
+        pass
+
+    def readline(self, limit):
+        return self.lines.pop(0) if self.lines else b""
 
 
 class TransportTests(unittest.TestCase):
@@ -215,6 +252,7 @@ class TransportTests(unittest.TestCase):
         class Reply:
             def request(self, command):
                 return ["0" * 16, "tx", "ready", "0" * 16, "0" * 16, "0001", "invalid", "00000001"]
+
         with self.assertRaises(provision.ProvisioningError):
             provision.hello(Reply())
 
@@ -222,8 +260,10 @@ class TransportTests(unittest.TestCase):
         class Reply:
             def __init__(self, health):
                 self.health = health
+
             def request(self, command):
                 return ["0" * 16, "rx", self.health, "0" * 16, "0" * 16, "0001", "0", "00000001"]
+
         for health, reason in (("role", "role"), ("bogus", "unknown")):
             with self.assertRaises(provision.ProvisioningError) as caught:
                 provision.hello(Reply(health))

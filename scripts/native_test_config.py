@@ -1,4 +1,5 @@
 """Locate the host OpenSSL installation without embedding machine-specific paths."""
+
 import os
 import subprocess
 import sys
@@ -11,5 +12,7 @@ if root:
     env.Append(CPPPATH=[os.path.join(root, "include")], LIBPATH=[os.path.join(root, "lib")])
 env.Append(LIBS=["crypto"])
 if os.environ.get("CAJUI_COVERAGE") == "1":
-    env.Append(CCFLAGS=["-fprofile-instr-generate", "-fcoverage-mapping"],
-               LINKFLAGS=["-fprofile-instr-generate"])
+    env.Append(
+        CCFLAGS=["-fprofile-instr-generate", "-fcoverage-mapping"],
+        LINKFLAGS=["-fprofile-instr-generate"],
+    )

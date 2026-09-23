@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run native Unity tests and optional LLVM coverage checks without accessing boards."""
+
 import argparse
 import json
 import os
@@ -34,16 +35,31 @@ def main():
         if args.coverage:
             prefix = ["xcrun"] if shutil.which("xcrun") else []
             profile = str(folder / "merged.profdata")
-            run(prefix + ["llvm-profdata", "merge", "-sparse", str(folder / "profile.profraw"),
-                          "-o", profile])
-            inputs = [".pio/build/native/program", f"-instr-profile={profile}",
-                      "lib/CajuiProtocol/src/codec.cpp", "lib/CajuiProtocol/src/delivery.cpp",
-                      "lib/CajuiRuntime/src/cajui_runtime.cpp", "lib/CajuiProtocol/src/crypto.cpp",
-                      "lib/CajuiStorage/src/cajui_storage.cpp",
-                      "lib/CajuiProvisioning/src/cajui_provisioning.cpp"]
+            run(
+                prefix
+                + [
+                    "llvm-profdata",
+                    "merge",
+                    "-sparse",
+                    str(folder / "profile.profraw"),
+                    "-o",
+                    profile,
+                ]
+            )
+            inputs = [
+                ".pio/build/native/program",
+                f"-instr-profile={profile}",
+                "lib/CajuiProtocol/src/codec.cpp",
+                "lib/CajuiProtocol/src/delivery.cpp",
+                "lib/CajuiRuntime/src/cajui_runtime.cpp",
+                "lib/CajuiProtocol/src/crypto.cpp",
+                "lib/CajuiStorage/src/cajui_storage.cpp",
+                "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
+            ]
             run(prefix + ["llvm-cov", "report"] + inputs)
-            report = subprocess.check_output(prefix + ["llvm-cov", "export"] + inputs,
-                                             cwd=ROOT, text=True)
+            report = subprocess.check_output(
+                prefix + ["llvm-cov", "export"] + inputs, cwd=ROOT, text=True
+            )
             totals = json.loads(report)["data"][0]["totals"]
             if totals["lines"]["percent"] < 95 or totals["branches"]["percent"] < 85:
                 raise SystemExit("Coverage below minimum: 95% lines and 85% branches (host).")

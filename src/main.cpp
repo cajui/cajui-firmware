@@ -25,28 +25,42 @@ bool overflow = false;
 }
 void setup() {
     // Keep SX1262 in reset. Enrollment and restart checks do not transmit RF.
-    digitalWrite(12, LOW); pinMode(12, OUTPUT); digitalWrite(12, LOW);
-    digitalWrite(8, HIGH); pinMode(8, OUTPUT); digitalWrite(8, HIGH);
+    digitalWrite(12, LOW);
+    pinMode(12, OUTPUT);
+    digitalWrite(12, LOW);
+    digitalWrite(8, HIGH);
+    pinMode(8, OUTPUT);
+    digitalWrite(8, HIGH);
     Serial.begin(115200);
     static cajui::PersistentStore persistent(blob, cajui::Role(CAJUI_ADMIN_ROLE), deviceId());
     static cajui::Provisioning provisioning(persistent, esp_random());
-    store = &persistent; admin = &provisioning;
+    store = &persistent;
+    admin = &provisioning;
     if (blob.begin()) store->mount();
 }
 void loop() {
     while (Serial.available()) {
         const char c = char(Serial.read());
         if (c == '\n') {
-            if (overflow) Serial.println("CJ1 ERR INVALID");
+            if (overflow)
+                Serial.println("CJ1 ERR INVALID");
             else {
                 admin->execute(line, used, reply, sizeof(reply));
                 Serial.println(reply);
             }
-            std::memset(line, 0, sizeof(line)); used = 0; overflow = false;
-            if (admin->restartRequested()) { Serial.flush(); delay(50); ESP.restart(); }
+            std::memset(line, 0, sizeof(line));
+            used = 0;
+            overflow = false;
+            if (admin->restartRequested()) {
+                Serial.flush();
+                delay(50);
+                ESP.restart();
+            }
         } else if (!overflow) {
-            if (used + 1 >= sizeof(line)) overflow = true;
-            else line[used++] = c;
+            if (used + 1 >= sizeof(line))
+                overflow = true;
+            else
+                line[used++] = c;
         }
     }
     delay(1);

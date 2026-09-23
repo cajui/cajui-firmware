@@ -1,0 +1,16 @@
+# Pinned via PyPI clang-format==19.1.7 (see scripts/check_protocol.py).
+BasedOnStyle: LLVM
+Standard: c++11
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+PointerAlignment: Left
+IndentCaseLabels: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+FixNamespaceComments: false
+# Arduino/Unity headers are order-sensitive on the ESP32 build.
+SortIncludes: Never

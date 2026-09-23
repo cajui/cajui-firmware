@@ -15,8 +15,18 @@ using Key = std::array<uint8_t, KeySize>;
 using Tag = std::array<uint8_t, TagSize>;
 enum class Type : uint8_t { Data = 1, Ack = 2 };
 enum class Status : uint8_t { Ok = 0, Error = 1, Skipped = 2 };
-enum class Result { Ok, Invalid, Unauthorized, CryptoError, StorageError,
-                    Full, Replay, Conflict, Duplicate, NotFound };
+enum class Result {
+    Ok,
+    Invalid,
+    Unauthorized,
+    CryptoError,
+    StorageError,
+    Full,
+    Replay,
+    Conflict,
+    Duplicate,
+    NotFound
+};
 struct Binding {
     uint64_t network = 0, node = 0;
     Key key{};
@@ -55,15 +65,18 @@ Result open(const Binding&, const Frame&, Message&);
 bool sameFrame(const Frame&, const Frame&);
 
 // Created during provisioning; retained after draining the queue.
-struct Receipt { uint64_t counter = 0; Frame last{}; };
+struct Receipt {
+    uint64_t counter = 0;
+    Frame last{};
+};
 class Journal {
 public:
     virtual ~Journal() = default;
     virtual bool load(const Binding&, Receipt&) = 0;
     // Contract: queue and Receipt become atomic and durable before returning Ok.
     // Failure leaves both unchanged; expectedCounter guards concurrent updates.
-    virtual Result commit(const Binding&, uint64_t expectedCounter,
-                          const Receipt&, const Data&) = 0;
+    virtual Result commit(const Binding&, uint64_t expectedCounter, const Receipt&,
+                          const Data&) = 0;
 };
 Result receive(const Binding&, const Frame&, Journal&, Frame& ack);
 
@@ -83,6 +96,7 @@ public:
     bool delivered() const { return delivered_; }
     uint8_t attempts() const { return attempts_; }
     static constexpr uint8_t MaxAttempts = 3;
+
 private:
     Binding binding_{};
     Frame pending_{};

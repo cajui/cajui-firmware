@@ -8,6 +8,7 @@ public:
     // Length-delimited input, no echo and no secret-bearing response. False = output too small.
     bool execute(const char* input, size_t length, char* reply, size_t capacity);
     bool restartRequested() const { return restart_; }
+
 private:
     PersistentStore& store_;
     bool restart_ = false;

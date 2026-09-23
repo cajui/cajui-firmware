@@ -14,12 +14,15 @@ Result receive(const Binding& b, const Frame& frame, Journal& journal, Frame& ac
     const bool duplicate = m.counter == old.counter;
     if (duplicate && !sameFrame(old.last, frame)) return Result::Conflict;
     if (!duplicate) {
-        Receipt next{}; next.counter = m.counter; next.last = frame;
+        Receipt next{};
+        next.counter = m.counter;
+        next.last = frame;
         const auto saved = journal.commit(b, old.counter, next, m.data);
         if (saved != Result::Ok) return saved;
     }
     Message response{};
-    response.type = Type::Ack; response.counter = m.counter;
+    response.type = Type::Ack;
+    response.counter = m.counter;
     std::memcpy(response.dataTag.data(), frame.bytes.data() + frame.size - TagSize, TagSize);
     const auto sealed = seal(b, response, ack);
     if (sealed != Result::Ok) return sealed;
@@ -31,15 +34,24 @@ Result Sender::begin(const Binding& b, const Data& data, CounterStore& store) {
     if (!detail::validData(data)) return Result::Invalid;
     uint64_t counter = 0;
     if (!store.reserve(b, counter) || !counter) return Result::StorageError;
-    Message m{}; m.counter = counter; m.data = data;
+    Message m{};
+    m.counter = counter;
+    m.data = data;
     Frame next{};
     const auto result = seal(b, m, next);
     if (result != Result::Ok) return result;
-    binding_ = b; pending_ = next; counter_ = counter; attempts_ = 0; delivered_ = false;
+    binding_ = b;
+    pending_ = next;
+    counter_ = counter;
+    attempts_ = 0;
+    delivered_ = false;
     return Result::Ok;
 }
 void Sender::abandon() {
-    pending_ = Frame{}; counter_ = 0; attempts_ = 0; delivered_ = false;
+    pending_ = Frame{};
+    counter_ = 0;
+    attempts_ = 0;
+    delivered_ = false;
 }
 const Frame* Sender::nextAttempt() {
     if (!pending_.size || delivered_ || attempts_ >= MaxAttempts) return nullptr;
