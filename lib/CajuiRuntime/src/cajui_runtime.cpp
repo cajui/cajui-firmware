@@ -131,8 +131,9 @@ void SendController::poll() {
         else if (report_.rejectedAcks != UINT32_MAX) ++report_.rejectedAcks;
         break;
     }
-    default:
-        break; // Idle/Finished already filtered by active().
+    case SendState::Idle:
+    case SendState::Finished:
+        break; // Filtered by active(); listed so -Wswitch flags any new state.
     }
 }
 
