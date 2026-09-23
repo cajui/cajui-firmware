@@ -56,9 +56,11 @@ For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
-Coverage gates apply to the codec, delivery, runtime, storage and command-handler
-host implementation files: at least 95% line coverage and 85% branch coverage. Coverage does not measure the ESP32 backend,
-radio behavior or the NVS backend itself. See [testing](docs/testing.md).
+Coverage gates apply to the host implementation files listed in
+`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot and
+command handler): at least 95% line and 85% branch coverage. The Python client needs 95%
+line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
+the NVS backend itself. See [testing](docs/testing.md).
 
 Compile the same tests for ESP32 without uploading or executing them:
 

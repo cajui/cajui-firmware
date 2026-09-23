@@ -13,6 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 # Pinned so local runs and CI format and lint identically.
 TOOLS = {
+    "coverage": "coverage==7.6.1",
     "clang-format": "clang-format==19.1.7",
     "clang-tidy": "clang-tidy==19.1.0",
     "ruff": "ruff==0.6.9",
@@ -70,7 +71,17 @@ def main():
         else:
             environment.pop("CAJUI_COVERAGE", None)
         run(pio + ["test", "-e", "native"], env=environment)
-        run([sys.executable, "-m", "unittest", "discover", "-s", "tests_python", "-v"])
+        unittest = ["-m", "unittest", "discover", "-s", "tests_python", "-v"]
+        if args.coverage:
+            data = f"--data-file={folder / 'python.coverage'}"
+            run(
+                tool("coverage")
+                + ["run", "--branch", "--include=tools/provision.py", data]
+                + unittest
+            )
+            run(tool("coverage") + ["report", "-m", "--fail-under=95", data])
+        else:
+            run([sys.executable] + unittest)
         if args.coverage:
             prefix = ["xcrun"] if shutil.which("xcrun") else []
             profile = str(folder / "merged.profdata")

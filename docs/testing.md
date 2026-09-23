@@ -35,7 +35,9 @@ The ESP32 target compiles the same tests with mbedTLS. Build-only success is not
 physical test result. CI does not connect to devices or upload firmware.
 
 Python unittest tests exercise client sequencing, resumable setup, identity checks,
-recovery-file permissions and error redaction. The shared check script runs them.
+recovery-file permissions, error redaction and the command line. With `--coverage`, the
+check script also requires 95% line and branch coverage of `tools/provision.py`
+(coverage.py 7.6.1, run through `uvx` or installed with pip).
 The build job also compiles `admin_tx` and `admin_rx`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time

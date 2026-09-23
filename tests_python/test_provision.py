@@ -1,8 +1,13 @@
+import contextlib
 import importlib.util
+import io
+import itertools
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -21,6 +26,11 @@ class Device:
         self.state, self.counter = 0, 0
         self.fail = None
         self.boot = 1
+        self.reboots = True
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
     def request(self, command):
         words = command.split()
@@ -65,7 +75,7 @@ class Device:
                 raise provision.ProvisioningError("Device rejected request: NOT_FOUND")
             self.state = 3
         elif verb == "REBOOT":
-            self.boot += 1  # Durable state survives; C++ storage has its own tests.
+            self.boot += int(self.reboots)  # Durable state survives; C++ tests cover storage.
         else:
             raise provision.ProvisioningError("Unknown command")
         return []
@@ -96,7 +106,8 @@ class ProvisionTests(unittest.TestCase):
         )
         self.assertEqual("configured", transaction["phase"])
 
-    def test_each_interruption_can_resume_without_resetting_counter(self):
+    def test_each_interruption_resumes_with_the_original_credentials(self):
+        # Counter continuity is firmware state, covered by the C++ provisioning tests.
         for role, verb in (
             ("rx", "PREPARE"),
             ("tx", "PREPARE"),
@@ -111,10 +122,12 @@ class ProvisionTests(unittest.TestCase):
                     provision.enroll(tx, rx, path)
                 initial = provision.load(path)
                 provision.enroll(tx, rx, path, resume=True)
-                self.assertEqual(initial["key"], provision.load(path)["key"])
-                tx.counter = 17
-                provision.enroll(tx, rx, path, resume=True)
-                self.assertEqual(17, tx.counter)
+                resumed = provision.load(path)
+                self.assertEqual("configured", resumed["phase"])
+                for field in ("network", "generation", "key"):
+                    self.assertEqual(initial[field], resumed[field])
+                # The fake rejects a PREPARE that differs from the enrollment it holds.
+                self.assertEqual(initial["generation"], tx.enrollment[3])
 
     def test_recovery_file_exists_before_first_device_write(self):
         original = self.rx.request
@@ -220,6 +233,137 @@ class ProvisionTests(unittest.TestCase):
                 provision.load(self.path)
 
 
+class FailureTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.path = Path(self.temporary.name) / "recovery.json"
+        self.tx = Device("tx", "0000000000000002", [])
+        self.rx = Device("rx", "0000000000000001", [])
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_ready_retries_until_the_deadline(self):
+        self.tx.fail = "HELLO"
+        with patch.object(provision.time, "sleep"):
+            self.assertEqual("tx", provision.ready(self.tx)["role"])
+
+        class Down:
+            def request(self, command):
+                raise provision.ProvisioningError("Simulated disconnect")
+
+        with (
+            patch.object(provision.time, "sleep"),
+            patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)),
+        ):
+            with self.assertRaises(provision.ProvisioningError):
+                provision.ready(Down())
+
+    def test_restart_without_a_new_boot_fails(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        self.rx.reboots = False
+        with (
+            patch.object(provision.time, "sleep"),
+            patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)),
+        ):
+            with self.assertRaisesRegex(provision.ProvisioningError, "new boot"):
+                provision.verify_restart(self.tx, self.rx, self.path)
+
+    def test_changed_identity_or_network_is_rejected_on_resume(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        transaction = provision.load(self.path)
+        other = Device("tx", "0000000000000003", [])
+        with self.assertRaisesRegex(provision.ProvisioningError, "identity"):
+            provision.check_devices(other, self.rx, transaction)
+        self.rx.network = "000000000000beef"
+        with self.assertRaisesRegex(provision.ProvisioningError, "network"):
+            provision.check_devices(self.tx, self.rx, transaction)
+
+    def test_invalid_device_answers_are_rejected(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        transaction = provision.load(self.path)
+
+        class Reply:
+            def __init__(self, values):
+                self.values = values
+
+            def request(self, command):
+                return self.values
+
+        with self.assertRaises(provision.ProvisioningError):
+            provision.get_info(Reply(["4", "0" * 16]), self.tx.identity, transaction)
+        self.tx.enrollment, self.tx.state = None, 0
+        activate = self.tx.request
+
+        def stays_prepared(command):
+            result = activate(command)
+            if command.startswith("ACTIVATE"):
+                self.tx.state = 1
+            return result
+
+        self.tx.request = stays_prepared
+        os.unlink(self.path)
+        self.tx.network, self.tx.receiver, self.tx.profile = "0" * 16, "0" * 16, "0000"
+        self.rx.enrollment, self.rx.state = None, 0
+        self.rx.network, self.rx.receiver, self.rx.profile = "0" * 16, "0" * 16, "0000"
+        with self.assertRaisesRegex(provision.ProvisioningError, "did not activate"):
+            provision.enroll(self.tx, self.rx, self.path)
+
+    def test_unreadable_recovery_file_is_rejected(self):
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "w") as output:
+            output.write("{not json")
+        with self.assertRaisesRegex(provision.ProvisioningError, "Invalid recovery file"):
+            provision.load(self.path)
+
+
+class CommandLineTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.path = Path(self.temporary.name) / "recovery.json"
+        self.devices = {
+            "tx-port": Device("tx", "0000000000000002", []),
+            "rx-port": Device("rx", "0000000000000001", []),
+        }
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_cli(self, *arguments):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(provision, "SerialLink", side_effect=self.devices.__getitem__),
+            patch.object(sys, "argv", ["provision.py", *arguments]),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = provision.main()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_enroll_revoke_and_status_print_json_without_the_key(self):
+        pair = ["--transmitter", "tx-port", "--receiver", "rx-port", "--state", str(self.path)]
+        code, output, _ = self.run_cli("enroll", *pair)
+        self.assertEqual(0, code)
+        self.assertTrue(json.loads(output)["configured"])
+        self.assertNotIn(provision.load(self.path)["key"], output)
+        self.assertEqual(0, self.run_cli("verify-restart", *pair)[0])
+        self.assertEqual(0, self.run_cli("resume", *pair)[0])
+        code, output, _ = self.run_cli("revoke", "--receiver", "rx-port", "--state", str(self.path))
+        self.assertEqual({"revoked": True, "node": "0000000000000002"}, json.loads(output))
+        code, output, _ = self.run_cli("status", "--port", "tx-port")
+        self.assertEqual("tx", json.loads(output)["role"])
+        self.assertTrue(all(device.closed for device in self.devices.values()))
+
+    def test_failures_exit_nonzero_and_still_close_ports(self):
+        code, output, error = self.run_cli(
+            "resume", "--transmitter", "tx-port", "--receiver", "rx-port", "--state", str(self.path)
+        )
+        self.assertEqual(1, code)
+        self.assertEqual("", output)
+        self.assertIn("Provisioning failed", error)
+        self.assertTrue(all(device.closed for device in self.devices.values()))
+
+
 class FakeSerial:
     def __init__(self, lines):
         self.lines = list(lines)
@@ -239,6 +383,37 @@ class FakeSerial:
 
 
 class TransportTests(unittest.TestCase):
+    def test_port_opens_with_reset_lines_low(self):
+        events = []
+
+        class Port:
+            def __init__(self, **settings):
+                events.append(("created", settings["port"]))
+
+            def __setattr__(self, name, value):
+                events.append((name, value))
+
+            def open(self):
+                events.append(("open",))
+
+            def close(self):
+                events.append(("close",))
+
+        with patch.dict(sys.modules, {"serial": types.SimpleNamespace(Serial=Port)}):
+            link = provision.SerialLink("port")
+            link.close()
+        self.assertEqual(
+            [
+                ("created", None),
+                ("dtr", False),
+                ("rts", False),
+                ("port", "port"),
+                ("open",),
+                ("close",),
+            ],
+            events,
+        )
+
     def link(self, lines):
         link = provision.SerialLink.__new__(provision.SerialLink)
         link.serial = FakeSerial(lines)
