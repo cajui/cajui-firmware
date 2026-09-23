@@ -23,6 +23,8 @@ Separate administration images keep the radio in reset. No production image is r
   channel waits, ACK deadlines and cancellation.
 - SX1262 CAD/TX/RX adapter with task-driven interrupt handling, a durable receiver
   loop, DHT22 sampling and a five-minute transmitter sleep schedule.
+- Receiver forwarding to an MQTT broker over Wi-Fi in Cajuí Central's JSON contract,
+  removing each queued sample only after its PUBACK, with USB-provisioned settings.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 ## Pending and unvalidated
@@ -30,9 +32,11 @@ Separate administration images keep the radio in reset. No production image is r
 This list is the single record of implementation status; the other documents describe
 contracts and link here.
 
-- Server forwarding and field battery-voltage/power policy. Runtime battery readings
-  are explicitly unknown; use USB for development. The receiver stops accepting new
-  samples when its 128-frame durable queue is full; nothing silently drains it.
+- Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
+  use USB for development. Without uplink settings, or while the broker is unreachable,
+  the receiver stops accepting new samples once its 128-frame durable queue is full.
+- Broker TLS and an application-level receipt from Central. Forwarding uses plain MQTT
+  3.1.1 on a trusted network; PUBACK proves broker acceptance only.
 - Physical validation is limited: a manual bench exchange achieved durable acceptance
   and authenticated ACKs on the first attempt, including sensor-error telemetry followed
   by valid climate readings on a subsequent boot. The queue survived that restart;
@@ -73,8 +77,8 @@ CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
 Coverage gates apply to the host implementation files listed in
-`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot, application and
-command handler): at least 95% line and 85% branch coverage. The Python client needs 95%
+`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot, application,
+command handler and uplink): at least 95% line and 85% branch coverage. The Python client needs 95%
 line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
 
@@ -95,6 +99,7 @@ lib/CajuiApplication/src/ Receiver loop and measurement normalization
 lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
 lib/CajuiStorage/src/     Persistent state machine and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
+lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
 src/                     ESP32 administration and experimental radio applications
 tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner
@@ -107,7 +112,7 @@ docs/                    Protocol contract, testing and integration roadmap
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 [Cajuí Central](https://github.com/cajui/cajui-central) is the separate monitoring
-application. A bridge to its API is planned, not available in this initial version.
+application. The receiver publishes to the MQTT broker that Central consumes.
 
 ## License
 

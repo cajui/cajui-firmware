@@ -115,3 +115,32 @@ RESERVE return `NOT_FOUND` for an unknown node/generation pair. RESERVE returns
 Profile `0001` is the initial direct-LoRa profile identifier; radio integration and
 its field/regulatory validation remain pending. No over-the-air enrollment, remote
 administration authentication, network migration or reset command is provided.
+
+## Receiver uplink settings
+
+The receiver forwards queued samples to an MQTT broker when Wi-Fi and broker settings
+are stored. Configure them with `admin_rx` loaded, then load `runtime_rx` again:
+
+```sh
+python3 tools/provision.py uplink --receiver /dev/cu.RECEIVER \
+  --ssid "network name" --host 192.168.1.20 --port 1883 \
+  --username receiver-1 --mqtt-password-file path/to/broker-password
+python3 tools/provision.py uplink-status --receiver /dev/cu.RECEIVER
+```
+
+Omitting `--wifi-password-file` or `--mqtt-password-file` prompts without echo. Files
+contribute their first line. The MQTT username is also the `source_id` in
+[Cajuí Central's contract](https://github.com/cajui/cajui-central#wire-contract-version-1),
+so a broker ACL that grants each user `telemetry/v1/<user>/+/samples` authorizes it.
+Every field is required: open Wi-Fi networks and 5 GHz-only networks are not
+supported (the ESP32-S3 has no 5 GHz radio). Output reports the stored host, port and
+username, never a password, and `forwarding_validated: false`.
+
+CJ1 commands, receiver only: `UPLINKSET <device> <field> <hex>` stages one field
+(`ssid`, `wifipass`, `host`, `port`, `user`, `pass`) as lower-case hex of its bytes, so
+spaces and non-ASCII characters survive the space-delimited protocol. `UPLINKSAVE
+<device>` validates the complete set and writes it atomically to the `uplink` key of
+the `cajui` NVS partition, separate from the protocol snapshot; staging is wiped on
+success. `UPLINKINFO <device>` returns `0` when nothing is stored or `1 <host> <port>
+<user>`. Stored secrets, including Wi-Fi and broker passwords, are not encrypted at
+rest, like enrollment keys. Anyone with USB access can replace them.

@@ -14,7 +14,8 @@ Next milestones:
 1. Hardware power-cut and flash-endurance tests for the NVS adapter.
 2. Validate the experimental radio applications on hardware: IRQ/ACK timing, sensor
    reads, sleep, interference and battery policy. Keep RF validation separate from USB setup.
-3. Idempotent server forwarding and queue backpressure handling.
+3. Broker TLS for receiver forwarding and field validation of the MQTT uplink.
+   Idempotent forwarding with PUBACK-gated queue removal is implemented.
 4. Optional local web administration and authenticated radio pairing.
 
 TDMA, mesh routing, radio firmware updates, actuator control and LoRaWAN mode are

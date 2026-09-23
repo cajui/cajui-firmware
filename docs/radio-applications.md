@@ -63,10 +63,40 @@ another queue entry, even if the queue is full.
 
 ACK TX has a three-second watchdog. Driver or storage failures latch a terminal
 state and stop the radio. Keep the controller alive until radio shutdown is confirmed.
-Queue entries survive image changes and resets. **No server forwarding or automatic
-queue draining is implemented.** At five-minute intervals, an initially empty queue
-holds 128 samples (about 10 hours 40 minutes from one transmitter). Never interpret
-receiver ACK as delivery to Cajuí Central.
+Queue entries survive image changes and resets. At five-minute intervals, an initially
+empty queue holds 128 samples (about 10 hours 40 minutes from one transmitter). Never
+interpret receiver ACK as delivery to Cajuí Central.
+
+## Forwarding to MQTT
+
+With [uplink settings](provisioning.md#receiver-uplink-settings) stored, `runtime_rx`
+joins Wi-Fi and publishes the oldest queued sample to
+`telemetry/v1/<username>/<node>/samples` with QoS 1 and retain off, using Cajuí Central's
+JSON contract version 1. `device_id` is the node ID and `sample_id` is
+`<generation>.<counter>`, so a republished sample keeps its identity and Central
+deduplicates it. Metric 1/unit 1 map to `temperature`/`degC`, metric 2/unit 2 to
+`humidity`/`%`; other registry entries are sent as `metric-<n>`/`unit-<n>`. Error and
+skipped readings carry no value. `measured_at` is omitted: the receiver does not know
+when a queued sample was measured, so Central's receipt time for a backlog is the
+forwarding time.
+
+One publication is in flight at a time. The queue front is removed durably only after
+the broker's PUBACK for that exact message. A missing PUBACK within 15 seconds or a
+broker disconnection abandons the attempt and retries after five seconds; a late
+PUBACK from an abandoned attempt is ignored. The ESP-IDF client enqueues the
+publication so the radio loop never blocks on network I/O, and forwarding runs only
+while the receiver is listening, never during an ACK transmission. A storage failure
+stops the application. Without stored settings the receiver logs `CJAPP UPLINK disabled`
+and keeps queueing as before.
+
+PUBACK is the broker's boundary, not proof that Central stored the sample. The client
+uses MQTT 3.1.1, where an ACL-denied publication is still acknowledged: a username
+without write permission on its namespace would silently discard samples. Transport
+is plain TCP, so Wi-Fi and broker credentials and samples are readable on the local
+network; use a trusted network until broker TLS is provisioned. Each removal rewrites
+the snapshot, doubling flash writes per sample compared with queueing alone.
+Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
+queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 
 ## Radio adapter
 
