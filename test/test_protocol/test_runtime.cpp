@@ -1,6 +1,7 @@
 #include <unity.h>
 #include "cajui_runtime.h"
 #include "storage_support.h"
+#include "assertions.h"
 #include <vector>
 
 namespace {
@@ -226,6 +227,7 @@ void test_runtime_time_wrap_and_hardware_completion_timestamp() {
 }
 void test_runtime_pending_operations_have_timeouts() {
     for (int stage = 0; stage < 2; ++stage) {
+        SCENARIO(stage);
         Rig r; r.start(); r.enterChannelCheck();
         if (stage == 0) r.radio.channel = ChannelStatus::Pending;
         else { r.controller.poll(); r.radio.tx = TransmitStatus::Pending; }
@@ -236,6 +238,7 @@ void test_runtime_pending_operations_have_timeouts() {
 }
 void test_runtime_driver_failures_stop_the_cycle() {
     for (int stage = 0; stage < 7; ++stage) {
+        SCENARIO(stage);
         Rig r; r.start(); r.controller.poll();
         if (stage == 0) r.radio.cadStart = false;
         r.controller.poll();
@@ -274,6 +277,7 @@ void test_runtime_sleep_failure_retains_frame_and_blocks_reuse() {
 }
 void test_runtime_random_failure_or_out_of_range_stops() {
     for (int scenario = 0; scenario < 3; ++scenario) {
+        SCENARIO(scenario);
         Rig r; r.start();
         if (scenario == 0) r.jitter.fail = true;
         else if (scenario == 1) r.jitter.outside = 1;
@@ -286,6 +290,7 @@ void test_runtime_random_failure_or_out_of_range_stops() {
 }
 void test_runtime_rejects_invalid_policies_and_samples_before_reserving() {
     for (int i = 0; i < 14; ++i) {
+        SCENARIO(i);
         SendPolicy p;
         switch (i) {
         case 0: p.cycleTimeoutMs = 0; break;
@@ -318,6 +323,7 @@ void test_runtime_rejects_invalid_policies_and_samples_before_reserving() {
 }
 void test_runtime_cancel_each_phase_consumes_counter_without_reuse() {
     for (int phase = 0; phase < 5; ++phase) {
+        SCENARIO(phase);
         Rig r; r.start();
         for (int i = 0; i < phase; ++i) r.controller.poll();
         r.controller.cancel(); COMPLETION(Completion::Cancelled, r);

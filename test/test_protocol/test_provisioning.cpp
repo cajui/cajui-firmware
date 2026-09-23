@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <string>
 #include "storage_support.h"
+#include "assertions.h"
 #include "cajui_provisioning.h"
 using namespace cajui;
 using namespace fixtures;
@@ -31,7 +32,7 @@ void test_usb_parser_rejects_untrusted_input_without_echo() {
         "CJ1 REBOOT 0000000000000003", "CJ1 REBOOT 000000000000000G", "CJ1 REBOOT 2",
         "CJ1 UNKNOWN 0000000000000002", "CJ1 A B C D E F G H I J", "CJ1\tHELLO",
         "CJ1 INFO 0000000000000002 BAD 0000000000000001"};
-    for (auto input : invalid) COMMAND(admin, input, "CJ1 ERR INVALID");
+    for (auto input : invalid) { UNITY_SET_DETAIL(input); COMMAND(admin, input, "CJ1 ERR INVALID"); }
     char out[ReplyCapacity]{};
     TEST_ASSERT_FALSE(admin.execute("CJ1 HELLO", 9, out, 10));
     TEST_ASSERT_TRUE(admin.execute(nullptr, 1, out, sizeof(out))); TEST_ASSERT_EQUAL_STRING("CJ1 ERR INVALID", out);

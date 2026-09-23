@@ -62,8 +62,10 @@ void test_commit_ambiguity_after_power_loss_is_recovered() {
 void test_queue_capacity_multiple_nodes_and_no_partial_receipt() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver);
     TEST_ASSERT_TRUE(enroll(*store)); TEST_ASSERT_TRUE(enroll(*store, 3, 11, 2)); Frame ack{};
-    for (size_t i = 1; i <= QueueCapacity; ++i)
+    for (size_t i = 1; i <= QueueCapacity; ++i) {
+        SCENARIO(i);
         EXPECT_RESULT(Result::Ok, receive(binding(), data(i), *store, ack));
+    }
     EXPECT_RESULT(Result::Full, receive(binding(3, 2), data(1, 3, 2), *store, ack));
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
     Receipt receipt{}; TEST_ASSERT_TRUE(store->load(binding(3, 2), receipt)); TEST_ASSERT_EQUAL_UINT64(0, receipt.counter);
@@ -129,6 +131,7 @@ void test_semantically_invalid_snapshots_fail_closed_even_with_valid_crc() {
         {39, 2}, {40, 255}, {41, 0}, {41, 17}, {42, 4}, {42, 0}, {42, 1}, {50, 0}, {50, 3},
         {58, 0}, {91, 1}, {90, 1}, {92, 1}};
     for (const auto& mutation : invalid) {
+        SCENARIO(mutation.offset);
         blob.bytes = good; blob.bytes[mutation.offset] = mutation.value; repairChecksum(blob);
         store = mounted(blob); TEST_ASSERT_FALSE_MESSAGE(store->healthy(), "Invalid snapshot accepted"); store.reset();
     }
@@ -147,6 +150,7 @@ void test_corrupt_receiver_receipts_and_queued_frames_are_rejected() {
     // Header receiver, tx-only counter, receipt, queue index/size and authenticated frame.
     const size_t invalidOffsets[] = {37, 82, 90, 92, 93, 228, 229, 231};
     for (size_t offset : invalidOffsets) {
+        SCENARIO(offset);
         blob.bytes = good; blob.bytes[offset] ^= 0xff; repairChecksum(blob);
         store = mounted(blob, Role::Receiver); TEST_ASSERT_FALSE(store->healthy()); store.reset();
     }
@@ -166,6 +170,7 @@ void test_duplicate_persistent_credentials_and_active_nodes_are_rejected() {
     TEST_ASSERT_TRUE(enroll(*store)); TEST_ASSERT_TRUE(enroll(*store, 3, 11, 2)); store.reset();
     const auto good = blob.bytes;
     for (int scenario = 0; scenario < 3; ++scenario) {
+        SCENARIO(scenario);
         blob.bytes = good;
         if (scenario == 0) std::memcpy(blob.bytes.data() + 245, blob.bytes.data() + 59, 16);
         if (scenario == 1) blob.bytes[244] = 10;

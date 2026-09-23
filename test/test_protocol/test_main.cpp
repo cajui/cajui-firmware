@@ -66,6 +66,7 @@ void test_roundtrip_multiple_metrics_and_zero() {
 void test_all_bytes_are_authenticated() {
     const auto original = packet();
     for (size_t i = 0; i < original.size; ++i) {
+        SCENARIO(i);
         auto modified = original; modified.bytes[i] ^= 1; Message m{};
         TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(binding(), modified, m)));
         TEST_ASSERT_EQUAL_UINT8(0, m.data.count);
@@ -83,6 +84,7 @@ void test_wrong_key_network_node_and_revocation() {
 void test_lengths_truncation_and_legacy_rejected() {
     auto original = packet(); Message m{};
     for (size_t n = 0; n < original.size; ++n) {
+        SCENARIO(n);
         auto f = original; f.size = n; EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
     }
     auto f = original; ++f.size; EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
@@ -142,6 +144,7 @@ void test_no_ack_before_durable_commit() {
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
     journal.readable = true;
     for (auto failure : {Result::Full, Result::StorageError, Result::Conflict}) {
+        SCENARIO(int(failure));
         journal.writeResult = failure; ack = f;
         EXPECT_RESULT(failure, receive(binding(), f, journal, ack));
         TEST_ASSERT_EQUAL_UINT32(0, ack.size); TEST_ASSERT_EQUAL_UINT64(0, journal.state.counter);
@@ -205,6 +208,7 @@ void test_ack_must_match_pending_data() {
 void test_authenticated_malformed_payload_is_rejected() {
     const auto original = packet();
     for (int scenario = 0; scenario < 5; ++scenario) {
+        SCENARIO(scenario);
         auto f = original;
         uint8_t nonce[12] = {'C', 'J', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1};
         uint8_t plain[MaxPayload]{};
@@ -227,6 +231,7 @@ void test_authenticated_malformed_payload_is_rejected() {
 void test_untrusted_lengths_and_bytes_under_sanitizers() {
     uint32_t random = 17;
     for (size_t trial = 0; trial < 2000; ++trial) {
+        SCENARIO(trial);
         Frame f{};
         for (auto& byte : f.bytes) {
             random ^= random << 13; random ^= random >> 17; random ^= random << 5;
