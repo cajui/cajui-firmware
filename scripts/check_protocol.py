@@ -40,7 +40,8 @@ def tracked(*patterns):
 
 
 def lint():
-    run(tool("clang-format") + ["--dry-run", "--Werror"] + tracked("lib", "src", "test"))
+    sources = tracked("lib/*.cpp", "lib/*.h", "src/*.cpp", "test/*.cpp", "test/*.h")
+    run(tool("clang-format") + ["--dry-run", "--Werror"] + sources)
     run(tool("ruff") + ["format", "--check"] + PYTHON)
     run(tool("ruff") + ["check"] + PYTHON)
     # Host-compilable library code only: src/ needs Arduino and test/ is fixture-heavy.
