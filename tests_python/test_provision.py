@@ -28,6 +28,7 @@ class Device:
         self.boot = 1
         self.reboots = True
         self.closed = False
+        self.staged, self.uplink, self.info = {}, {}, None
 
     def close(self):
         self.closed = True
@@ -76,6 +77,17 @@ class Device:
             self.state = 3
         elif verb == "REBOOT":
             self.boot += int(self.reboots)  # Durable state survives; C++ tests cover storage.
+        elif verb == "UPLINKSET":
+            self.staged[words[2]] = bytes.fromhex(words[3]).decode("utf-8")
+        elif verb == "UPLINKSAVE":
+            self.uplink = dict(self.staged)
+            self.staged = {}
+        elif verb == "UPLINKINFO":
+            if self.info is not None:
+                return self.info
+            if not self.uplink:
+                return ["0"]
+            return ["1", self.uplink["host"], self.uplink["port"], self.uplink["user"]]
         else:
             raise provision.ProvisioningError("Unknown command")
         return []
@@ -509,3 +521,155 @@ class TransportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+UPLINK = ("Bench net", "wifi secret", "192.168.1.20", 1883, "receiver-1", "mqtt secret")
+
+
+class UplinkTests(unittest.TestCase):
+    def setUp(self):
+        self.events = []
+        self.rx = Device("rx", "0000000000000001", self.events)
+
+    def test_settings_are_hex_encoded_saved_and_confirmed_without_secrets(self):
+        fields = provision.uplink_fields(*UPLINK)
+        output = provision.configure_uplink(self.rx, fields)
+        self.assertEqual(
+            {
+                "configured": True,
+                "host": "192.168.1.20",
+                "port": 1883,
+                "username": "receiver-1",
+                "receiver": "0000000000000001",
+                "forwarding_validated": False,
+            },
+            output,
+        )
+        self.assertEqual("wifi secret", self.rx.uplink["wifipass"])
+        self.assertEqual(
+            ["HELLO"] + ["UPLINKSET"] * 6 + ["UPLINKSAVE", "UPLINKINFO"],
+            [verb for _, verb in self.events],
+        )
+        self.assertNotIn("secret", json.dumps(output))
+
+    def test_stored_settings_must_match_the_request(self):
+        self.rx.info = ["1", "10.0.0.1", "1883", "receiver-1"]
+        with self.assertRaisesRegex(provision.ProvisioningError, "did not store"):
+            provision.configure_uplink(self.rx, provision.uplink_fields(*UPLINK))
+        self.rx.info = ["0"]
+        with self.assertRaisesRegex(provision.ProvisioningError, "did not store"):
+            provision.configure_uplink(self.rx, provision.uplink_fields(*UPLINK))
+
+    def test_transmitter_is_rejected_before_any_setting(self):
+        tx = Device("tx", "0000000000000002", self.events)
+        with self.assertRaisesRegex(provision.ProvisioningError, "receiver administration"):
+            provision.configure_uplink(tx, provision.uplink_fields(*UPLINK))
+        self.assertEqual(["HELLO"], [verb for _, verb in self.events])
+
+    def test_status_shapes(self):
+        self.assertEqual({"configured": False}, provision.uplink_info(self.rx, "0000000000000001"))
+        for info in (["1", "host", "port", "user"], ["2", "h", "1", "u"], ["1", "h", "1"]):
+            self.rx.info = info
+            with self.assertRaisesRegex(provision.ProvisioningError, "Invalid uplink status"):
+                provision.uplink_info(self.rx, "0000000000000001")
+
+    def test_local_validation_rejects_values_the_device_would_refuse(self):
+        cases = (
+            (0, "", "SSID"),
+            (0, "s" * 33, "SSID"),
+            (0, "a\0b", "SSID"),
+            (1, "short", "Wi-Fi password"),
+            (1, "p" * 65, "Wi-Fi password"),
+            (1, "password\0", "Wi-Fi password"),
+            (2, "bad host", "host"),
+            (3, 0, "port"),
+            (3, 65536, "port"),
+            (4, "bad/source", "username"),
+            (4, "-leading", "username"),
+            (5, "", "MQTT password"),
+            (5, "p" * 65, "MQTT password"),
+            (5, "x\0", "MQTT password"),
+        )
+        for index, value, message in cases:
+            with self.subTest(index=index, value=value):
+                values = list(UPLINK)
+                values[index] = value
+                with self.assertRaisesRegex(provision.ProvisioningError, message):
+                    provision.uplink_fields(*values)
+        fields = dict(provision.uplink_fields("Rede é", "p" * 64, "broker.local", 65535, "a", "m"))
+        self.assertEqual("65535", fields["port"])
+
+    def test_secrets_come_from_the_first_file_line_or_a_silent_prompt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "secret"
+            path.write_text("line one\r\nline two\n")
+            self.assertEqual("line one", provision.read_secret(path, "unused"))
+        with patch.object(provision.getpass, "getpass", return_value="typed") as prompt:
+            self.assertEqual("typed", provision.read_secret(None, "Wi-Fi password: "))
+        prompt.assert_called_once_with("Wi-Fi password: ")
+
+
+class UplinkCommandLineTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.secret = Path(self.temporary.name) / "mqtt"
+        self.secret.write_text("mqtt secret\n")
+        self.devices = {"rx-port": Device("rx", "0000000000000001", [])}
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_cli(self, *arguments):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(provision, "SerialLink", side_effect=self.devices.__getitem__),
+            patch.object(provision.getpass, "getpass", return_value="typed wifi"),
+            patch.object(sys, "argv", ["provision.py", *arguments]),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = provision.main()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_uplink_and_status_print_json_without_secrets(self):
+        code, output, _ = self.run_cli(
+            "uplink",
+            "--receiver",
+            "rx-port",
+            "--ssid",
+            "Bench net",
+            "--host",
+            "192.168.1.20",
+            "--username",
+            "receiver-1",
+            "--mqtt-password-file",
+            str(self.secret),
+        )
+        self.assertEqual(0, code)
+        self.assertEqual(1883, json.loads(output)["port"])
+        self.assertNotIn("secret", output)
+        self.assertNotIn("typed", output)
+        self.assertEqual("typed wifi", self.devices["rx-port"].uplink["wifipass"])
+        code, output, _ = self.run_cli("uplink-status", "--receiver", "rx-port")
+        self.assertEqual(0, code)
+        self.assertEqual("receiver-1", json.loads(output)["username"])
+        self.assertTrue(self.devices["rx-port"].closed)
+
+    def test_invalid_uplink_fails_before_opening_the_port(self):
+        code, output, error = self.run_cli(
+            "uplink",
+            "--receiver",
+            "rx-port",
+            "--ssid",
+            "Bench net",
+            "--host",
+            "bad host",
+            "--username",
+            "receiver-1",
+            "--mqtt-password-file",
+            str(self.secret),
+        )
+        self.assertEqual(1, code)
+        self.assertIn("host", error)
+        self.assertEqual("", output)
+        self.assertFalse(self.devices["rx-port"].closed)

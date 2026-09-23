@@ -7,9 +7,11 @@
 
 import argparse
 from enum import IntEnum
+import getpass
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 import sys
@@ -36,6 +38,10 @@ DEVICE_ERRORS = {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHO
 # Recovery file phases in order; progress is recorded and never moves backwards.
 PHASES = ("new", "receiver_prepared", "both_prepared", "receiver_active", "configured")
 NO_NETWORK = "0" * 16
+# Mirrors the receiver's uplink limits (cajui_uplink.h). The MQTT username is also the
+# telemetry source_id, so it follows the Central identity syntax.
+IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}")
+HOST = re.compile(r"[A-Za-z0-9.-]{1,64}")
 
 
 class Enrollment(IntEnum):
@@ -324,6 +330,73 @@ def revoke(rx, transaction):
     return {"revoked": True, "node": transaction["node"]}
 
 
+def read_secret(path, prompt):
+    """Read a secret from a file (first line) or an interactive prompt without echo."""
+    if path is None:
+        return getpass.getpass(prompt)
+    with open(path, encoding="utf-8") as source:
+        return source.readline().rstrip("\r\n")
+
+
+def uplink_fields(ssid, wifi_password, host, port, username, password):
+    """Validate locally so a device never receives a partial or oversized setting."""
+
+    def size(value):
+        return len(value.encode("utf-8"))
+
+    if not 1 <= size(ssid) <= 32 or "\0" in ssid:
+        raise ProvisioningError("Wi-Fi SSID must have 1-32 bytes")
+    if not 8 <= size(wifi_password) <= 64 or "\0" in wifi_password:
+        raise ProvisioningError(
+            "Wi-Fi password must have 8-64 bytes; open networks are unsupported"
+        )
+    if not HOST.fullmatch(host):
+        raise ProvisioningError("Broker host must be an IPv4 address or host name")
+    if not 1 <= port <= 65535:
+        raise ProvisioningError("Broker port must be 1-65535")
+    if not IDENTITY.fullmatch(username):
+        raise ProvisioningError("MQTT username must be a Central source_id")
+    if not 1 <= size(password) <= 64 or "\0" in password:
+        raise ProvisioningError("MQTT password must have 1-64 bytes")
+    return (
+        ("ssid", ssid),
+        ("wifipass", wifi_password),
+        ("host", host),
+        ("port", str(port)),
+        ("user", username),
+        ("pass", password),
+    )
+
+
+def uplink_info(link, device):
+    values = link.request("UPLINKINFO " + device)
+    if values == ["0"]:
+        return {"configured": False}
+    if len(values) != 4 or values[0] != "1" or not values[2].isdigit():
+        raise ProvisioningError("Invalid uplink status")
+    return {"configured": True, "host": values[1], "port": int(values[2]), "username": values[3]}
+
+
+def configure_uplink(rx, fields):
+    """Stage every field, then save atomically. The device never echoes a secret."""
+    device = ready(rx)
+    if device["role"] != "rx":
+        raise ProvisioningError("Uplink settings require the receiver administration firmware")
+    for name, value in fields:
+        rx.request(f"UPLINKSET {device['device']} {name} {value.encode('utf-8').hex()}")
+    rx.request("UPLINKSAVE " + device["device"])
+    stored = uplink_info(rx, device["device"])
+    expected = dict(fields)
+    if (
+        not stored["configured"]
+        or stored["host"] != expected["host"]
+        or stored["port"] != int(expected["port"])
+        or stored["username"] != expected["user"]
+    ):
+        raise ProvisioningError("Receiver did not store the requested uplink settings")
+    return {**stored, "receiver": device["device"], "forwarding_validated": False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -342,6 +415,16 @@ def main():
     revoke_command = sub.add_parser("revoke")
     revoke_command.add_argument("--receiver", required=True)
     revoke_command.add_argument("--state", type=Path, required=True)
+    uplink = sub.add_parser("uplink", help="Store Wi-Fi and MQTT forwarding settings")
+    uplink.add_argument("--receiver", required=True)
+    uplink.add_argument("--ssid", required=True)
+    uplink.add_argument("--host", required=True, help="Broker IPv4 address or host name")
+    uplink.add_argument("--port", type=int, default=1883)
+    uplink.add_argument("--username", required=True, help="MQTT user, also the source_id")
+    uplink.add_argument("--wifi-password-file", type=Path, help="Prompts when omitted")
+    uplink.add_argument("--mqtt-password-file", type=Path, help="Prompts when omitted")
+    uplink_status = sub.add_parser("uplink-status")
+    uplink_status.add_argument("--receiver", required=True)
     args = parser.parse_args()
     links = []
     try:
@@ -356,6 +439,19 @@ def main():
         elif args.action == "revoke":
             transaction = load(args.state)
             output = revoke(connect(args.receiver), transaction)
+        elif args.action == "uplink":
+            fields = uplink_fields(
+                args.ssid,
+                read_secret(args.wifi_password_file, "Wi-Fi password: "),
+                args.host,
+                args.port,
+                args.username,
+                read_secret(args.mqtt_password_file, "MQTT password: "),
+            )
+            output = configure_uplink(connect(args.receiver), fields)
+        elif args.action == "uplink-status":
+            link = connect(args.receiver)
+            output = uplink_info(link, ready(link)["device"])
         else:
             tx, rx = connect(args.transmitter), connect(args.receiver)
             if args.action == "verify-restart":
