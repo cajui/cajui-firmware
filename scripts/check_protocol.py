@@ -25,6 +25,10 @@ def run(command, **kwargs):
     subprocess.run(command, cwd=ROOT, check=True, **kwargs)
 
 
+def pio():
+    return ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.1.18", "pio"]
+
+
 def tool(name):
     # uvx guarantees the pinned version; CI installs the same pins with pip instead.
     return ["uvx", "--from", TOOLS[name], name] if shutil.which("uvx") else [name]
@@ -51,6 +55,10 @@ def lint():
         sdk = subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()
         flags += ["-isysroot", sdk]
     run(tool("clang-tidy") + ["--quiet"] + tracked("lib/*.cpp") + ["--"] + flags)
+    # Tests use test/.clang-tidy and need the pinned Unity headers from PlatformIO.
+    run(pio() + ["pkg", "install", "-e", "native", "--silent"])
+    unity = next(ROOT.glob(".pio/libdeps/native/Unity/src"))
+    run(tool("clang-tidy") + ["--quiet"] + tracked("test/*.cpp") + ["--"] + flags + [f"-I{unity}"])
 
 
 def main():
@@ -61,7 +69,6 @@ def main():
     if args.lint:
         lint()
         return
-    pio = ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.1.18", "pio"]
     environment = os.environ.copy()
     with tempfile.TemporaryDirectory(prefix="cajui-protocol-") as temporary:
         folder = Path(temporary)
@@ -70,7 +77,7 @@ def main():
             environment["LLVM_PROFILE_FILE"] = str(folder / "profile.profraw")
         else:
             environment.pop("CAJUI_COVERAGE", None)
-        run(pio + ["test", "-e", "native"], env=environment)
+        run(pio() + ["test", "-e", "native"], env=environment)
         unittest = ["-m", "unittest", "discover", "-s", "tests_python", "-v"]
         if args.coverage:
             data = f"--data-file={folder / 'python.coverage'}"

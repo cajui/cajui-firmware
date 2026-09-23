@@ -1,0 +1,8 @@
+# Tests: bug-finding checks only. Fixtures and snapshot offsets are deliberate literals.
+InheritParentConfig: false
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*
+WarningsAsErrors: '*'

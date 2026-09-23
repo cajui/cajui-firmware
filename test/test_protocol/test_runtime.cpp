@@ -464,6 +464,7 @@ void test_runtime_rejects_invalid_policies_and_samples_before_reserving() {
         case 11: p.firstBackoffMaxMs = p.cycleTimeoutMs; break;
         case 12: p.secondBackoffMinMs = 0; break;
         case 13: p.secondBackoffMinMs = p.secondBackoffMaxMs + 1; break;
+        default: TEST_FAIL_MESSAGE("Unlisted policy case");
         }
         Rig r(p);
         TEST_ASSERT_EQUAL_INT(int(StartResult::InvalidPolicy),
