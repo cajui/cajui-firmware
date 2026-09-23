@@ -330,10 +330,10 @@ void test_counter_revision_exhaustion_and_operation_guards() {
     Receipt receipt{};
     receipt.counter = 1;
     receipt.last = data(1);
-    EXPECT_RESULT(Result::Conflict, store->commit(binding(), 1, receipt, sample()));
+    EXPECT_RESULT(Result::Conflict, store->commit(binding(), 1, receipt));
     receipt.counter = 2;
-    EXPECT_RESULT(Result::Invalid, store->commit(binding(), 0, receipt, sample()));
-    EXPECT_RESULT(Result::Unauthorized, store->commit(binding(3), 0, receipt, sample()));
+    EXPECT_RESULT(Result::Invalid, store->commit(binding(), 0, receipt));
+    EXPECT_RESULT(Result::Unauthorized, store->commit(binding(3), 0, receipt));
     auto wrong = binding();
     wrong.active = false;
     TEST_ASSERT_FALSE(store->load(wrong, receipt));

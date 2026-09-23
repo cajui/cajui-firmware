@@ -75,8 +75,7 @@ public:
     virtual bool load(const Binding&, Receipt&) = 0;
     // Contract: queue and Receipt become atomic and durable before returning Ok.
     // Failure leaves both unchanged; expectedCounter guards concurrent updates.
-    virtual Result commit(const Binding&, uint64_t expectedCounter, const Receipt&,
-                          const Data&) = 0;
+    virtual Result commit(const Binding&, uint64_t expectedCounter, const Receipt&) = 0;
 };
 Result receive(const Binding&, const Frame&, Journal&, Frame& ack);
 

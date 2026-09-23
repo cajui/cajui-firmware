@@ -17,7 +17,7 @@ Result receive(const Binding& b, const Frame& frame, Journal& journal, Frame& ac
         Receipt next{};
         next.counter = m.counter;
         next.last = frame;
-        const auto saved = journal.commit(b, old.counter, next, m.data);
+        const auto saved = journal.commit(b, old.counter, next);
         if (saved != Result::Ok) return saved;
     }
     Message response{};

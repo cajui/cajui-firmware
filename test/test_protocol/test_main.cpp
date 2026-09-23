@@ -51,7 +51,7 @@ public:
         out = state;
         return readable;
     }
-    Result commit(const Binding&, uint64_t expected, const Receipt& next, const Data&) override {
+    Result commit(const Binding&, uint64_t expected, const Receipt& next) override {
         if (writeResult != Result::Ok) return writeResult;
         if (expected != state.counter) return Result::Conflict;
         state = next;

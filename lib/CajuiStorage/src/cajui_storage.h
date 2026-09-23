@@ -67,7 +67,7 @@ public:
     bool binding(uint64_t node, Binding&) const;
     bool reserve(const Binding&, uint64_t&) override;
     bool load(const Binding&, Receipt&) override;
-    Result commit(const Binding&, uint64_t expectedCounter, const Receipt&, const Data&) override;
+    Result commit(const Binding&, uint64_t expectedCounter, const Receipt&) override;
     bool peek(QueuedSample&) const;
     Result forwarded(uint64_t node, uint64_t generation, uint64_t counter);
 
