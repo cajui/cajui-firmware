@@ -1,0 +1,3 @@
+# Formatting-only commits; use with git blame --ignore-revs-file or blame.ignoreRevsFile.
+# style: apply clang-format and ruff format
+ae12a3752a759aad04a4b0dd8269033d6fb5e200
