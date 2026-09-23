@@ -388,6 +388,18 @@ void test_mount_reports_why_storage_is_unavailable() {
     TEST_ASSERT_FALSE(store->reserve(binding(), counter));
     EXPECT_HEALTH(Health::WriteError, *store);
 }
+void test_commit_on_unhealthy_store_is_a_storage_error() {
+    MemoryBlob blob;
+    auto store = mounted(blob, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    blob.failAfter = true;
+    Frame ack{};
+    EXPECT_RESULT(Result::StorageError, receive(binding(), data(1), *store, ack));
+    Receipt receipt{};
+    receipt.counter = 2;
+    receipt.last = data(2);
+    EXPECT_RESULT(Result::StorageError, store->commit(binding(), 0, receipt));
+}
 }
 void runStorageTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -405,4 +417,5 @@ void runStorageTests() {
     RUN_TEST(test_duplicate_persistent_credentials_and_active_nodes_are_rejected);
     RUN_TEST(test_counter_revision_exhaustion_and_operation_guards);
     RUN_TEST(test_mount_reports_why_storage_is_unavailable);
+    RUN_TEST(test_commit_on_unhealthy_store_is_a_storage_error);
 }

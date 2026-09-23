@@ -325,6 +325,7 @@ bool PersistentStore::load(const Binding& b, Receipt& out) {
     return true;
 }
 Result PersistentStore::commit(const Binding& b, uint64_t expected, const Receipt& receipt) {
+    if (!healthy()) return Result::StorageError;
     const int index = authorized(b);
     if (index < 0 || role_ != Role::Receiver) return Result::Unauthorized;
     if (state_.entries[size_t(index)].receipt.counter != expected) return Result::Conflict;
