@@ -43,7 +43,12 @@ brew install openssl@3
 
 python3 -m pip install platformio==6.1.18
 python3 scripts/check_protocol.py
+python3 scripts/check_protocol.py --lint
 ```
+
+`--lint` checks formatting and runs clang-tidy on `lib/` and ruff on the Python code. It
+uses `uvx` to run the pinned clang-format 19.1.7, clang-tidy 19.1.0 and ruff 0.6.9; without
+`uv`, install those versions with pip.
 
 For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 

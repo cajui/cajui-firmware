@@ -1,3 +1,7 @@
 # Pinned via PyPI ruff==0.6.9 (see scripts/check_protocol.py).
 line-length = 100
 target-version = "py310"
+
+[lint.per-file-ignores]
+# PlatformIO injects Import, env and projenv into SCons scripts.
+"scripts/native_*.py" = ["F821"]

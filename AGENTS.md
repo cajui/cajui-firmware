@@ -6,8 +6,9 @@
 - Never implement cryptographic primitives locally; use established libraries.
 - Preserve nonce uniqueness, authenticated context, replay state and commit-before-ACK semantics.
 - Test behavior and failures, including restarts. Coverage does not replace review.
-- Run `python3 scripts/check_protocol.py --coverage` with Clang/LLVM and compile the
-  ESP32 test target with `--without-uploading --without-testing` before submitting.
+- Run `python3 scripts/check_protocol.py --lint`, then `--coverage` with Clang/LLVM, and
+  compile the ESP32 test target with `--without-uploading --without-testing` before submitting.
+- Keep formatting-only changes in their own commit and list it in `.git-blame-ignore-revs`.
 - Do not imply persistence, radio timing or field reliability is implemented when
   only a contract or test double exists. Document integration limitations.
 - Never commit credentials, device-specific configuration or local machine paths.

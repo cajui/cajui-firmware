@@ -1,0 +1,13 @@
+# Pinned via PyPI clang-tidy==19.1.0; run on lib/ by scripts/check_protocol.py --lint.
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*,
+  readability-isolate-declaration,
+  readability-magic-numbers
+WarningsAsErrors: '*'
+CheckOptions:
+  # Powers of two here are field widths such as put(p, value, 8).
+  - key: readability-magic-numbers.IgnorePowersOf2IntegerValues
+    value: true

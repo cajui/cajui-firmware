@@ -14,11 +14,14 @@ persistence, bounded attempts and counter exhaustion. A known AES-GCM vector
 checks the crypto adapter independently of codec round trips.
 
 ```sh
+python3 scripts/check_protocol.py --lint
 python3 scripts/check_protocol.py
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 pio test -e protocol_esp32 --without-uploading --without-testing
 ```
 
+`--lint` runs clang-format, clang-tidy (`.clang-tidy`, library code only: `src/` needs
+Arduino and the tests are fixture-heavy) and ruff with pinned versions.
 On macOS the runner locates OpenSSL via Homebrew and LLVM via `xcrun`. Elsewhere,
 OpenSSL and LLVM must be on the compiler/tool search paths. `OPENSSL_ROOT_DIR`
 can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
