@@ -70,37 +70,90 @@ const char* name(Health h) {
     }
     return "unknown";
 }
+// Splits on single spaces; returns 0 for empty, doubled or trailing separators or too many words.
+size_t tokenize(char* cursor, char* words[MaxWords]) {
+    size_t count = 0;
+    while (*cursor) {
+        if (count == MaxWords || *cursor == ' ') return 0;
+        words[count++] = cursor;
+        while (*cursor && *cursor != ' ') ++cursor;
+        if (*cursor) {
+            *cursor++ = 0;
+            if (!*cursor) return 0;
+        }
+    }
+    return count;
+}
+void respond(Result result, const char* command, char* reply, size_t capacity) {
+    if (result == Result::Ok)
+        std::snprintf(reply, capacity, "CJ1 OK %s", command);
+    else
+        std::snprintf(reply, capacity, "CJ1 ERR %s", name(result));
+}
+void hello(const PersistentStore& store, uint32_t boot, char* reply, size_t capacity) {
+    std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx",
+                  static_cast<unsigned long long>(store.device()),
+                  store.role() == Role::Transmitter ? "tx" : "rx", name(store.health()),
+                  static_cast<unsigned long long>(store.network()),
+                  static_cast<unsigned long long>(store.receiver()), unsigned(store.profile()),
+                  unsigned(store.queued()), static_cast<unsigned long>(boot));
+}
+Result prepare(PersistentStore& store, Fields& fields) {
+    uint64_t network = 0;
+    uint64_t receiver = 0;
+    uint64_t node = 0;
+    uint64_t generation = 0;
+    uint16_t profile = 0;
+    Key key{};
+    if (!fields.id(network) || !fields.id(receiver) || !fields.id(node) || !fields.id(generation) ||
+        !fields.key(key) || !fields.profile(profile))
+        return Result::Invalid;
+    return store.prepare(network, receiver, node, generation, key, profile);
+}
+void info(const PersistentStore& store, uint64_t node, uint64_t generation, char* reply,
+          size_t capacity) {
+    EnrollmentInfo info{};
+    if (!store.info(node, generation, info)) {
+        respond(Result::NotFound, "INFO", reply, capacity);
+        return;
+    }
+    std::snprintf(reply, capacity, "CJ1 OK INFO %u %016llx", unsigned(info.state),
+                  static_cast<unsigned long long>(info.counter));
+}
+void reserve(PersistentStore& store, uint64_t node, uint64_t generation, char* reply,
+             size_t capacity) {
+    EnrollmentInfo info{};
+    Binding binding{};
+    uint64_t counter = 0;
+    Result result = Result::StorageError;
+    if (store.role() != Role::Transmitter)
+        result = Result::Invalid;
+    else if (!store.info(node, generation, info))
+        result = Result::NotFound;
+    else if (info.state != Enrollment::Active)
+        result = Result::Conflict;
+    else if (store.binding(node, binding) && store.reserve(binding, counter)) {
+        std::snprintf(reply, capacity, "CJ1 OK RESERVE %016llx",
+                      static_cast<unsigned long long>(counter));
+        return;
+    }
+    respond(result, "RESERVE", reply, capacity);
+}
 }
 bool Provisioning::execute(const char* input, size_t length, char* reply, size_t capacity) {
     if (!reply || capacity < ReplyCapacity) return false;
     std::snprintf(reply, capacity, "CJ1 ERR INVALID");
     if (!input || !length || length >= CommandCapacity) return true;
-    char buffer[CommandCapacity]{};
     for (size_t i = 0; i < length; ++i)
         if (input[i] < FirstPrintable || input[i] > LastPrintable) return true;
+    char buffer[CommandCapacity]{};
     std::memcpy(buffer, input, length);
     char* words[MaxWords]{};
-    size_t count = 0;
-    char* cursor = buffer;
-    while (*cursor) {
-        if (count == MaxWords || *cursor == ' ') return true;
-        words[count++] = cursor;
-        while (*cursor && *cursor != ' ') ++cursor;
-        if (*cursor) {
-            *cursor++ = 0;
-            if (!*cursor) return true;
-        }
-    }
+    const size_t count = tokenize(buffer, words);
     if (count < 2 || std::strcmp(words[0], "CJ1") != 0) return true;
     const char* command = words[1];
     if (!std::strcmp(command, "HELLO") && count == 2) {
-        std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx",
-                      static_cast<unsigned long long>(store_.device()),
-                      store_.role() == Role::Transmitter ? "tx" : "rx", name(store_.health()),
-                      static_cast<unsigned long long>(store_.network()),
-                      static_cast<unsigned long long>(store_.receiver()),
-                      unsigned(store_.profile()), unsigned(store_.queued()),
-                      static_cast<unsigned long>(boot_));
+        hello(store_, boot_, reply, capacity);
         return true;
     }
     Fields fields(words + 2);
@@ -116,55 +169,21 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
         std::snprintf(reply, capacity, "CJ1 ERR STORAGE");
         return true;
     }
-    Result result = Result::Invalid;
     if (!std::strcmp(command, "PREPARE") && count == PrepareWords) {
-        uint64_t network = 0;
-        uint64_t receiver = 0;
-        uint64_t node = 0;
-        uint64_t generation = 0;
-        uint16_t profile = 0;
-        Key key{};
-        if (fields.id(network) && fields.id(receiver) && fields.id(node) && fields.id(generation) &&
-            fields.key(key) && fields.profile(profile))
-            result = store_.prepare(network, receiver, node, generation, key, profile);
-    } else if (count == EnrollmentWords) {
-        uint64_t node = 0;
-        uint64_t generation = 0;
-        if (!fields.id(node) || !fields.id(generation)) return true;
-        if (!std::strcmp(command, "ACTIVATE"))
-            result = store_.activate(node, generation);
-        else if (!std::strcmp(command, "REVOKE"))
-            result = store_.revoke(node, generation);
-        else if (!std::strcmp(command, "INFO")) {
-            EnrollmentInfo info{};
-            if (store_.info(node, generation, info)) {
-                std::snprintf(reply, capacity, "CJ1 OK INFO %u %016llx", unsigned(info.state),
-                              static_cast<unsigned long long>(info.counter));
-            } else
-                std::snprintf(reply, capacity, "CJ1 ERR NOT_FOUND");
-            return true;
-        } else if (!std::strcmp(command, "RESERVE")) {
-            EnrollmentInfo info{};
-            Binding binding{};
-            uint64_t counter = 0;
-            if (store_.role() != Role::Transmitter)
-                result = Result::Invalid;
-            else if (!store_.info(node, generation, info))
-                result = Result::NotFound;
-            else if (info.state != Enrollment::Active)
-                result = Result::Conflict;
-            else if (store_.binding(node, binding) && store_.reserve(binding, counter)) {
-                std::snprintf(reply, capacity, "CJ1 OK RESERVE %016llx",
-                              static_cast<unsigned long long>(counter));
-                return true;
-            } else
-                result = Result::StorageError;
-        }
+        respond(prepare(store_, fields), command, reply, capacity);
+        return true;
     }
-    if (result == Result::Ok)
-        std::snprintf(reply, capacity, "CJ1 OK %s", command);
-    else
-        std::snprintf(reply, capacity, "CJ1 ERR %s", name(result));
+    uint64_t node = 0;
+    uint64_t generation = 0;
+    if (count != EnrollmentWords || !fields.id(node) || !fields.id(generation)) return true;
+    if (!std::strcmp(command, "INFO"))
+        info(store_, node, generation, reply, capacity);
+    else if (!std::strcmp(command, "RESERVE"))
+        reserve(store_, node, generation, reply, capacity);
+    else if (!std::strcmp(command, "ACTIVATE"))
+        respond(store_.activate(node, generation), command, reply, capacity);
+    else if (!std::strcmp(command, "REVOKE"))
+        respond(store_.revoke(node, generation), command, reply, capacity);
     return true;
 }
 }
