@@ -23,7 +23,9 @@ pio test -e protocol_esp32 --without-uploading --without-testing
 `--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
 snapshot offsets are deliberate literals. `src/` is not analyzed because it needs the
-Arduino headers.
+Arduino headers. PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
+would build LLVM from source; on such machines, run `--lint` on macOS or in an x86-64
+container.
 On macOS the runner locates OpenSSL via Homebrew and LLVM via `xcrun`. Elsewhere,
 OpenSSL and LLVM must be on the compiler/tool search paths. `OPENSSL_ROOT_DIR`
 can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
