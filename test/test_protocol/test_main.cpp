@@ -1,6 +1,7 @@
 #include <unity.h>
 #include "cajui_protocol.h"
 #include "assertions.h"
+#include "storage_support.h"
 #include <cstring>
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -10,7 +11,7 @@ void setUp() {}
 void tearDown() {}
 
 namespace {
-Binding binding() {
+Binding vectorBinding() {
     Binding b{};
     b.network = 42;
     b.node = 1234;
@@ -18,7 +19,7 @@ Binding binding() {
     for (size_t i = 0; i < b.key.size(); ++i) b.key[i] = uint8_t(i + 1);
     return b; // Public test vector only, never a production credential.
 }
-Data sample() {
+Data twoReadings() {
     Data d{};
     d.batteryMv = 3900;
     d.nextSeconds = 300;
@@ -36,9 +37,9 @@ Data sample() {
 Frame packet(uint64_t counter = 1) {
     Message m{};
     m.counter = counter;
-    m.data = sample();
+    m.data = twoReadings();
     Frame f{};
-    TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(seal(binding(), m, f)));
+    TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(seal(vectorBinding(), m, f)));
     return f;
 }
 class MemoryJournal : public Journal {
@@ -72,7 +73,7 @@ public:
 void test_roundtrip_multiple_metrics_and_zero() {
     auto f = packet();
     Message m{};
-    EXPECT_RESULT(Result::Ok, open(binding(), f, m));
+    EXPECT_RESULT(Result::Ok, open(vectorBinding(), f, m));
     TEST_ASSERT_EQUAL_UINT64(1, m.counter);
     TEST_ASSERT_EQUAL_UINT16(3900, m.data.batteryMv);
     TEST_ASSERT_EQUAL_UINT32(300, m.data.nextSeconds);
@@ -88,27 +89,27 @@ void test_all_bytes_are_authenticated() {
         auto modified = original;
         modified.bytes[i] ^= 1;
         Message m{};
-        TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(binding(), modified, m)));
+        TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(vectorBinding(), modified, m)));
         TEST_ASSERT_EQUAL_UINT8(0, m.data.count);
     }
 }
 void test_wrong_key_network_node_and_revocation() {
     auto f = packet();
     Message m{};
-    auto b = binding();
+    auto b = vectorBinding();
     b.key[0] ^= 1;
     EXPECT_RESULT(Result::CryptoError, open(b, f, m));
-    b = binding();
+    b = vectorBinding();
     ++b.network;
     EXPECT_RESULT(Result::Unauthorized, open(b, f, m));
-    b = binding();
+    b = vectorBinding();
     ++b.node;
     EXPECT_RESULT(Result::Unauthorized, open(b, f, m));
-    b = binding();
+    b = vectorBinding();
     b.active = false;
     EXPECT_RESULT(Result::Unauthorized, open(b, f, m));
     m.counter = 1;
-    m.data = sample();
+    m.data = twoReadings();
     EXPECT_RESULT(Result::Unauthorized, seal(b, m, f));
     TEST_ASSERT_EQUAL_UINT32(0, f.size);
 }
@@ -119,76 +120,76 @@ void test_lengths_truncation_and_legacy_rejected() {
         SCENARIO(n);
         auto f = original;
         f.size = n;
-        EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
+        EXPECT_RESULT(Result::Invalid, open(vectorBinding(), f, m));
     }
     auto f = original;
     ++f.size;
-    EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
+    EXPECT_RESULT(Result::Invalid, open(vectorBinding(), f, m));
     f.size = SIZE_MAX;
-    EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
+    EXPECT_RESULT(Result::Invalid, open(vectorBinding(), f, m));
     f = original;
     std::memcpy(f.bytes.data(), "CAJUI|3|", 8);
-    EXPECT_RESULT(Result::Invalid, open(binding(), f, m));
+    EXPECT_RESULT(Result::Invalid, open(vectorBinding(), f, m));
 }
 void test_payload_validation_and_extremes() {
     Message m{};
     m.counter = UINT64_MAX;
-    m.data = sample();
+    m.data = twoReadings();
     Frame f{};
     Message decoded{};
     m.data.count = MaxReadings;
     for (size_t i = 0; i < MaxReadings; ++i) {
-        m.data.readings[i] = sample().readings[0];
+        m.data.readings[i] = twoReadings().readings[0];
         m.data.readings[i].sensor = uint16_t(i + 1);
         m.data.readings[i].milliValue = i % 2 ? INT32_MAX : INT32_MIN;
     }
-    EXPECT_RESULT(Result::Ok, seal(binding(), m, f));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), m, f));
     TEST_ASSERT_EQUAL_UINT32(MaxFrame, f.size);
-    EXPECT_RESULT(Result::Ok, open(binding(), f, decoded));
+    EXPECT_RESULT(Result::Ok, open(vectorBinding(), f, decoded));
     TEST_ASSERT_EQUAL_INT32(INT32_MIN, decoded.data.readings[0].milliValue);
     TEST_ASSERT_EQUAL_INT32(INT32_MAX, decoded.data.readings[1].milliValue);
     m.data.count = MaxReadings + 1;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.count = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.nextSeconds = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.readings[1] = m.data.readings[0];
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.readings[0].sensor = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.readings[0].metric = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.readings[0].unit = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.data.readings[0].status = Status(3);
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
-    m.data = sample();
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
+    m.data = twoReadings();
     m.counter = 0;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
     m.counter = 1;
     m.type = Type(3);
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
 }
 void test_sensor_error_is_not_a_measurement() {
     Message m{};
     m.counter = 1;
-    m.data = sample();
+    m.data = twoReadings();
     Frame f{};
     Message out{};
     m.data.readings[0].status = Status::Error;
-    EXPECT_RESULT(Result::Invalid, seal(binding(), m, f));
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), m, f));
     m.data.readings[0].milliValue = 0;
     m.data.readings[1].status = Status::Skipped;
-    EXPECT_RESULT(Result::Ok, seal(binding(), m, f));
-    EXPECT_RESULT(Result::Ok, open(binding(), f, out));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), m, f));
+    EXPECT_RESULT(Result::Ok, open(vectorBinding(), f, out));
     TEST_ASSERT_EQUAL_UINT8(1, uint8_t(out.data.readings[0].status));
     TEST_ASSERT_EQUAL_UINT8(2, uint8_t(out.data.readings[1].status));
 }
@@ -197,14 +198,14 @@ void test_lost_ack_retries_without_duplicate_storage() {
     MemoryJournal journal;
     Sender tx;
     Frame ack{};
-    EXPECT_RESULT(Result::Ok, tx.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Ok, tx.begin(vectorBinding(), twoReadings(), counter));
     const auto first = *tx.nextAttempt();
-    EXPECT_RESULT(Result::Ok, receive(binding(), first, journal, ack));
+    EXPECT_RESULT(Result::Ok, receive(vectorBinding(), first, journal, ack));
     // Lost ACK: retry the same DATA with the previously committed receipt.
     const auto retry = *tx.nextAttempt();
     TEST_ASSERT_TRUE(sameFrame(first, retry));
     Frame repeatedAck{};
-    EXPECT_RESULT(Result::Duplicate, receive(binding(), retry, journal, repeatedAck));
+    EXPECT_RESULT(Result::Duplicate, receive(vectorBinding(), retry, journal, repeatedAck));
     TEST_ASSERT_EQUAL_UINT32(1, journal.writes);
     TEST_ASSERT_TRUE(sameFrame(ack, repeatedAck));
     EXPECT_RESULT(Result::Ok, tx.acknowledge(repeatedAck));
@@ -216,38 +217,38 @@ void test_no_ack_before_durable_commit() {
     Frame ack{};
     MemoryJournal journal;
     journal.readable = false;
-    EXPECT_RESULT(Result::StorageError, receive(binding(), f, journal, ack));
+    EXPECT_RESULT(Result::StorageError, receive(vectorBinding(), f, journal, ack));
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
     journal.readable = true;
     for (auto failure : {Result::Full, Result::StorageError, Result::Conflict}) {
         SCENARIO(int(failure));
         journal.writeResult = failure;
         ack = f;
-        EXPECT_RESULT(failure, receive(binding(), f, journal, ack));
+        EXPECT_RESULT(failure, receive(vectorBinding(), f, journal, ack));
         TEST_ASSERT_EQUAL_UINT32(0, ack.size);
         TEST_ASSERT_EQUAL_UINT64(0, journal.state.counter);
     }
     journal.writeResult = Result::Ok;
-    EXPECT_RESULT(Result::Ok, receive(binding(), f, journal, ack));
+    EXPECT_RESULT(Result::Ok, receive(vectorBinding(), f, journal, ack));
     journal.writeResult = Result::Full;
-    EXPECT_RESULT(Result::Duplicate, receive(binding(), f, journal, ack));
+    EXPECT_RESULT(Result::Duplicate, receive(vectorBinding(), f, journal, ack));
     TEST_ASSERT_GREATER_THAN_UINT32(0, ack.size);
 }
 void test_replay_conflict_and_invalid_input_do_not_commit() {
     Frame ack{};
     MemoryJournal journal;
-    EXPECT_RESULT(Result::Ok, receive(binding(), packet(2), journal, ack));
-    EXPECT_RESULT(Result::Replay, receive(binding(), packet(1), journal, ack));
+    EXPECT_RESULT(Result::Ok, receive(vectorBinding(), packet(2), journal, ack));
+    EXPECT_RESULT(Result::Replay, receive(vectorBinding(), packet(1), journal, ack));
     Message conflict{};
     conflict.counter = 2;
-    conflict.data = sample();
+    conflict.data = twoReadings();
     conflict.data.batteryMv = 4000;
     Frame changed{};
     // Deliberately misuse a counter to simulate a faulty sender.
-    EXPECT_RESULT(Result::Ok, seal(binding(), conflict, changed));
-    EXPECT_RESULT(Result::Conflict, receive(binding(), changed, journal, ack));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), conflict, changed));
+    EXPECT_RESULT(Result::Conflict, receive(vectorBinding(), changed, journal, ack));
     changed.bytes[50] ^= 1;
-    EXPECT_RESULT(Result::CryptoError, receive(binding(), changed, journal, ack));
+    EXPECT_RESULT(Result::CryptoError, receive(vectorBinding(), changed, journal, ack));
     TEST_ASSERT_EQUAL_UINT32(1, journal.writes);
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
 }
@@ -257,56 +258,56 @@ void test_sender_limits_and_counter_survives_restart() {
     TEST_ASSERT_NULL(tx.nextAttempt());
     Frame empty{};
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(empty));
-    EXPECT_RESULT(Result::Ok, tx.begin(binding(), sample(), counter));
-    EXPECT_RESULT(Result::Conflict, tx.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Ok, tx.begin(vectorBinding(), twoReadings(), counter));
+    EXPECT_RESULT(Result::Conflict, tx.begin(vectorBinding(), twoReadings(), counter));
     for (int i = 0; i < 3; ++i) TEST_ASSERT_NOT_NULL(tx.nextAttempt());
     TEST_ASSERT_NULL(tx.nextAttempt());
     TEST_ASSERT_FALSE(tx.delivered());
-    EXPECT_RESULT(Result::Conflict, tx.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Conflict, tx.begin(vectorBinding(), twoReadings(), counter));
     tx.abandon();
-    EXPECT_RESULT(Result::Ok, tx.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Ok, tx.begin(vectorBinding(), twoReadings(), counter));
     Sender restarted;
-    EXPECT_RESULT(Result::Ok, restarted.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Ok, restarted.begin(vectorBinding(), twoReadings(), counter));
     Message m{};
-    EXPECT_RESULT(Result::Ok, open(binding(), *restarted.nextAttempt(), m));
+    EXPECT_RESULT(Result::Ok, open(vectorBinding(), *restarted.nextAttempt(), m));
     TEST_ASSERT_EQUAL_UINT64(3, m.counter);
     Sender blocked;
     counter.writable = false;
-    EXPECT_RESULT(Result::StorageError, blocked.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::StorageError, blocked.begin(vectorBinding(), twoReadings(), counter));
     TEST_ASSERT_NULL(blocked.nextAttempt());
     counter.writable = true;
     counter.last = UINT64_MAX;
-    EXPECT_RESULT(Result::StorageError, blocked.begin(binding(), sample(), counter));
-    auto b = binding();
+    EXPECT_RESULT(Result::StorageError, blocked.begin(vectorBinding(), twoReadings(), counter));
+    auto b = vectorBinding();
     b.active = false;
-    EXPECT_RESULT(Result::Unauthorized, blocked.begin(b, sample(), counter));
-    auto d = sample();
+    EXPECT_RESULT(Result::Unauthorized, blocked.begin(b, twoReadings(), counter));
+    auto d = twoReadings();
     d.count = 0;
-    EXPECT_RESULT(Result::Invalid, blocked.begin(binding(), d, counter));
+    EXPECT_RESULT(Result::Invalid, blocked.begin(vectorBinding(), d, counter));
 }
 void test_ack_must_match_pending_data() {
     Sender tx;
     MemoryCounter counter;
     MemoryJournal journal;
     Frame ack{};
-    EXPECT_RESULT(Result::Ok, tx.begin(binding(), sample(), counter));
+    EXPECT_RESULT(Result::Ok, tx.begin(vectorBinding(), twoReadings(), counter));
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(packet()));
     const auto data = *tx.nextAttempt();
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(data));
-    EXPECT_RESULT(Result::Ok, receive(binding(), packet(2), journal, ack));
+    EXPECT_RESULT(Result::Ok, receive(vectorBinding(), packet(2), journal, ack));
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(ack));
     Message wrong{};
     wrong.type = Type::Ack;
     wrong.counter = 1;
-    EXPECT_RESULT(Result::Ok, seal(binding(), wrong, ack));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), wrong, ack));
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(ack));
     ack.bytes[ack.size - 1] ^= 1;
     EXPECT_RESULT(Result::CryptoError, tx.acknowledge(ack));
     TEST_ASSERT_FALSE(tx.delivered());
     Frame ignored{};
-    EXPECT_RESULT(Result::CryptoError, receive(binding(), ack, journal, ignored));
-    EXPECT_RESULT(Result::Ok, seal(binding(), wrong, ack));
-    EXPECT_RESULT(Result::Invalid, receive(binding(), ack, journal, ignored));
+    EXPECT_RESULT(Result::CryptoError, receive(vectorBinding(), ack, journal, ignored));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), wrong, ack));
+    EXPECT_RESULT(Result::Invalid, receive(vectorBinding(), ack, journal, ignored));
 }
 void test_authenticated_malformed_payload_is_rejected() {
     const auto original = packet();
@@ -316,7 +317,7 @@ void test_authenticated_malformed_payload_is_rejected() {
         uint8_t nonce[12] = {'C', 'J', 1, 1, 0, 0, 0, 0, 0, 0, 0, 1};
         uint8_t plain[MaxPayload]{};
         const size_t size = f.size - HeaderSize - TagSize;
-        TEST_ASSERT_TRUE(decrypt(binding().key, nonce, f.bytes.data(), HeaderSize,
+        TEST_ASSERT_TRUE(decrypt(vectorBinding().key, nonce, f.bytes.data(), HeaderSize,
                                  f.bytes.data() + HeaderSize, size,
                                  f.bytes.data() + f.size - TagSize, plain));
         switch (scenario) {
@@ -326,10 +327,11 @@ void test_authenticated_malformed_payload_is_rejected() {
         case 3: plain[7] = plain[8] = 0; break; // zero sensor ID
         default: plain[12] = 1; break;          // error carrying a measurement
         }
-        TEST_ASSERT_TRUE(encrypt(binding().key, nonce, f.bytes.data(), HeaderSize, plain, size,
-                                 f.bytes.data() + HeaderSize, f.bytes.data() + f.size - TagSize));
+        TEST_ASSERT_TRUE(encrypt(vectorBinding().key, nonce, f.bytes.data(), HeaderSize, plain,
+                                 size, f.bytes.data() + HeaderSize,
+                                 f.bytes.data() + f.size - TagSize));
         Message out{};
-        EXPECT_RESULT(Result::Invalid, open(binding(), f, out));
+        EXPECT_RESULT(Result::Invalid, open(vectorBinding(), f, out));
         TEST_ASSERT_EQUAL_UINT8(0, out.data.count);
     }
 }
@@ -346,7 +348,7 @@ void test_untrusted_lengths_and_bytes_under_sanitizers() {
         }
         f.size = trial % (MaxFrame + 20);
         Message out{};
-        TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(binding(), f, out)));
+        TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(vectorBinding(), f, out)));
     }
 }
 void test_wire_header_is_portable_and_ack_direction_is_separate() {
@@ -358,13 +360,24 @@ void test_wire_header_is_portable_and_ack_direction_is_separate() {
     ack.type = Type::Ack;
     ack.counter = 1;
     Frame response{};
-    EXPECT_RESULT(Result::Ok, seal(binding(), ack, response));
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), ack, response));
     // Changing direction does not create an authenticated message of another type.
     response.bytes[5] = 1;
     Message out{};
-    TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(binding(), response, out)));
+    TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(vectorBinding(), response, out)));
     response.size = MaxFrame + 1;
     TEST_ASSERT_FALSE(sameFrame(response, response));
+}
+void test_codec_matches_pre_refactor_wire_fixture() {
+    const uint8_t expected[] = {0x43, 0x4a, 0x4c, 0x52, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                0x00, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x11, 0xe3,
+                                0x30, 0xa6, 0x91, 0xf0, 0x79, 0x7a, 0xcd, 0xcf, 0xac, 0x2b, 0xc4,
+                                0x6c, 0xa5, 0xed, 0xcf, 0xeb, 0x02, 0x90, 0x30, 0x9f, 0xc1, 0xec,
+                                0x18, 0xdf, 0xca, 0xd0, 0x5f, 0x45, 0x3e, 0xc9, 0x87, 0x9a};
+    auto frame = fixtures::data(1);
+    TEST_ASSERT_EQUAL_UINT(sizeof(expected), frame.size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, frame.bytes.data(), sizeof(expected));
 }
 void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     // NIST GCM: AES-128, zero key/IV/plaintext, no AAD, one 16-byte block.
@@ -405,6 +418,7 @@ int runTests() {
     RUN_TEST(test_untrusted_lengths_and_bytes_under_sanitizers);
     RUN_TEST(test_wire_header_is_portable_and_ack_direction_is_separate);
     RUN_TEST(test_nist_aes_gcm_known_answer_and_failure_wipes_output);
+    RUN_TEST(test_codec_matches_pre_refactor_wire_fixture);
     runRuntimeTests();
     runStorageTests();
     runProvisioningTests();

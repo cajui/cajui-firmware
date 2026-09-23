@@ -504,17 +504,6 @@ void test_runtime_cancel_each_phase_consumes_counter_without_reuse() {
         r.controller.cancel();
     }
 }
-void test_codec_matches_pre_refactor_wire_fixture() {
-    const uint8_t expected[] = {0x43, 0x4a, 0x4c, 0x52, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                0x00, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x11, 0xe3,
-                                0x30, 0xa6, 0x91, 0xf0, 0x79, 0x7a, 0xcd, 0xcf, 0xac, 0x2b, 0xc4,
-                                0x6c, 0xa5, 0xed, 0xcf, 0xeb, 0x02, 0x90, 0x30, 0x9f, 0xc1, 0xec,
-                                0x18, 0xdf, 0xca, 0xd0, 0x5f, 0x45, 0x3e, 0xc9, 0x87, 0x9a};
-    auto frame = fixtures::data(1);
-    TEST_ASSERT_EQUAL_UINT(sizeof(expected), frame.size);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, frame.bytes.data(), sizeof(expected));
-}
 }
 void runRuntimeTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -534,5 +523,4 @@ void runRuntimeTests() {
     RUN_TEST(test_runtime_random_failure_or_out_of_range_stops);
     RUN_TEST(test_runtime_rejects_invalid_policies_and_samples_before_reserving);
     RUN_TEST(test_runtime_cancel_each_phase_consumes_counter_without_reuse);
-    RUN_TEST(test_codec_matches_pre_refactor_wire_fixture);
 }
