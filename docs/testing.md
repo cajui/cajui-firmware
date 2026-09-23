@@ -43,6 +43,9 @@ Python unittest tests exercise client sequencing, resumable setup, identity chec
 recovery-file permissions, error redaction and the command line. With `--coverage`, the
 check script also requires 95% line and branch coverage of `tools/provision.py`
 (coverage.py 7.6.1, run through `uvx` or installed with pip).
+The gate reads the client file's JSON counts and checks each metric independently,
+without rounding. A high combined percentage cannot compensate for low branch
+coverage. Regression tests cover that distinction and missing coverage data.
 The build job also compiles `admin_tx` and `admin_rx`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time

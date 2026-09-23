@@ -309,6 +309,41 @@ class FailureTests(unittest.TestCase):
         with self.assertRaisesRegex(provision.ProvisioningError, "did not activate"):
             provision.enroll(self.tx, self.rx, self.path)
 
+    def test_failed_replace_preserves_recovery_and_removes_temporary_secret(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        original = self.path.read_bytes()
+        transaction = provision.load(self.path)
+        transaction["phase"] = "new"
+        with patch.object(provision.os, "replace", side_effect=OSError("Simulated I/O failure")):
+            with self.assertRaises(OSError):
+                provision.save(self.path, transaction)
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertEqual([self.path], list(self.path.parent.iterdir()))
+
+    def test_restart_requires_active_enrollment_before_any_reservation(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        self.tx.state = provision.Enrollment.PREPARED
+        with self.assertRaisesRegex(provision.ProvisioningError, "active enrollment"):
+            provision.verify_restart(self.tx, self.rx, self.path)
+        self.assertEqual(0, self.tx.counter)
+        self.assertEqual(1, self.tx.boot)
+        self.assertEqual(1, self.rx.boot)
+
+    def test_restart_rejects_enrollment_lost_after_reboot(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        original = self.rx.request
+
+        def lost_enrollment(command):
+            response = original(command)
+            if command.startswith("REBOOT"):
+                self.rx.state = provision.Enrollment.PREPARED
+            return response
+
+        self.rx.request = lost_enrollment
+        with self.assertRaisesRegex(provision.ProvisioningError, "survive restart"):
+            provision.verify_restart(self.tx, self.rx, self.path)
+        self.assertEqual(1, self.tx.counter)  # No second reservation after lost enrollment.
+
     def test_unreadable_recovery_file_is_rejected(self):
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
         with os.fdopen(fd, "w") as output:
@@ -446,6 +481,17 @@ class TransportTests(unittest.TestCase):
 
         with self.assertRaises(provision.ProvisioningError):
             provision.hello(Reply())
+
+    def test_invalid_hello_shape_role_and_queue_are_rejected(self):
+        valid = ["0" * 16, "tx", "ready", "0" * 16, "0" * 16, "0001", "0", "00000001"]
+        replies = [valid[:-1], valid[:1] + ["unknown"] + valid[2:]]
+        for count in ("-1", "129", "١", ""):
+            replies.append(valid[:6] + [count] + valid[7:])
+        for fields in replies:
+            with self.subTest(fields=fields):
+                reply = types.SimpleNamespace(request=lambda _: fields)
+                with self.assertRaises(provision.ProvisioningError):
+                    provision.hello(reply)
 
     def test_storage_failure_reason_is_reported(self):
         class Reply:

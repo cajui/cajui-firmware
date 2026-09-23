@@ -39,6 +39,22 @@ def tracked(*patterns):
     return output.split()
 
 
+def check_python_coverage(report):
+    """Require independent, unrounded line and branch minima for the USB client."""
+    try:
+        summary = report["files"]["tools/provision.py"]["summary"]
+        counts = (
+            ("lines", summary["covered_lines"], summary["num_statements"]),
+            ("branches", summary["covered_branches"], summary["num_branches"]),
+        )
+    except KeyError:
+        raise SystemExit("Missing Python client line/branch coverage data.") from None
+    for label, covered, total in counts:
+        if total <= 0 or covered * 100 < total * 95:
+            raise SystemExit(f"Python client {label} coverage below 95%: {covered}/{total}.")
+        print(f"Python client {label}: {covered}/{total} ({100 * covered / total:.2f}%)")
+
+
 def lint():
     sources = tracked("lib/*.cpp", "lib/*.h", "src/*.cpp", "test/*.cpp", "test/*.h")
     run(tool("clang-format") + ["--dry-run", "--Werror"] + sources)
@@ -87,7 +103,10 @@ def main():
                 + ["run", "--branch", "--include=tools/provision.py", data]
                 + unittest
             )
-            run(tool("coverage") + ["report", "-m", "--fail-under=95", data])
+            run(tool("coverage") + ["report", "-m", data])
+            python_report = folder / "python-coverage.json"
+            run(tool("coverage") + ["json", data, "-o", str(python_report)])
+            check_python_coverage(json.loads(python_report.read_text()))
         else:
             run([sys.executable] + unittest)
         if args.coverage:
