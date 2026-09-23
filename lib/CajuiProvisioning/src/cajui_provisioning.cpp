@@ -30,6 +30,7 @@ const char* name(Result r) {
     case Result::Conflict: return "CONFLICT";
     case Result::StorageError: return "STORAGE";
     case Result::Unauthorized: return "UNAUTHORIZED";
+    case Result::NotFound: return "NOT_FOUND";
     default: return "INVALID";
     }
 }

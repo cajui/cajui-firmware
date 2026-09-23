@@ -98,7 +98,7 @@ void test_bad_provisioning_and_identity_do_not_mutate_state() {
     TEST_ASSERT_EQUAL_UINT32(0, blob.writes); TEST_ASSERT_TRUE(enroll(*store));
     expect(Result::Conflict, store->prepare(43, 1, 2, 11, key(2), 1));
     expect(Result::Conflict, store->prepare(42, 1, 2, 10, key(2), 1));
-    expect(Result::Invalid, store->activate(2, 100)); expect(Result::Invalid, store->revoke(2, 100));
+    expect(Result::NotFound, store->activate(2, 100)); expect(Result::NotFound, store->revoke(2, 100));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_FALSE(store->healthy());
 }
 void test_full_binding_registry_and_prepared_conflict() {

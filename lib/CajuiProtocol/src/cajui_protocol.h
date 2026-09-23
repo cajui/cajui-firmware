@@ -13,7 +13,7 @@ using Tag = std::array<uint8_t, TagSize>;
 enum class Type : uint8_t { Data = 1, Ack = 2 };
 enum class Status : uint8_t { Ok = 0, Error = 1, Skipped = 2 };
 enum class Result { Ok, Invalid, Unauthorized, CryptoError, StorageError,
-                    Full, Replay, Conflict, Duplicate };
+                    Full, Replay, Conflict, Duplicate, NotFound };
 struct Binding {
     uint64_t network = 0, node = 0;
     Key key{};

@@ -184,7 +184,7 @@ Result PersistentStore::prepare(uint64_t network, uint64_t receiver, uint64_t no
 Result PersistentStore::activate(uint64_t node, uint64_t generation) {
     if (!healthy_) return Result::StorageError;
     const int index = find(node, generation);
-    if (index < 0) return Result::Invalid;
+    if (index < 0) return Result::NotFound;
     const auto& old = state_.entries[size_t(index)];
     if (old.state == Enrollment::Active) return Result::Ok;
     if (old.state != Enrollment::Prepared) return Result::Conflict;
@@ -197,7 +197,7 @@ Result PersistentStore::activate(uint64_t node, uint64_t generation) {
 Result PersistentStore::revoke(uint64_t node, uint64_t generation) {
     if (!healthy_) return Result::StorageError;
     const int index = find(node, generation);
-    if (index < 0) return Result::Invalid;
+    if (index < 0) return Result::NotFound;
     if (state_.entries[size_t(index)].state == Enrollment::Revoked) return Result::Ok;
     next_ = state_; next_.entries[size_t(index)].state = Enrollment::Revoked;
     return save() ? Result::Ok : Result::StorageError;
