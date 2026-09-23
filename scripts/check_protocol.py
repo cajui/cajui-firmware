@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,13 +30,16 @@ def main():
         else:
             environment.pop("CAJUI_COVERAGE", None)
         run(pio + ["test", "-e", "native"], env=environment)
+        run([sys.executable, "-m", "unittest", "discover", "-s", "tests_python", "-v"])
         if args.coverage:
             prefix = ["xcrun"] if shutil.which("xcrun") else []
             profile = str(folder / "merged.profdata")
             run(prefix + ["llvm-profdata", "merge", "-sparse", str(folder / "profile.profraw"),
                           "-o", profile])
             inputs = [".pio/build/native/program", f"-instr-profile={profile}",
-                      "lib/CajuiProtocol/src/cajui_protocol.cpp", "lib/CajuiProtocol/src/crypto.cpp"]
+                      "lib/CajuiProtocol/src/cajui_protocol.cpp", "lib/CajuiProtocol/src/crypto.cpp",
+                      "lib/CajuiStorage/src/cajui_storage.cpp",
+                      "lib/CajuiProvisioning/src/cajui_provisioning.cpp"]
             run(prefix + ["llvm-cov", "report"] + inputs)
             report = subprocess.check_output(prefix + ["llvm-cov", "export"] + inputs,
                                              cwd=ROOT, text=True)

@@ -6,23 +6,26 @@ Firmware foundations for a direct LoRa telemetry network: sensor nodes send read
 to a receiver, which acknowledges accepted samples and eventually forwards them to
 a server.
 
-**Experimental, pre-integration code.** This initial repository contains the shared
-C++11 protocol core and tests. It does not yet provide a deployable transmitter or
-receiver application. Persistent storage, USB provisioning, radio integration and
-server forwarding are not implemented. No production firmware binaries are released.
+**Experimental development code.** The shared protocol core, persistent storage and
+USB enrollment are implemented. Administration-only ESP32 images are available;
+they keep the radio in reset. Sensor/radio runtime and server forwarding are still
+pending. No production transmitter or receiver image is released.
 
 ## Implemented
 
-- A bounded binary DATA/ACK format with up to eight sensor metrics per sample.
-- AES-128-GCM using OpenSSL on the host and mbedTLS on ESP32.
-- Per-device binding, authenticated headers and acknowledgement correlation.
-- Duplicate/replay handling through an injected persistence contract.
-- Up to three attempts per pending sample, with explicit abandonment.
-- Unity unit tests, address/undefined-behavior sanitizers and coverage checks.
+- Bounded DATA/ACK frames with up to eight sensor metrics and AES-128-GCM.
+- Per-device credentials, replay/duplicate handling and bounded sender attempts.
+- Versioned snapshot storage with an ESP32 NVS adapter, durable counter reservation,
+  a 128-frame receiver queue and atomic queue/receipt updates before ACK.
+- Two-phase USB enrollment, resumable setup, key rotation and revocation.
+- A local Python tool with private recovery files and a software-restart check.
+- Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
-The persistence implementations in tests are in-memory doubles. The core requires
-an atomic, durable queue/receipt commit before acknowledging a new sample; this
-contract is not a claim that flash storage has already been implemented or tested.
+Host tests inject storage failures. The real adapter relies on NVS atomic blob
+replacement; arbitrary power-loss behavior and flash endurance still require field
+validation. The USB restart check does not establish radio communication.
+
+[USB administration](docs/provisioning.md) · [Persistent storage](docs/persistence.md)
 
 ## Run tests
 
@@ -45,9 +48,9 @@ For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
-Coverage gates apply to the two host implementation files: at least 95% line
+Coverage gates apply to the protocol, storage and command-handler host implementation files: at least 95% line
 coverage and 85% branch coverage. Coverage does not measure the ESP32 backend,
-radio behavior or durable storage. See [testing](docs/testing.md).
+radio behavior or the NVS backend itself. See [testing](docs/testing.md).
 
 Compile the same tests for ESP32 without uploading or executing them:
 
@@ -62,8 +65,13 @@ ESP32-S3; the protocol core does not depend on a radio driver.
 
 ```text
 lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
+lib/CajuiStorage/src/     Persistent state machine and NVS adapter
+lib/CajuiProvisioning/src/ Bounded USB command handler
+src/                     Radio-disabled ESP32 administration application
+tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner
-test/test_protocol/      Unity tests and persistence doubles
+test/test_protocol/      Unity tests and fault-injection storage doubles
+tests_python/            USB client and recovery-file tests
 docs/                    Protocol contract, testing and integration roadmap
 ```
 

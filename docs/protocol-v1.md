@@ -1,7 +1,7 @@
 # Direct LoRa protocol v1
 
-Draft implementation contract. The shared core is implemented; storage, provisioning
-and radio integrations described below are requirements for subsequent work. This
+Draft implementation contract. The shared core is implemented; storage and USB provisioning
+are implemented, while radio integration remains pending. This
 specification has not undergone an independent security audit.
 
 ## Scope
@@ -92,8 +92,7 @@ or a failed write, must prevent transmission. Restarting or waking from sleep
 must not reset counters while retaining a key. Block reservation may reduce flash
 wear only if the reservation high-water mark is durable before any counter in the
 block is used. Skipped counters are valid. New keys permit new counter state;
-restoring an old key with reset counters is forbidden. The physical adapter is
-not implemented yet.
+restoring an old key with reset counters is forbidden. The NVS adapter is implemented; physical power-loss validation remains pending.
 
 Retries reuse the identical serialized frame. Duplicate ACKs have identical bytes.
 Do not re-encrypt changed content with an existing counter. Adding variable ACK
@@ -123,8 +122,7 @@ continuity cannot be trusted. The real adapter must uphold these guarantees acro
 power loss. In-memory unit tests do not prove that behavior.
 
 An initial integration target is a bounded global queue of 128 DATA frames, without
-overwriting unforwarded samples. This capacity is proposed, not implemented in the
-core. Forwarding must use a stable identity including network, node, credential
+overwriting unforwarded samples. This capacity is implemented by the persistent store. Forwarding must use a stable identity including network, node, credential
 generation, sample counter, sensor and metric. Delete queued samples only after
 server acceptance. The server adapter is pending; avoid representing u64 IDs as
 JSON numbers in consumers that lose integer precision.
@@ -163,8 +161,8 @@ link are separate states.
 
 Partial setup must be resumable or replaced with fresh credentials consistently
 on both devices. Never offer a reset operation that erases counters while retaining
-the key. Serial commands, the provisioning tool, durable adapters and radio tests
-remain unimplemented. There are no over-the-air enrollment messages in v1.
+the key. Serial commands, the provisioning tool and NVS adapter are implemented; radio tests
+remain pending. See [USB enrollment](provisioning.md) and [storage](persistence.md). There are no over-the-air enrollment messages in v1.
 
 ## Validation and references
 

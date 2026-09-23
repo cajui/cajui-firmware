@@ -265,6 +265,8 @@ void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(plain, out, 16);
 }
 }
+void runStorageTests();
+void runProvisioningTests();
 int runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_roundtrip_multiple_metrics_and_zero);
@@ -282,6 +284,8 @@ int runTests() {
     RUN_TEST(test_untrusted_lengths_and_bytes_under_sanitizers);
     RUN_TEST(test_wire_header_is_portable_and_ack_direction_is_separate);
     RUN_TEST(test_nist_aes_gcm_known_answer_and_failure_wipes_output);
+    runStorageTests();
+    runProvisioningTests();
     return UNITY_END();
 }
 #ifdef ARDUINO
