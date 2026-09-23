@@ -19,7 +19,7 @@ ReadResult NvsBlob::read(uint8_t* out, size_t capacity, size_t& size) {
     return nvs_get_blob(handle_, "snapshot", out, &size) == ESP_OK ? ReadResult::Ok : ReadResult::Error;
 }
 bool NvsBlob::replace(const uint8_t* input, size_t size) {
-    return opened_ && size >= 46 && size <= SnapshotSize &&
+    return opened_ && size >= MinSnapshotSize && size <= SnapshotSize &&
            nvs_set_blob(handle_, "snapshot", input, size) == ESP_OK && nvs_commit(handle_) == ESP_OK;
 }
 }

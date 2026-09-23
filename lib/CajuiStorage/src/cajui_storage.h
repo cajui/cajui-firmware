@@ -3,7 +3,18 @@
 
 namespace cajui {
 constexpr size_t BindingCapacity = 16, QueueCapacity = 128;
-constexpr size_t SnapshotSize = 42 + BindingCapacity * 186 + QueueCapacity * 138 + 4;
+// Snapshot v1: header, one record per occupied enrollment and queued frame, then CRC32.
+// Header: magic 4, version 1, role 1, device 8, revision 8, network 8, receiver 8,
+// profile 2, queue count 1, enrollment count 1.
+constexpr size_t SnapshotHeaderSize = 4 + 1 + 1 + 8 + 8 + 8 + 8 + 2 + 1 + 1, ChecksumSize = 4;
+// State 1, node 8, generation 8, key, counter 8, receipt counter 8, frame size 2, frame.
+constexpr size_t EntryRecordSize = 1 + 8 + 8 + sizeof(Key) + 8 + 8 + 2 + MaxFrame;
+constexpr size_t QueueRecordSize = 1 + 2 + MaxFrame; // Entry index, frame size, frame.
+constexpr size_t MinSnapshotSize = SnapshotHeaderSize + ChecksumSize;
+constexpr size_t SnapshotSize =
+    MinSnapshotSize + BindingCapacity * EntryRecordSize + QueueCapacity * QueueRecordSize;
+// Stored snapshots depend on these sizes: changing MaxFrame requires a new snapshot version.
+static_assert(EntryRecordSize == 186 && QueueRecordSize == 138, "Snapshot v1 layout changed");
 enum class Role : uint8_t { Transmitter = 1, Receiver = 2 };
 enum class Enrollment : uint8_t { Empty = 0, Prepared = 1, Active = 2, Revoked = 3 };
 enum class ReadResult { Ok, Missing, Error };

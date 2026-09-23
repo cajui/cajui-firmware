@@ -29,6 +29,8 @@ struct Reader {
     }
     void block(uint8_t* dst, size_t size) { std::memcpy(dst, p, size); p += size; }
 };
+constexpr uint8_t SnapshotMagic[4] = {'C', 'J', 'S', 'T'};
+constexpr uint8_t SnapshotVersion = 1;
 bool nonzero(const Key& key) {
     for (auto byte : key) if (byte) return true;
     return false;
@@ -64,13 +66,14 @@ bool PersistentStore::mount() {
     size_t size = 0;
     const auto result = blob_.read(bytes_.data(), bytes_.size(), size);
     bytesSize_ = size;
+    // Reset in place: `next_ = State{}` may build a ~22 KB temporary on the 8 KB loop-task stack.
     next_.revision = next_.network = next_.receiver = 0;
     next_.profile = next_.count = 0;
     for (auto& e : next_.entries) e = Entry{};
     for (auto& q : next_.queue) q = Queued{};
     const Health loaded = result == ReadResult::Error ? Health::ReadError :
         result == ReadResult::Missing ? Health::Ready :
-        size < 46 || size > SnapshotSize ? Health::Corrupt : decode();
+        size < MinSnapshotSize || size > SnapshotSize ? Health::Corrupt : decode();
     if (loaded != Health::Ready) { health_ = loaded; return false; }
     state_ = next_; health_ = Health::Ready;
     return true;
@@ -78,17 +81,19 @@ bool PersistentStore::mount() {
 void PersistentStore::encode() {
     bytes_.fill(0);
     Writer w{bytes_.data()};
-    w.block(reinterpret_cast<const uint8_t*>("CJST"), 4); w.number(1, 1);
+    w.block(SnapshotMagic, sizeof(SnapshotMagic)); w.number(SnapshotVersion, 1);
     w.number(uint8_t(role_), 1); w.number(device_, 8); w.number(next_.revision, 8);
     w.number(next_.network, 8); w.number(next_.receiver, 8);
     w.number(next_.profile, 2); w.number(next_.count, 1); // count <= 128
+    // Slots are never freed, so occupied entries form a prefix; queued frames refer to
+    // them by index. Freeing a slot would require compacting both.
     size_t occupied = 0;
     for (const auto& e : next_.entries) if (e.state != Enrollment::Empty) ++occupied;
     w.number(occupied, 1);
     for (size_t i = 0; i < occupied; ++i) {
         const auto& e = next_.entries[i];
         w.number(uint8_t(e.state), 1); w.number(e.node, 8); w.number(e.generation, 8);
-        w.block(e.key.data(), 16); w.number(e.counter, 8); w.number(e.receipt.counter, 8);
+        w.block(e.key.data(), e.key.size()); w.number(e.counter, 8); w.number(e.receipt.counter, 8);
         w.number(e.receipt.last.size, 2); w.block(e.receipt.last.bytes.data(), MaxFrame);
     }
     for (size_t i = 0; i < next_.count; ++i) {
@@ -102,23 +107,25 @@ Health PersistentStore::decode() {
     Reader trailer{bytes_.data() + bytesSize_ - 4};
     if (trailer.number(4) != checksum(bytes_.data(), bytesSize_ - 4)) return Health::Corrupt;
     Reader r{bytes_.data()};
-    if (r.number(4) != 0x434a5354 || r.number(1) != 1) return Health::Format;
+    uint8_t magic[sizeof(SnapshotMagic)]{}; r.block(magic, sizeof(magic));
+    if (std::memcmp(magic, SnapshotMagic, sizeof(magic)) || r.number(1) != SnapshotVersion) return Health::Format;
     if (r.number(1) != uint8_t(role_)) return Health::Role;
     if (r.number(8) != device_) return Health::Device;
     next_.revision = r.number(8); next_.network = r.number(8); next_.receiver = r.number(8);
     next_.profile = uint16_t(r.number(2)); next_.count = uint16_t(r.number(1));
     const size_t entryCount = size_t(r.number(1));
     if (!entryCount || entryCount > BindingCapacity ||
-        bytesSize_ != 46 + entryCount * 186 + next_.count * 138) return Health::Invalid;
+        bytesSize_ != MinSnapshotSize + entryCount * EntryRecordSize + next_.count * QueueRecordSize)
+        return Health::Invalid;
     if (!next_.revision || !next_.network || !next_.receiver || next_.profile != 1 ||
         next_.count > QueueCapacity || (role_ == Role::Transmitter && next_.count) ||
         (role_ == Role::Receiver && next_.receiver != device_)) return Health::Invalid;
     for (size_t i = 0; i < entryCount; ++i) {
         auto& e = next_.entries[i];
         e.state = Enrollment(r.number(1)); e.node = r.number(8); e.generation = r.number(8);
-        r.block(e.key.data(), 16); e.counter = r.number(8); e.receipt.counter = r.number(8);
+        r.block(e.key.data(), e.key.size()); e.counter = r.number(8); e.receipt.counter = r.number(8);
         e.receipt.last.size = size_t(r.number(2)); r.block(e.receipt.last.bytes.data(), MaxFrame);
-        if (uint8_t(e.state) > 3 || e.receipt.last.size > MaxFrame) return Health::Invalid;
+        if (uint8_t(e.state) > uint8_t(Enrollment::Revoked) || e.receipt.last.size > MaxFrame) return Health::Invalid;
         if (e.state == Enrollment::Empty) return Health::Invalid;
         if (!e.node || !e.generation || !nonzero(e.key) || e.node == next_.receiver ||
             (role_ == Role::Transmitter && e.node != device_) ||
