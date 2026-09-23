@@ -5,6 +5,9 @@
 namespace cajui {
 class NvsBlob final : public AtomicBlob {
 public:
+    NvsBlob() = default;
+    NvsBlob(const NvsBlob&) = delete; // Owns the NVS handle closed by the destructor.
+    NvsBlob& operator=(const NvsBlob&) = delete;
     ~NvsBlob() override;
     bool begin();
     ReadResult read(uint8_t*, size_t capacity, size_t& size) override;
