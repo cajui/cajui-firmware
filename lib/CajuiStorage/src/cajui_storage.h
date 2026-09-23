@@ -22,6 +22,11 @@ struct QueuedSample {
 class PersistentStore final : public CounterStore, public Journal {
 public:
     PersistentStore(AtomicBlob&, Role, uint64_t device);
+    // One owner per backing snapshot. Duplicating cached counters can reuse GCM nonces.
+    PersistentStore(const PersistentStore&) = delete;
+    PersistentStore& operator=(const PersistentStore&) = delete;
+    PersistentStore(PersistentStore&&) = delete;
+    PersistentStore& operator=(PersistentStore&&) = delete;
     bool mount();
     bool healthy() const { return health_ == Health::Ready; }
     Health health() const { return health_; }

@@ -49,6 +49,14 @@ this class is not a multi-task concurrent store. It owns scratch buffers to avoi
 large temporary allocations on the MCU task stack. The expected-counter check detects
 stale commits, but is not a substitute for synchronizing multiple tasks.
 
+`PersistentStore` is neither copyable nor movable: copying its cached state could
+reserve the same counter twice under one key. There must be exactly one live store
+owner per backing snapshot, including across separate adapter handles to the same
+NVS namespace/key. Do not construct a second store for that snapshot while the first
+is in use. Recreate and mount it only after the previous owner and its users have
+stopped; pass references to the existing owner when sharing access. This ownership
+contract is not an inter-process lock.
+
 ## Partition layout
 
 `partitions.csv` reserves 256 KiB for the dedicated NVS partition at `0x310000`,

@@ -1,9 +1,15 @@
 #include <unity.h>
+#include <type_traits>
 #include "storage_support.h"
 #include "assertions.h"
 using namespace cajui;
 using namespace fixtures;
 namespace {
+// Compile-time regressions: duplicating a store's cached reservation state is unsafe.
+static_assert(!std::is_copy_constructible<PersistentStore>::value, "Store must not be copied");
+static_assert(!std::is_copy_assignable<PersistentStore>::value, "Store must not be copy-assigned");
+static_assert(!std::is_move_constructible<PersistentStore>::value, "Store must not be moved");
+static_assert(!std::is_move_assignable<PersistentStore>::value, "Store must not be move-assigned");
 #define EXPECT_HEALTH(expected, store) TEST_ASSERT_EQUAL_INT(int(expected), int((store).health()))
 void test_durable_enrollment_and_counter_restart() {
     MemoryBlob blob;
