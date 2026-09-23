@@ -35,8 +35,9 @@ contracts and link here.
   samples when its 128-frame durable queue is full; nothing silently drains it.
 - Physical validation is limited: a manual bench exchange achieved durable acceptance
   and authenticated ACKs on the first attempt, including sensor-error telemetry followed
-  by valid climate readings on a subsequent boot. The queue survived that restart.
-  IRQ timing, loss/interference, sleep cadence and power use need further measurement. CI only
+  by valid climate readings on a subsequent boot. The queue survived that restart;
+  one automatic five-minute wake also delivered valid readings and received an ACK.
+  IRQ timing, loss/interference, sustained cadence and power use need measurement. CI only
   compiles the ESP32 targets; USB enrollment alone does not validate RF.
 - Arbitrary power-loss behavior and flash endurance of the NVS adapter. Host tests inject
   storage failures; the adapter relies on NVS atomic blob replacement.
