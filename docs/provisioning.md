@@ -101,7 +101,9 @@ key. HELLO fields: device, role (`tx`/`rx`), health (`ready`/`error`), network,
 receiver, profile, queue count in decimal, ephemeral boot ID (8 hex digits). A boot
 ID is diagnostic, not an authentication token or GCM nonce. INFO returns enrollment
 state (prepared=1, active=2, revoked=3) and last reserved counter (16 hex digits).
-RESERVE is an administrative persistence probe, not a radio-send operation.
+RESERVE is an administrative persistence probe, not a radio-send operation. While
+storage is unhealthy, well-formed commands other than HELLO and REBOOT return
+`STORAGE`; REBOOT stays available because restarting remounts the store.
 
 Profile `0001` is the initial direct-LoRa profile identifier; radio integration and
 its field/regulatory validation remain pending. No over-the-air enrollment, remote

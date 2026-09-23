@@ -55,9 +55,19 @@ void test_usb_revocation_storage_errors_and_no_secret_readback() {
     char out[ReplyCapacity]{}; admin.execute("CJ1 HELLO", 9, out, sizeof(out));
     TEST_ASSERT_NOT_NULL(std::strstr(out, "tx error")); TEST_ASSERT_NULL(std::strstr(out, "0101010101"));
 }
+void test_usb_reboot_remains_available_after_storage_failure() {
+    MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
+    Provisioning admin(*store); blob.failAfter = true;
+    command(admin, "CJ1 REVOKE 0000000000000002 0000000000000002 000000000000000a", "CJ1 ERR STORAGE");
+    command(admin, "CJ1 INFO 0000000000000002 0000000000000002 000000000000000a", "CJ1 ERR STORAGE");
+    command(admin, "CJ1 REBOOT 0000000000000003", "CJ1 ERR INVALID"); TEST_ASSERT_FALSE(admin.restartRequested());
+    command(admin, "CJ1 REBOOT 0000000000000002", "CJ1 OK REBOOT"); TEST_ASSERT_TRUE(admin.restartRequested());
+    store.reset(); store = mounted(blob); TEST_ASSERT_TRUE(store->healthy());
+}
 }
 void runProvisioningTests() {
     RUN_TEST(test_usb_enrollment_resumes_without_resetting_counter);
     RUN_TEST(test_usb_parser_rejects_untrusted_input_without_echo);
     RUN_TEST(test_usb_revocation_storage_errors_and_no_secret_readback);
+    RUN_TEST(test_usb_reboot_remains_available_after_storage_failure);
 }

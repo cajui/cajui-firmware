@@ -61,10 +61,11 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     }
     uint64_t device = 0;
     if (count < 3 || !hex(words[2], 16, device) || device != store_.device()) return true;
-    if (!store_.healthy()) { std::snprintf(reply, capacity, "CJ1 ERR STORAGE"); return true; }
+    // An unhealthy store stays latched until remounted, and only a restart remounts it.
     if (!std::strcmp(command, "REBOOT") && count == 3) {
         restart_ = true; std::snprintf(reply, capacity, "CJ1 OK REBOOT"); return true;
     }
+    if (!store_.healthy()) { std::snprintf(reply, capacity, "CJ1 ERR STORAGE"); return true; }
     Result result = Result::Invalid;
     if (!std::strcmp(command, "PREPARE") && count == 9) {
         uint64_t network = 0, receiver = 0, node = 0, generation = 0, profile = 0; Key key{};
