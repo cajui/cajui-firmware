@@ -49,7 +49,7 @@ void test_usb_revocation_storage_errors_and_no_secret_readback() {
     command(admin, prepare, "CJ1 OK PREPARE");
     command(admin, "CJ1 REVOKE 0000000000000002 0000000000000002 000000000000000a", "CJ1 OK REVOKE");
     command(admin, prepare, "CJ1 ERR CONFLICT");
-    command(admin, "CJ1 RESERVE 0000000000000002 0000000000000002 000000000000000a", "CJ1 ERR STORAGE");
+    command(admin, "CJ1 RESERVE 0000000000000002 0000000000000002 000000000000000a", "CJ1 ERR CONFLICT");
     blob.failRead = true; TEST_ASSERT_FALSE(store->mount());
     command(admin, prepare, "CJ1 ERR STORAGE");
     char out[ReplyCapacity]{}; admin.execute("CJ1 HELLO", 9, out, sizeof(out));
@@ -72,6 +72,17 @@ void test_usb_unknown_enrollment_is_not_found() {
     command(admin, "CJ1 REVOKE 0000000000000002 0000000000000002 000000000000000b", "CJ1 ERR NOT_FOUND");
     TEST_ASSERT_EQUAL_UINT32(1, blob.writes);
 }
+void test_usb_reserve_reports_why_it_was_refused() {
+    const char* reserve = "CJ1 RESERVE 0000000000000002 0000000000000002 000000000000000a";
+    MemoryBlob blob; auto store = mounted(blob); Provisioning admin(*store);
+    command(admin, reserve, "CJ1 ERR NOT_FOUND");
+    command(admin, prepare, "CJ1 OK PREPARE"); command(admin, reserve, "CJ1 ERR CONFLICT");
+    command(admin, "CJ1 ACTIVATE 0000000000000002 0000000000000002 000000000000000a", "CJ1 OK ACTIVATE");
+    blob.failBefore = true; command(admin, reserve, "CJ1 ERR STORAGE");
+    MemoryBlob rxBlob; auto rx = mounted(rxBlob, Role::Receiver); TEST_ASSERT_TRUE(enroll(*rx));
+    Provisioning receiver(*rx);
+    command(receiver, "CJ1 RESERVE 0000000000000001 0000000000000002 000000000000000a", "CJ1 ERR INVALID");
+}
 }
 void runProvisioningTests() {
     RUN_TEST(test_usb_enrollment_resumes_without_resetting_counter);
@@ -79,4 +90,5 @@ void runProvisioningTests() {
     RUN_TEST(test_usb_revocation_storage_errors_and_no_secret_readback);
     RUN_TEST(test_usb_reboot_remains_available_after_storage_failure);
     RUN_TEST(test_usb_unknown_enrollment_is_not_found);
+    RUN_TEST(test_usb_reserve_reports_why_it_was_refused);
 }

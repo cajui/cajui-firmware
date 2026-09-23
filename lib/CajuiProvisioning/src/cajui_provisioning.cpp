@@ -87,12 +87,13 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
             return true;
         } else if (!std::strcmp(command, "RESERVE")) {
             EnrollmentInfo info{}; Binding binding{}; uint64_t counter = 0;
-            if (store_.info(node, generation, info) && info.state == Enrollment::Active &&
-                store_.binding(node, binding) && store_.reserve(binding, counter)) {
+            if (store_.role() != Role::Transmitter) result = Result::Invalid;
+            else if (!store_.info(node, generation, info)) result = Result::NotFound;
+            else if (info.state != Enrollment::Active) result = Result::Conflict;
+            else if (store_.binding(node, binding) && store_.reserve(binding, counter)) {
                 std::snprintf(reply, capacity, "CJ1 OK RESERVE %016llx", static_cast<unsigned long long>(counter));
                 return true;
-            }
-            result = Result::StorageError;
+            } else result = Result::StorageError;
         }
     }
     if (result == Result::Ok) std::snprintf(reply, capacity, "CJ1 OK %s", command);

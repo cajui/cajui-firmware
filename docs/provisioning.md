@@ -104,7 +104,9 @@ state (prepared=1, active=2, revoked=3) and last reserved counter (16 hex digits
 RESERVE is an administrative persistence probe, not a radio-send operation. While
 storage is unhealthy, well-formed commands other than HELLO and REBOOT return
 `STORAGE`; REBOOT stays available because restarting remounts the store. INFO,
-ACTIVATE and REVOKE return `NOT_FOUND` for an unknown node/generation pair.
+ACTIVATE, REVOKE and RESERVE return `NOT_FOUND` for an unknown node/generation
+pair. RESERVE returns `INVALID` on a receiver and `CONFLICT` for a prepared or
+revoked generation.
 
 Profile `0001` is the initial direct-LoRa profile identifier; radio integration and
 its field/regulatory validation remain pending. No over-the-air enrollment, remote
