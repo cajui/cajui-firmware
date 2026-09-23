@@ -14,3 +14,9 @@ or physical extraction of unprotected device storage.
 
 Please use GitHub private vulnerability reporting through the repository Security
 tab. Do not post credentials or exploitable vulnerability details in public issues.
+
+The send controller bounds each ACK window and the complete cycle, including busy
+channel time. Invalid packets cannot extend those deadlines. Driver/clock/jitter
+adapters remain a trusted integration boundary; the current tests use fakes.
+A failed radio shutdown blocks another cycle and requires explicit driver recovery.
+See [adapter contracts](docs/runtime.md) before integrating hardware.

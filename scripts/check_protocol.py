@@ -37,7 +37,8 @@ def main():
             run(prefix + ["llvm-profdata", "merge", "-sparse", str(folder / "profile.profraw"),
                           "-o", profile])
             inputs = [".pio/build/native/program", f"-instr-profile={profile}",
-                      "lib/CajuiProtocol/src/cajui_protocol.cpp", "lib/CajuiProtocol/src/crypto.cpp",
+                      "lib/CajuiProtocol/src/codec.cpp", "lib/CajuiProtocol/src/delivery.cpp",
+                      "lib/CajuiRuntime/src/cajui_runtime.cpp", "lib/CajuiProtocol/src/crypto.cpp",
                       "lib/CajuiStorage/src/cajui_storage.cpp",
                       "lib/CajuiProvisioning/src/cajui_provisioning.cpp"]
             run(prefix + ["llvm-cov", "report"] + inputs)

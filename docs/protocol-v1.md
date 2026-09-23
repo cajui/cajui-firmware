@@ -135,12 +135,14 @@ while one is pending returns a conflict. Exhausting attempts does not imply
 success or silently discard the frame. The caller may explicitly `abandon` after
 the final ACK window closes and account for an unconfirmed sample.
 
-Initial scheduling parameters to implement and measure: channel activity detection
-before transmission, 0–500 ms initial jitter, 1,500 ms ACK timeout measured from the
+The host-tested `SendController` implements the initial scheduling policy: channel
+activity detection before transmission, 0–500 ms initial jitter, 1,500 ms ACK timeout measured from the
 end of transmission, 100–500 ms backoff after the first failure, and 200–1,000 ms
 after the second. A 10-second overall send-cycle deadline must include busy-channel
-waiting. These timers are not implemented in this core. Adjust them against radio
-airtime and durable storage latency when selecting a radio profile. Activity
+waiting. Scheduling is implemented over injected radio, clock and jitter interfaces;
+the hardware adapter is still pending. CAD/TX watchdogs and adapter contracts are
+described in [runtime](runtime.md). Adjust timers against radio airtime and durable
+storage latency when selecting a radio profile. Activity
 detection reduces collisions but cannot eliminate hidden nodes or interference.
 
 After a cycle is exhausted, the initial integration policy is to count the sample

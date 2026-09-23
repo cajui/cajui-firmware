@@ -6,10 +6,10 @@ Firmware foundations for a direct LoRa telemetry network: sensor nodes send read
 to a receiver, which acknowledges accepted samples and eventually forwards them to
 a server.
 
-**Experimental development code.** The shared protocol core, persistent storage and
-USB enrollment are implemented. Administration-only ESP32 images are available;
-they keep the radio in reset. Sensor/radio runtime and server forwarding are still
-pending. No production transmitter or receiver image is released.
+**Experimental development code.** The shared protocol core, persistent storage,
+USB enrollment and a host-tested delivery scheduler are implemented.
+Administration-only ESP32 images are available; they keep the radio in reset.
+Hardware integration of sensors/radio and server forwarding are still pending. No production transmitter or receiver image is released.
 
 ## Implemented
 
@@ -19,13 +19,16 @@ pending. No production transmitter or receiver image is released.
   a 128-frame receiver queue and atomic queue/receipt updates before ACK.
 - Two-phase USB enrollment, resumable setup, key rotation and revocation.
 - A local Python tool with private recovery files and a software-restart check.
+- A nonblocking send controller with injected radio, clock and jitter, bounded
+  channel waits, ACK deadlines and cancellation. The hardware adapter is pending.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 Host tests inject storage failures. The real adapter relies on NVS atomic blob
 replacement; arbitrary power-loss behavior and flash endurance still require field
 validation. The USB restart check does not establish radio communication.
 
-[USB administration](docs/provisioning.md) · [Persistent storage](docs/persistence.md)
+[Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
+[Persistent storage](docs/persistence.md)
 
 ## Run tests
 
@@ -48,8 +51,8 @@ For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
-Coverage gates apply to the protocol, storage and command-handler host implementation files: at least 95% line
-coverage and 85% branch coverage. Coverage does not measure the ESP32 backend,
+Coverage gates apply to the codec, delivery, runtime, storage and command-handler
+host implementation files: at least 95% line coverage and 85% branch coverage. Coverage does not measure the ESP32 backend,
 radio behavior or the NVS backend itself. See [testing](docs/testing.md).
 
 Compile the same tests for ESP32 without uploading or executing them:
@@ -65,6 +68,7 @@ ESP32-S3; the protocol core does not depend on a radio driver.
 
 ```text
 lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
+lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
 lib/CajuiStorage/src/     Persistent state machine and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
 src/                     Radio-disabled ESP32 administration application

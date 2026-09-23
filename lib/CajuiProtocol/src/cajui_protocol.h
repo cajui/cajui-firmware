@@ -76,7 +76,7 @@ public:
     Result begin(const Binding&, const Data&, CounterStore&);
     const Frame* nextAttempt(); // At most three transmissions; does not drive the radio.
     Result acknowledge(const Frame&);
-    void abandon(); // Only after closing the final ACK window; the caller accounts for loss.
+    void abandon(); // Stop radio/close the ACK window first; account for unconfirmed loss.
     bool delivered() const { return delivered_; }
     uint8_t attempts() const { return attempts_; }
     static constexpr uint8_t MaxAttempts = 3;
