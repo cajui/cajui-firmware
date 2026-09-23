@@ -4,7 +4,8 @@
 namespace cajui {
 namespace {
 // Word counts include "CJ1", the command and the device ID.
-constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWords = 9;
+constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWords = 9,
+                 UplinkSetWords = 5;
 constexpr size_t IdDigits = 16, ProfileDigits = 4;
 constexpr char FirstPrintable = ' ', LastPrintable = '~';
 bool hex(const char* text, size_t length, uint64_t& result) {
@@ -139,6 +140,75 @@ void reserve(PersistentStore& store, uint64_t node, uint64_t generation, char* r
     }
     respond(result, "RESERVE", reply, capacity);
 }
+// Decodes a lower-case hex value of 1..capacity bytes without NUL bytes into a C string.
+bool hexText(const char* text, char* output, size_t capacity) {
+    const size_t length = std::strlen(text);
+    if (!length || length % 2 || length / 2 > capacity) return false;
+    for (size_t i = 0; i < length / 2; ++i) {
+        const char byte[3] = {text[i * 2], text[i * 2 + 1], 0};
+        uint64_t value = 0;
+        if (!hex(byte, 2, value) || !value) return false;
+        output[i] = char(value);
+    }
+    output[length / 2] = 0;
+    return true;
+}
+bool setField(UplinkConfig& pending, const char* field, const char* value) {
+    struct Target {
+        const char* name;
+        char* output;
+        size_t capacity;
+    };
+    const Target targets[] = {{"ssid", pending.ssid, SsidCapacity},
+                              {"wifipass", pending.wifiPassword, WifiPasswordCapacity},
+                              {"host", pending.host, HostCapacity},
+                              {"user", pending.username, UsernameCapacity},
+                              {"pass", pending.password, MqttPasswordCapacity}};
+    for (const auto& target : targets)
+        if (!std::strcmp(field, target.name)) return hexText(value, target.output, target.capacity);
+    if (std::strcmp(field, "port") != 0) return false;
+    constexpr size_t PortDigits = 5;
+    constexpr unsigned long MaxPort = 65535;
+    constexpr unsigned long Decimal = 10;
+    char digits[PortDigits + 1]{};
+    if (!hexText(value, digits, PortDigits)) return false;
+    unsigned long port = 0;
+    for (const char* c = digits; *c; ++c) {
+        if (*c < '0' || *c > '9') return false;
+        port = port * Decimal + unsigned(*c - '0');
+    }
+    if (!port || port > MaxPort) return false;
+    pending.port = uint16_t(port);
+    return true;
+}
+}
+void Provisioning::uplink(const char* command, size_t count, char* const* words, char* reply,
+                          size_t capacity) {
+    if (!uplink_ || store_.role() != Role::Receiver) return; // Reply stays CJ1 ERR INVALID.
+    if (!std::strcmp(command, "UPLINKSET") && count == UplinkSetWords) {
+        respond(setField(pending_, words[3], words[4]) ? Result::Ok : Result::Invalid, command,
+                reply, capacity);
+        return;
+    }
+    if (count != RebootWords) return;
+    if (!std::strcmp(command, "UPLINKSAVE")) {
+        const Result result = !validUplink(pending_)           ? Result::Invalid
+                              : saveUplink(*uplink_, pending_) ? Result::Ok
+                                                               : Result::StorageError;
+        if (result == Result::Ok) wipe(pending_);
+        respond(result, command, reply, capacity);
+    } else if (!std::strcmp(command, "UPLINKINFO")) {
+        UplinkConfig stored{};
+        const auto loaded = loadUplink(*uplink_, stored);
+        if (loaded == ReadResult::Ok)
+            std::snprintf(reply, capacity, "CJ1 OK UPLINKINFO 1 %s %u %s", stored.host,
+                          unsigned(stored.port), stored.username);
+        else if (loaded == ReadResult::Missing)
+            std::snprintf(reply, capacity, "CJ1 OK UPLINKINFO 0");
+        else
+            respond(Result::StorageError, command, reply, capacity);
+        wipe(stored);
+    }
 }
 bool Provisioning::execute(const char* input, size_t length, char* reply, size_t capacity) {
     if (!reply || capacity < ReplyCapacity) return false;
@@ -163,6 +233,10 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     if (!std::strcmp(command, "REBOOT") && count == RebootWords) {
         restart_ = true;
         std::snprintf(reply, capacity, "CJ1 OK REBOOT");
+        return true;
+    }
+    if (!std::strncmp(command, "UPLINK", std::strlen("UPLINK"))) {
+        uplink(command, count, words, reply, capacity);
         return true;
     }
     if (!store_.healthy()) {

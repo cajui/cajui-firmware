@@ -8,6 +8,10 @@
 #include "cajui_nvs.h"
 #include "cajui_application.h"
 #include "board/sx1262_radio.h"
+#if CAJUI_RUNTIME_ROLE == 2
+#include "cajui_uplink.h"
+#include "board/mqtt_uplink.h"
+#endif
 
 namespace {
 #if CAJUI_RUNTIME_ROLE == 1
@@ -35,6 +39,47 @@ cajui::SendController sender(radio, clockSource, jitter);
 #if CAJUI_RUNTIME_ROLE == 2
 cajui::ReceiverController* receiver = nullptr;
 cajui::PersistentStore* receiverStore = nullptr;
+cajui::NvsBlob uplinkBlob("uplink", cajui::MinUplinkSize, cajui::UplinkBlobCapacity);
+board::MqttUplink uplink;
+cajui::Forwarder* forwarder = nullptr;
+uint32_t reportedForwards = 0, reportedRetries = 0;
+bool reportedOnline = false;
+// Forwarding is optional: without a stored configuration the receiver keeps queueing.
+void startForwarding(cajui::PersistentStore& store) {
+    static cajui::UplinkConfig settings;
+    const auto loaded =
+        uplinkBlob.begin() ? cajui::loadUplink(uplinkBlob, settings) : cajui::ReadResult::Error;
+    if (loaded != cajui::ReadResult::Ok) {
+        Serial.println(loaded == cajui::ReadResult::Missing ? "CJAPP UPLINK disabled"
+                                                            : "CJAPP UPLINK config_error");
+        return;
+    }
+    if (uplink.begin(settings, store.device())) {
+        static cajui::Forwarder instance(uplink, clockSource, store, settings.username);
+        forwarder = &instance;
+        Serial.printf("CJAPP UPLINK started host=%s port=%u source=%s\n", settings.host,
+                      unsigned(settings.port), settings.username);
+    } else {
+        Serial.println("CJAPP UPLINK start_failed");
+    }
+    cajui::wipe(settings);
+}
+void reportForwarding() {
+    if (uplink.connected() != reportedOnline) {
+        reportedOnline = uplink.connected();
+        Serial.printf("CJAPP UPLINK %s wifi=%u\n", reportedOnline ? "online" : "offline",
+                      unsigned(uplink.wifiConnected()));
+    }
+    if (forwarder->forwarded() != reportedForwards) {
+        reportedForwards = forwarder->forwarded();
+        Serial.printf("CJAPP FORWARD puback total=%u queued=%u\n", unsigned(reportedForwards),
+                      unsigned(receiverStore->queued()));
+    }
+    if (forwarder->retries() != reportedRetries) {
+        reportedRetries = forwarder->retries();
+        Serial.printf("CJAPP FORWARD retry total=%u\n", unsigned(reportedRetries));
+    }
+}
 #endif
 uint32_t bootAt = 0;
 bool running = false;
@@ -136,6 +181,7 @@ void setup() {
         return;
     }
     Serial.printf("CJAPP RECEIVER queued=%u\n", unsigned(store.queued()));
+    startForwarding(store);
 #endif
     running = true;
 }
@@ -156,7 +202,14 @@ void loop() {
             receiver->state() == cajui::ReceiverState::Acknowledging)
             Serial.printf("CJAPP ACCEPT result=%u queued=%u\n", unsigned(receiver->lastResult()),
                           unsigned(receiverStore->queued()));
-        if (receiver->state() == cajui::ReceiverState::Failed) halt("RECEIVER");
+        if (receiver->state() == cajui::ReceiverState::Failed) {
+            halt("RECEIVER");
+        } else if (forwarder) {
+            // Only while listening: forwarding writes flash and must not delay an ACK.
+            forwarder->poll(receiver->state() == cajui::ReceiverState::Listening);
+            reportForwarding();
+            if (forwarder->state() == cajui::ForwardState::Failed) halt("FORWARDER");
+        }
 #endif
     }
     delay(1);

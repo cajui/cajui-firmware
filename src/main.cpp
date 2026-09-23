@@ -12,6 +12,7 @@ namespace {
 // SX1262 wiring on the Heltec WiFi LoRa 32 V3. No radio driver is linked in this image.
 constexpr uint8_t RadioReset = 12, RadioChipSelect = 8;
 cajui::NvsBlob blob;
+cajui::NvsBlob uplinkBlob("uplink", cajui::MinUplinkSize, cajui::UplinkBlobCapacity);
 uint64_t deviceId() {
     uint8_t mac[6]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;
@@ -37,7 +38,9 @@ void setup() {
     Serial.begin(115200);
     // Static, not on the 8 KB loop-task stack: the store holds over 60 KB of state.
     static cajui::PersistentStore persistent(blob, cajui::Role(CAJUI_ADMIN_ROLE), deviceId());
-    static cajui::Provisioning provisioning(persistent, esp_random());
+    const bool receiver = CAJUI_ADMIN_ROLE == int(cajui::Role::Receiver);
+    static cajui::Provisioning provisioning(persistent, esp_random(),
+                                            receiver && uplinkBlob.begin() ? &uplinkBlob : nullptr);
     admin = &provisioning;
     if (blob.begin()) persistent.mount();
 }
@@ -51,7 +54,7 @@ void loop() {
                 admin->execute(line, used, reply, sizeof(reply));
                 Serial.println(reply);
             }
-            // PREPARE carries a key, and this buffer outlives the command.
+            // PREPARE and UPLINKSET carry secrets, and this buffer outlives the command.
             std::memset(line, 0, sizeof(line));
             used = 0;
             overflow = false;

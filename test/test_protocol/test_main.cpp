@@ -402,6 +402,7 @@ void runApplicationTests();
 void runRuntimeTests();
 void runStorageTests();
 void runProvisioningTests();
+void runUplinkTests();
 int runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_roundtrip_multiple_metrics_and_zero);
@@ -424,6 +425,7 @@ int runTests() {
     runRuntimeTests();
     runStorageTests();
     runProvisioningTests();
+    runUplinkTests();
     return UNITY_END();
 }
 #ifdef ARDUINO
