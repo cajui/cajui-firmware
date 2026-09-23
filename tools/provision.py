@@ -15,6 +15,10 @@ import tempfile
 import time
 
 
+# Storage health reported by HELLO when it is not "ready"; see docs/provisioning.md.
+STORAGE_FAILURES = {"unmounted", "identity", "read", "corrupt", "format", "role", "device", "invalid", "write"}
+
+
 class ProvisioningError(Exception):
     pass
 
@@ -59,8 +63,11 @@ class SerialLink:
 
 def hello(link):
     fields = link.request("HELLO")
-    if len(fields) != 8 or fields[1] not in {"tx", "rx"} or fields[2] != "ready":
-        raise ProvisioningError("Device is unavailable or its storage failed validation")
+    if len(fields) != 8 or fields[1] not in {"tx", "rx"}:
+        raise ProvisioningError("Unexpected device status")
+    if fields[2] != "ready":
+        reason = fields[2] if fields[2] in STORAGE_FAILURES else "unknown"
+        raise ProvisioningError("Device storage is unavailable: " + reason)
     if not fields[6].isascii() or not fields[6].isdigit() or not 0 <= int(fields[6]) <= 128:
         raise ProvisioningError("Invalid queue status")
     return {"device": identifier(fields[0]), "role": fields[1], "network": identifier(fields[3]),

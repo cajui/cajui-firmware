@@ -23,6 +23,15 @@ public:
         return !failAfter;
     }
 };
+inline void repairChecksum(MemoryBlob& blob) {
+    uint32_t crc = UINT32_MAX;
+    for (size_t i = 0; i < blob.size - 4; ++i) {
+        crc ^= blob.bytes[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
+    }
+    crc = ~crc;
+    for (size_t i = 0; i < 4; ++i) blob.bytes[blob.size - 4 + i] = uint8_t(crc >> ((3 - i) * 8));
+}
 inline Key key(uint8_t value = 1) { Key k{}; k.fill(value); return k; }
 inline std::unique_ptr<PersistentStore> mounted(MemoryBlob& blob, Role role = Role::Transmitter) {
     std::unique_ptr<PersistentStore> store(new PersistentStore(blob, role, role == Role::Transmitter ? 2 : 1));

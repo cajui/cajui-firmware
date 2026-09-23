@@ -55,7 +55,7 @@ void test_usb_revocation_storage_errors_and_no_secret_readback() {
     blob.failRead = true; TEST_ASSERT_FALSE(store->mount());
     COMMAND(admin, prepare, "CJ1 ERR STORAGE");
     char out[ReplyCapacity]{}; admin.execute("CJ1 HELLO", 9, out, sizeof(out));
-    TEST_ASSERT_NOT_NULL(std::strstr(out, "tx error")); TEST_ASSERT_NULL(std::strstr(out, "0101010101"));
+    TEST_ASSERT_NOT_NULL(std::strstr(out, "tx read")); TEST_ASSERT_NULL(std::strstr(out, "0101010101"));
 }
 void test_usb_reboot_remains_available_after_storage_failure() {
     MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
@@ -85,6 +85,36 @@ void test_usb_reserve_reports_why_it_was_refused() {
     Provisioning receiver(*rx);
     COMMAND(receiver, "CJ1 RESERVE 0000000000000001 0000000000000002 000000000000000a", "CJ1 ERR INVALID");
 }
+std::string health(PersistentStore& store) {
+    Provisioning admin(store); char out[ReplyCapacity]{};
+    admin.execute("CJ1 HELLO", 9, out, sizeof(out));
+    const std::string reply(out); // CJ1 OK HELLO <device> <role> <health> ...
+    size_t start = 0;
+    for (int field = 0; field < 5; ++field) start = reply.find(' ', start) + 1;
+    return reply.substr(start, reply.find(' ', start) - start);
+}
+void test_usb_hello_reports_why_storage_is_unavailable() {
+    MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
+    TEST_ASSERT_EQUAL_STRING("ready", health(*store).c_str()); const auto good = blob.bytes;
+    std::unique_ptr<PersistentStore> other(new PersistentStore(blob, Role::Transmitter, 2));
+    TEST_ASSERT_EQUAL_STRING("unmounted", health(*other).c_str());
+    other.reset(new PersistentStore(blob, Role::Transmitter, 0)); other->mount();
+    TEST_ASSERT_EQUAL_STRING("identity", health(*other).c_str());
+    other.reset(new PersistentStore(blob, Role::Transmitter, 3)); other->mount();
+    TEST_ASSERT_EQUAL_STRING("device", health(*other).c_str());
+    other = mounted(blob, Role::Receiver); TEST_ASSERT_EQUAL_STRING("role", health(*other).c_str());
+    blob.bytes[4] = 2; repairChecksum(blob); other = mounted(blob);
+    TEST_ASSERT_EQUAL_STRING("format", health(*other).c_str());
+    blob.bytes = good; blob.bytes[41] = 0; repairChecksum(blob); other = mounted(blob);
+    TEST_ASSERT_EQUAL_STRING("invalid", health(*other).c_str());
+    blob.bytes = good; blob.bytes[20] ^= 1; other = mounted(blob);
+    TEST_ASSERT_EQUAL_STRING("corrupt", health(*other).c_str());
+    blob.bytes = good; blob.failRead = true; other = mounted(blob);
+    TEST_ASSERT_EQUAL_STRING("read", health(*other).c_str());
+    blob.failRead = false; other = mounted(blob); blob.failAfter = true;
+    uint64_t counter = 0; TEST_ASSERT_FALSE(other->reserve(binding(), counter));
+    TEST_ASSERT_EQUAL_STRING("write", health(*other).c_str());
+}
 }
 void runProvisioningTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -94,4 +124,5 @@ void runProvisioningTests() {
     RUN_TEST(test_usb_reboot_remains_available_after_storage_failure);
     RUN_TEST(test_usb_unknown_enrollment_is_not_found);
     RUN_TEST(test_usb_reserve_reports_why_it_was_refused);
+    RUN_TEST(test_usb_hello_reports_why_storage_is_unavailable);
 }

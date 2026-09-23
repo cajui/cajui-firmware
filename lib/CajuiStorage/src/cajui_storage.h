@@ -7,6 +7,9 @@ constexpr size_t SnapshotSize = 42 + BindingCapacity * 186 + QueueCapacity * 138
 enum class Role : uint8_t { Transmitter = 1, Receiver = 2 };
 enum class Enrollment : uint8_t { Empty = 0, Prepared = 1, Active = 2, Revoked = 3 };
 enum class ReadResult { Ok, Missing, Error };
+// Why the store refuses work; Ready is the only usable state.
+enum class Health : uint8_t { Unmounted, Ready, Identity, ReadError, Corrupt, Format, Role, Device,
+                              Invalid, WriteError };
 class AtomicBlob {
 public:
     virtual ~AtomicBlob() = default;
@@ -27,7 +30,8 @@ class PersistentStore final : public CounterStore, public Journal {
 public:
     PersistentStore(AtomicBlob&, Role, uint64_t device);
     bool mount();
-    bool healthy() const { return healthy_; }
+    bool healthy() const { return health_ == Health::Ready; }
+    Health health() const { return health_; }
     uint64_t device() const { return device_; }
     Role role() const { return role_; }
     uint64_t network() const { return state_.network; }
@@ -62,7 +66,7 @@ private:
     AtomicBlob& blob_;
     Role role_;
     uint64_t device_;
-    bool healthy_ = false;
+    Health health_ = Health::Unmounted;
     // Scratch space is part of the object, never a large MCU task-stack allocation.
     State state_{}, next_{};
     std::array<uint8_t, SnapshotSize> bytes_{};
@@ -71,7 +75,7 @@ private:
     int authorized(const Binding&) const;
     Binding asBinding(const Entry&, uint64_t network) const;
     bool save();
-    bool decode();
+    Health decode();
     void encode();
 };
 } // namespace cajui

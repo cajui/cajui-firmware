@@ -34,6 +34,21 @@ const char* name(Result r) {
     default: return "INVALID";
     }
 }
+const char* name(Health h) {
+    switch (h) {
+    case Health::Ready: return "ready";
+    case Health::Unmounted: return "unmounted";
+    case Health::Identity: return "identity";
+    case Health::ReadError: return "read";
+    case Health::Corrupt: return "corrupt";
+    case Health::Format: return "format";
+    case Health::Role: return "role";
+    case Health::Device: return "device";
+    case Health::Invalid: return "invalid";
+    case Health::WriteError: return "write";
+    }
+    return "unknown";
+}
 }
 bool Provisioning::execute(const char* input, size_t length, char* reply, size_t capacity) {
     if (!reply || capacity < ReplyCapacity) return false;
@@ -55,7 +70,7 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     if (!std::strcmp(command, "HELLO") && count == 2) {
         std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx",
             static_cast<unsigned long long>(store_.device()),
-            store_.role() == Role::Transmitter ? "tx" : "rx", store_.healthy() ? "ready" : "error",
+            store_.role() == Role::Transmitter ? "tx" : "rx", name(store_.health()),
             static_cast<unsigned long long>(store_.network()),
             static_cast<unsigned long long>(store_.receiver()), unsigned(store_.profile()), unsigned(store_.queued()), static_cast<unsigned long>(boot_));
         return true;

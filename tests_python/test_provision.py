@@ -218,6 +218,17 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(provision.ProvisioningError):
             provision.hello(Reply())
 
+    def test_storage_failure_reason_is_reported(self):
+        class Reply:
+            def __init__(self, health):
+                self.health = health
+            def request(self, command):
+                return ["0" * 16, "rx", self.health, "0" * 16, "0" * 16, "0001", "0", "00000001"]
+        for health, reason in (("role", "role"), ("bogus", "unknown")):
+            with self.assertRaises(provision.ProvisioningError) as caught:
+                provision.hello(Reply(health))
+            self.assertEqual("Device storage is unavailable: " + reason, str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

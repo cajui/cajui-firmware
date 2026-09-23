@@ -48,7 +48,7 @@ int PersistentStore::find(uint64_t node, uint64_t generation) const {
     return -1;
 }
 int PersistentStore::authorized(const Binding& b) const {
-    if (!healthy_ || !b.active || b.network != state_.network) return -1;
+    if (!healthy() || !b.active || b.network != state_.network) return -1;
     for (size_t i = 0; i < BindingCapacity; ++i) {
         const auto& e = state_.entries[i];
         if (e.state == Enrollment::Active && e.node == b.node && e.key == b.key) return int(i);
@@ -56,8 +56,11 @@ int PersistentStore::authorized(const Binding& b) const {
     return -1;
 }
 bool PersistentStore::mount() {
-    healthy_ = false;
-    if (!device_ || (role_ != Role::Transmitter && role_ != Role::Receiver)) return false;
+    health_ = Health::Unmounted;
+    if (!device_ || (role_ != Role::Transmitter && role_ != Role::Receiver)) {
+        health_ = Health::Identity;
+        return false;
+    }
     size_t size = 0;
     const auto result = blob_.read(bytes_.data(), bytes_.size(), size);
     bytesSize_ = size;
@@ -65,9 +68,11 @@ bool PersistentStore::mount() {
     next_.profile = next_.count = 0;
     for (auto& e : next_.entries) e = Entry{};
     for (auto& q : next_.queue) q = Queued{};
-    if (result == ReadResult::Error || (result == ReadResult::Ok &&
-        (size < 46 || size > SnapshotSize || !decode()))) return false;
-    state_ = next_; healthy_ = true;
+    const Health loaded = result == ReadResult::Error ? Health::ReadError :
+        result == ReadResult::Missing ? Health::Ready :
+        size < 46 || size > SnapshotSize ? Health::Corrupt : decode();
+    if (loaded != Health::Ready) { health_ = loaded; return false; }
+    state_ = next_; health_ = Health::Ready;
     return true;
 }
 void PersistentStore::encode() {
@@ -93,63 +98,64 @@ void PersistentStore::encode() {
     bytesSize_ = size_t(w.p - bytes_.data()) + 4;
     w.number(checksum(bytes_.data(), bytesSize_ - 4), 4);
 }
-bool PersistentStore::decode() {
+Health PersistentStore::decode() {
     Reader trailer{bytes_.data() + bytesSize_ - 4};
-    if (trailer.number(4) != checksum(bytes_.data(), bytesSize_ - 4)) return false;
+    if (trailer.number(4) != checksum(bytes_.data(), bytesSize_ - 4)) return Health::Corrupt;
     Reader r{bytes_.data()};
-    if (r.number(4) != 0x434a5354 || r.number(1) != 1 || r.number(1) != uint8_t(role_) ||
-        r.number(8) != device_) return false;
+    if (r.number(4) != 0x434a5354 || r.number(1) != 1) return Health::Format;
+    if (r.number(1) != uint8_t(role_)) return Health::Role;
+    if (r.number(8) != device_) return Health::Device;
     next_.revision = r.number(8); next_.network = r.number(8); next_.receiver = r.number(8);
     next_.profile = uint16_t(r.number(2)); next_.count = uint16_t(r.number(1));
     const size_t entryCount = size_t(r.number(1));
     if (!entryCount || entryCount > BindingCapacity ||
-        bytesSize_ != 46 + entryCount * 186 + next_.count * 138) return false;
+        bytesSize_ != 46 + entryCount * 186 + next_.count * 138) return Health::Invalid;
     if (!next_.revision || !next_.network || !next_.receiver || next_.profile != 1 ||
         next_.count > QueueCapacity || (role_ == Role::Transmitter && next_.count) ||
-        (role_ == Role::Receiver && next_.receiver != device_)) return false;
+        (role_ == Role::Receiver && next_.receiver != device_)) return Health::Invalid;
     for (size_t i = 0; i < entryCount; ++i) {
         auto& e = next_.entries[i];
         e.state = Enrollment(r.number(1)); e.node = r.number(8); e.generation = r.number(8);
         r.block(e.key.data(), 16); e.counter = r.number(8); e.receipt.counter = r.number(8);
         e.receipt.last.size = size_t(r.number(2)); r.block(e.receipt.last.bytes.data(), MaxFrame);
-        if (uint8_t(e.state) > 3 || e.receipt.last.size > MaxFrame) return false;
-        if (e.state == Enrollment::Empty) return false;
+        if (uint8_t(e.state) > 3 || e.receipt.last.size > MaxFrame) return Health::Invalid;
+        if (e.state == Enrollment::Empty) return Health::Invalid;
         if (!e.node || !e.generation || !nonzero(e.key) || e.node == next_.receiver ||
             (role_ == Role::Transmitter && e.node != device_) ||
             (role_ == Role::Transmitter && e.receipt.counter) ||
-            (role_ == Role::Receiver && e.counter)) return false;
+            (role_ == Role::Receiver && e.counter)) return Health::Invalid;
         for (size_t j = 0; j < i; ++j) {
             const auto& prior = next_.entries[j];
             if (prior.state != Enrollment::Empty && (prior.key == e.key ||
                 prior.generation == e.generation ||
                 (prior.node == e.node && prior.state == Enrollment::Active && e.state == Enrollment::Active)))
-                return false;
+                return Health::Invalid;
         }
-        if (e.state == Enrollment::Prepared && (e.counter || e.receipt.counter)) return false;
+        if (e.state == Enrollment::Prepared && (e.counter || e.receipt.counter)) return Health::Invalid;
         if (e.receipt.counter) {
             Message message{};
             if (open(asBinding(e, next_.network), e.receipt.last, message) != Result::Ok ||
-                message.type != Type::Data || message.counter != e.receipt.counter) return false;
-        } else if (e.receipt.last.size) return false;
+                message.type != Type::Data || message.counter != e.receipt.counter) return Health::Invalid;
+        } else if (e.receipt.last.size) return Health::Invalid;
     }
     for (size_t i = 0; i < next_.count; ++i) {
         auto& q = next_.queue[i];
         q.entry = uint8_t(r.number(1)); q.frame.size = size_t(r.number(2));
         r.block(q.frame.bytes.data(), MaxFrame);
-        if (q.entry >= BindingCapacity || q.frame.size > MaxFrame) return false;
+        if (q.entry >= BindingCapacity || q.frame.size > MaxFrame) return Health::Invalid;
         const auto& e = next_.entries[q.entry]; Message message{};
         if (e.state == Enrollment::Empty || e.state == Enrollment::Prepared ||
             open(asBinding(e, next_.network), q.frame, message) != Result::Ok ||
-            message.type != Type::Data || message.counter > e.receipt.counter) return false;
+            message.type != Type::Data || message.counter > e.receipt.counter) return Health::Invalid;
     }
-    return true;
+    return Health::Ready;
 }
 bool PersistentStore::save() {
-    if (state_.revision == UINT64_MAX) { healthy_ = false; return false; }
+    if (state_.revision == UINT64_MAX) { health_ = Health::WriteError; return false; }
     next_.revision = state_.revision + 1;
     encode();
     if (!blob_.replace(bytes_.data(), bytesSize_)) {
-        healthy_ = false; // An ambiguous write must never lead to reuse of old counters.
+        health_ = Health::WriteError; // An ambiguous write must never lead to reuse of old counters.
         return false;
     }
     state_ = next_;
@@ -157,7 +163,7 @@ bool PersistentStore::save() {
 }
 Result PersistentStore::prepare(uint64_t network, uint64_t receiver, uint64_t node,
                                 uint64_t generation, const Key& key, uint16_t profile) {
-    if (!healthy_) return Result::StorageError;
+    if (!healthy()) return Result::StorageError;
     if (!network || !receiver || !node || !generation || !nonzero(key) || receiver == node || profile != 1 ||
         (role_ == Role::Transmitter && node != device_) ||
         (role_ == Role::Receiver && receiver != device_)) return Result::Invalid;
@@ -182,7 +188,7 @@ Result PersistentStore::prepare(uint64_t network, uint64_t receiver, uint64_t no
     return save() ? Result::Ok : Result::StorageError;
 }
 Result PersistentStore::activate(uint64_t node, uint64_t generation) {
-    if (!healthy_) return Result::StorageError;
+    if (!healthy()) return Result::StorageError;
     const int index = find(node, generation);
     if (index < 0) return Result::NotFound;
     const auto& old = state_.entries[size_t(index)];
@@ -195,7 +201,7 @@ Result PersistentStore::activate(uint64_t node, uint64_t generation) {
     return save() ? Result::Ok : Result::StorageError;
 }
 Result PersistentStore::revoke(uint64_t node, uint64_t generation) {
-    if (!healthy_) return Result::StorageError;
+    if (!healthy()) return Result::StorageError;
     const int index = find(node, generation);
     if (index < 0) return Result::NotFound;
     if (state_.entries[size_t(index)].state == Enrollment::Revoked) return Result::Ok;
@@ -204,7 +210,7 @@ Result PersistentStore::revoke(uint64_t node, uint64_t generation) {
 }
 bool PersistentStore::info(uint64_t node, uint64_t generation, EnrollmentInfo& out) const {
     out = EnrollmentInfo{};
-    if (!healthy_) return false;
+    if (!healthy()) return false;
     const int index = find(node, generation);
     if (index < 0) return false;
     const auto& e = state_.entries[size_t(index)];
@@ -213,7 +219,7 @@ bool PersistentStore::info(uint64_t node, uint64_t generation, EnrollmentInfo& o
 }
 bool PersistentStore::binding(uint64_t node, Binding& out) const {
     out = Binding{};
-    if (!healthy_) return false;
+    if (!healthy()) return false;
     for (const auto& e : state_.entries) if (e.node == node && e.state == Enrollment::Active) {
         out = asBinding(e, state_.network); return true;
     }
@@ -251,14 +257,14 @@ Result PersistentStore::commit(const Binding& b, uint64_t expected, const Receip
 }
 bool PersistentStore::peek(QueuedSample& out) const {
     out = QueuedSample{};
-    if (!healthy_ || !state_.count) return false;
+    if (!healthy() || !state_.count) return false;
     const auto& q = state_.queue[0]; const auto& e = state_.entries[q.entry]; Message m{};
     if (open(asBinding(e, state_.network), q.frame, m) != Result::Ok) return false;
     out.node = e.node; out.generation = e.generation; out.counter = m.counter; out.data = m.data;
     return true;
 }
 Result PersistentStore::forwarded(uint64_t node, uint64_t generation, uint64_t counter) {
-    if (!healthy_) return Result::StorageError;
+    if (!healthy()) return Result::StorageError;
     QueuedSample front{};
     if (!peek(front) || front.node != node || front.generation != generation || front.counter != counter)
         return Result::Conflict;

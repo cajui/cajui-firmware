@@ -4,6 +4,7 @@
 using namespace cajui;
 using namespace fixtures;
 namespace {
+#define EXPECT_HEALTH(expected, store) TEST_ASSERT_EQUAL_INT(int(expected), int((store).health()))
 void test_durable_enrollment_and_counter_restart() {
     MemoryBlob blob; auto store = mounted(blob);
     TEST_ASSERT_TRUE(store->healthy()); Binding b{};
@@ -113,15 +114,6 @@ void test_full_binding_registry_and_prepared_conflict() {
     EXPECT_RESULT(Result::Full, store->prepare(42, 1, 100, 100, key(100), 1));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(store->healthy());
 }
-void repairChecksum(MemoryBlob& blob) {
-    uint32_t crc = UINT32_MAX;
-    for (size_t i = 0; i < blob.size - 4; ++i) {
-        crc ^= blob.bytes[i];
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
-    }
-    crc = ~crc;
-    for (size_t i = 0; i < 4; ++i) blob.bytes[blob.size - 4 + i] = uint8_t(crc >> ((3 - i) * 8));
-}
 void test_semantically_invalid_snapshots_fail_closed_even_with_valid_crc() {
     MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
     uint64_t value = 0; TEST_ASSERT_TRUE(store->reserve(binding(), value)); store.reset();
@@ -202,6 +194,21 @@ void test_counter_revision_exhaustion_and_operation_guards() {
     EXPECT_RESULT(Result::Conflict, store->forwarded(2, 10, 1));
 }
 
+void test_mount_reports_why_storage_is_unavailable() {
+    MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
+    EXPECT_HEALTH(Health::Ready, *store); const auto good = blob.bytes;
+    store = mounted(blob, Role::Receiver); EXPECT_HEALTH(Health::Role, *store);
+    store.reset(new PersistentStore(blob, Role::Transmitter, 3)); store->mount(); EXPECT_HEALTH(Health::Device, *store);
+    blob.bytes[20] ^= 1; store = mounted(blob); EXPECT_HEALTH(Health::Corrupt, *store);
+    blob.bytes = good; blob.bytes[4] = 2; repairChecksum(blob); store = mounted(blob); EXPECT_HEALTH(Health::Format, *store);
+    blob.bytes = good; blob.bytes[41] = 0; repairChecksum(blob); store = mounted(blob); EXPECT_HEALTH(Health::Invalid, *store);
+    blob.bytes = good; const size_t size = blob.size; blob.size = 12; store = mounted(blob); EXPECT_HEALTH(Health::Corrupt, *store);
+    blob.size = size; blob.failRead = true; store = mounted(blob); EXPECT_HEALTH(Health::ReadError, *store);
+    blob.failRead = false; store.reset(new PersistentStore(blob, Role(3), 2));
+    EXPECT_HEALTH(Health::Unmounted, *store); store->mount(); EXPECT_HEALTH(Health::Identity, *store);
+    store = mounted(blob); EXPECT_HEALTH(Health::Ready, *store); blob.failAfter = true;
+    uint64_t counter = 0; TEST_ASSERT_FALSE(store->reserve(binding(), counter)); EXPECT_HEALTH(Health::WriteError, *store);
+}
 }
 void runStorageTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -218,4 +225,5 @@ void runStorageTests() {
     RUN_TEST(test_corrupt_receiver_receipts_and_queued_frames_are_rejected);
     RUN_TEST(test_duplicate_persistent_credentials_and_active_nodes_are_rejected);
     RUN_TEST(test_counter_revision_exhaustion_and_operation_guards);
+    RUN_TEST(test_mount_reports_why_storage_is_unavailable);
 }
