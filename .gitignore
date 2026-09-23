@@ -1,0 +1,13 @@
+.pio/
+.venv/
+.vscode/
+__pycache__/
+*.pyc
+*.profraw
+*.profdata
+.env
+.env.*
+!.env.example
+.DS_Store
+/local/
+/credentials/

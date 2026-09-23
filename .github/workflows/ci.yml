@@ -1,0 +1,29 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm libssl-dev
+      - run: python -m pip install platformio==6.1.18
+      - name: Unit tests, sanitizers and coverage
+        env:
+          CC: clang
+          CXX: clang++
+        run: python scripts/check_protocol.py --coverage
+  esp32-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install platformio==6.1.18
+      - name: Compile tests with the ESP32 crypto backend (no upload)
+        run: pio test -e protocol_esp32 --without-uploading --without-testing
