@@ -1,36 +1,8 @@
 #pragma once
-#include "cajui_protocol.h"
+#include "snapshot.h"
 
 namespace cajui {
-constexpr size_t BindingCapacity = 16, QueueCapacity = 128;
-// Snapshot v1: header, one record per occupied enrollment and queued frame, then CRC32.
-// Header: magic 4, version 1, role 1, device 8, revision 8, network 8, receiver 8,
-// profile 2, queue count 1, enrollment count 1.
-constexpr size_t SnapshotHeaderSize = 4 + 1 + 1 + 8 + 8 + 8 + 8 + 2 + 1 + 1, ChecksumSize = 4;
-// State 1, node 8, generation 8, key, counter 8, receipt counter 8, frame size 2, frame.
-constexpr size_t EntryRecordSize = 1 + 8 + 8 + sizeof(Key) + 8 + 8 + 2 + MaxFrame;
-constexpr size_t QueueRecordSize = 1 + 2 + MaxFrame; // Entry index, frame size, frame.
-constexpr size_t MinSnapshotSize = SnapshotHeaderSize + ChecksumSize;
-constexpr size_t SnapshotSize =
-    MinSnapshotSize + BindingCapacity * EntryRecordSize + QueueCapacity * QueueRecordSize;
-// Stored snapshots depend on these sizes: changing MaxFrame requires a new snapshot version.
-static_assert(EntryRecordSize == 186 && QueueRecordSize == 138, "Snapshot v1 layout changed");
-enum class Role : uint8_t { Transmitter = 1, Receiver = 2 };
-enum class Enrollment : uint8_t { Empty = 0, Prepared = 1, Active = 2, Revoked = 3 };
 enum class ReadResult { Ok, Missing, Error };
-// Why the store refuses work; Ready is the only usable state.
-enum class Health : uint8_t {
-    Unmounted,
-    Ready,
-    Identity,
-    ReadError,
-    Corrupt,
-    Format,
-    Role,
-    Device,
-    Invalid,
-    WriteError
-};
 class AtomicBlob {
 public:
     virtual ~AtomicBlob() = default;
@@ -72,35 +44,15 @@ public:
     Result forwarded(uint64_t node, uint64_t generation, uint64_t counter);
 
 private:
-    struct Entry {
-        Enrollment state = Enrollment::Empty;
-        uint64_t node = 0, generation = 0, counter = 0;
-        Key key{};
-        Receipt receipt{};
-    };
-    struct Queued {
-        uint8_t entry = 0;
-        Frame frame{};
-    };
-    struct State {
-        uint64_t revision = 0, network = 0, receiver = 0;
-        uint16_t profile = 0, count = 0;
-        std::array<Entry, BindingCapacity> entries{};
-        std::array<Queued, QueueCapacity> queue{};
-    };
     AtomicBlob& blob_;
     Role role_;
     uint64_t device_;
     Health health_ = Health::Unmounted;
     // Scratch space is part of the object, never a large MCU task-stack allocation.
-    State state_{}, next_{};
+    snapshot::State state_{}, next_{};
     std::array<uint8_t, SnapshotSize> bytes_{};
-    size_t bytesSize_ = 0;
     int find(uint64_t node, uint64_t generation) const;
     int authorized(const Binding&) const;
-    Binding asBinding(const Entry&, uint64_t network) const;
     bool save();
-    Health decode();
-    void encode();
 };
 } // namespace cajui

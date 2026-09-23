@@ -93,6 +93,7 @@ def main():
                 "lib/CajuiRuntime/src/cajui_runtime.cpp",
                 "lib/CajuiProtocol/src/crypto.cpp",
                 "lib/CajuiStorage/src/cajui_storage.cpp",
+                "lib/CajuiStorage/src/snapshot.cpp",
                 "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
             ]
             run(prefix + ["llvm-cov", "report"] + inputs)

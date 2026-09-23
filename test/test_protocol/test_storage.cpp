@@ -400,6 +400,36 @@ void test_commit_on_unhealthy_store_is_a_storage_error() {
     receipt.last = data(2);
     EXPECT_RESULT(Result::StorageError, store->commit(binding(), 0, receipt));
 }
+void test_snapshot_codec_round_trips_without_a_blob() {
+    std::unique_ptr<snapshot::State> state(new snapshot::State());
+    state->revision = 7;
+    state->network = 42;
+    state->receiver = 1;
+    state->profile = 1;
+    auto& entry = state->entries[0];
+    entry.state = Enrollment::Active;
+    entry.node = 2;
+    entry.generation = 10;
+    entry.key = key();
+    entry.counter = 5;
+    std::vector<uint8_t> bytes(SnapshotSize);
+    const size_t size = snapshot::encode(*state, Role::Transmitter, 2, bytes.data());
+    TEST_ASSERT_EQUAL_UINT(MinSnapshotSize + EntryRecordSize, size);
+    std::unique_ptr<snapshot::State> decoded(new snapshot::State());
+    TEST_ASSERT_EQUAL_INT(
+        int(Health::Ready),
+        int(snapshot::decode(bytes.data(), size, Role::Transmitter, 2, *decoded)));
+    TEST_ASSERT_EQUAL_UINT64(7, decoded->revision);
+    TEST_ASSERT_EQUAL_UINT64(5, decoded->entries[0].counter);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(key().data(), decoded->entries[0].key.data(), KeySize);
+    snapshot::reset(*decoded);
+    TEST_ASSERT_EQUAL_INT(
+        int(Health::Device),
+        int(snapshot::decode(bytes.data(), size, Role::Transmitter, 3, *decoded)));
+    TEST_ASSERT_EQUAL_INT(
+        int(Health::Corrupt),
+        int(snapshot::decode(bytes.data(), size - 1, Role::Transmitter, 2, *decoded)));
+}
 }
 void runStorageTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -418,4 +448,5 @@ void runStorageTests() {
     RUN_TEST(test_counter_revision_exhaustion_and_operation_guards);
     RUN_TEST(test_mount_reports_why_storage_is_unavailable);
     RUN_TEST(test_commit_on_unhealthy_store_is_a_storage_error);
+    RUN_TEST(test_snapshot_codec_round_trips_without_a_blob);
 }

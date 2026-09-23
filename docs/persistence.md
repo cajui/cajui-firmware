@@ -1,6 +1,8 @@
 # Persistent state
 
-`PersistentStore` implements `CounterStore` and `Journal` over an `AtomicBlob`.
+`PersistentStore` implements `CounterStore` and `Journal` over an `AtomicBlob`. It owns the
+state transitions; `snapshot.h` holds the state types and the pure snapshot v1 encoder and
+validating decoder, which tests exercise without a blob.
 The ESP32 adapter uses one NVS blob in the dedicated `cajui` partition, namespace
 `store`, key `snapshot`. The codec is versioned, big-endian and protected by CRC32
 for accidental corruption. CRC is not authentication or physical tamper protection.
