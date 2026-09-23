@@ -339,9 +339,9 @@ def main():
             required=True,
             help="Private recovery file, outside version control",
         )
-    revoke = sub.add_parser("revoke")
-    revoke.add_argument("--receiver", required=True)
-    revoke.add_argument("--state", type=Path, required=True)
+    revoke_command = sub.add_parser("revoke")
+    revoke_command.add_argument("--receiver", required=True)
+    revoke_command.add_argument("--state", type=Path, required=True)
     args = parser.parse_args()
     links = []
     try:
