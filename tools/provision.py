@@ -316,6 +316,14 @@ def verify_restart(tx, rx, path):
     }
 
 
+def revoke(rx, transaction):
+    device = ready(rx)
+    if device["device"] != transaction["receiver"] or device["role"] != "rx":
+        raise ProvisioningError("Wrong receiver")
+    rx.request(f"REVOKE {device['device']} {transaction['node']} {transaction['generation']}")
+    return {"revoked": True, "node": transaction["node"]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -347,14 +355,7 @@ def main():
             output = ready(connect(args.port))
         elif args.action == "revoke":
             transaction = load(args.state)
-            rx = connect(args.receiver)
-            device = ready(rx)
-            if device["device"] != transaction["receiver"] or device["role"] != "rx":
-                raise ProvisioningError("Wrong receiver")
-            rx.request(
-                f"REVOKE {device['device']} {transaction['node']} {transaction['generation']}"
-            )
-            output = {"revoked": True, "node": transaction["node"]}
+            output = revoke(connect(args.receiver), transaction)
         else:
             tx, rx = connect(args.transmitter), connect(args.receiver)
             if args.action == "verify-restart":

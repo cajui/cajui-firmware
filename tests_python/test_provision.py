@@ -60,6 +60,10 @@ class Device:
         elif verb == "RESERVE":
             self.counter += 1
             return [f"{self.counter:016x}"]
+        elif verb == "REVOKE":
+            if self.enrollment is None:
+                raise provision.ProvisioningError("Device rejected request: NOT_FOUND")
+            self.state = 3
         elif verb == "REBOOT":
             self.boot += 1  # Durable state survives; C++ storage has its own tests.
         else:
@@ -183,6 +187,18 @@ class ProvisionTests(unittest.TestCase):
         self.tx.request = resetting
         with self.assertRaises(provision.ProvisioningError):
             provision.verify_restart(self.tx, self.rx, self.path)
+
+    def test_revoke_targets_only_the_enrolled_receiver(self):
+        provision.enroll(self.tx, self.rx, self.path)
+        transaction = provision.load(self.path)
+        with self.assertRaises(provision.ProvisioningError):
+            provision.revoke(self.tx, transaction)
+        self.assertEqual(provision.Enrollment.ACTIVE, self.tx.state)
+        self.assertEqual(
+            {"revoked": True, "node": self.tx.identity}, provision.revoke(self.rx, transaction)
+        )
+        self.assertEqual(provision.Enrollment.REVOKED, self.rx.state)
+        self.assertEqual(provision.Enrollment.ACTIVE, self.tx.state)
 
     def test_malformed_identifiers_and_recovery_file(self):
         for value in (None, 123, "abc", "g" * 16, "F" * 16):
