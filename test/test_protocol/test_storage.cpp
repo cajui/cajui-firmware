@@ -1,22 +1,22 @@
 #include <unity.h>
 #include "storage_support.h"
+#include "assertions.h"
 using namespace cajui;
 using namespace fixtures;
 namespace {
-void expect(Result a, Result b) { TEST_ASSERT_EQUAL_INT(int(a), int(b)); }
 void test_durable_enrollment_and_counter_restart() {
     MemoryBlob blob; auto store = mounted(blob);
     TEST_ASSERT_TRUE(store->healthy()); Binding b{};
     TEST_ASSERT_FALSE(store->binding(2, b));
-    expect(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
     TEST_ASSERT_FALSE(store->binding(2, b)); store.reset(); store = mounted(blob);
     EnrollmentInfo info{}; TEST_ASSERT_TRUE(store->info(2, 10, info));
     TEST_ASSERT_EQUAL_INT(int(Enrollment::Prepared), int(info.state));
-    expect(Result::Ok, store->activate(2, 10)); TEST_ASSERT_TRUE(store->binding(2, b));
+    EXPECT_RESULT(Result::Ok, store->activate(2, 10)); TEST_ASSERT_TRUE(store->binding(2, b));
     uint64_t counter = 0; TEST_ASSERT_TRUE(store->reserve(b, counter)); TEST_ASSERT_EQUAL_UINT64(1, counter);
     store.reset(); store = mounted(blob);
-    expect(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
-    expect(Result::Ok, store->activate(2, 10));
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Ok, store->activate(2, 10));
     TEST_ASSERT_TRUE(store->reserve(b, counter)); TEST_ASSERT_EQUAL_UINT64(2, counter);
     TEST_ASSERT_EQUAL_UINT64(42, store->network()); TEST_ASSERT_EQUAL_UINT64(1, store->receiver());
 }
@@ -31,84 +31,84 @@ void test_uncertain_counter_write_cannot_reuse_nonce() {
 void test_failed_counter_write_and_corruption_fail_closed() {
     MemoryBlob blob; auto store = mounted(blob); TEST_ASSERT_TRUE(enroll(*store));
     blob.failBefore = true; uint64_t counter = 0; TEST_ASSERT_FALSE(store->reserve(binding(), counter));
-    expect(Result::StorageError, store->activate(2, 10));
+    EXPECT_RESULT(Result::StorageError, store->activate(2, 10));
     blob.failBefore = false; store.reset(); store = mounted(blob);
     TEST_ASSERT_TRUE(store->reserve(binding(), counter)); TEST_ASSERT_EQUAL_UINT64(1, counter);
     blob.tear = true; TEST_ASSERT_FALSE(store->reserve(binding(), counter));
     store.reset(); store = mounted(blob); TEST_ASSERT_FALSE(store->healthy());
-    expect(Result::StorageError, store->prepare(42, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::StorageError, store->prepare(42, 1, 2, 10, key(), 1));
     blob.failRead = true; TEST_ASSERT_FALSE(store->mount());
 }
 void test_receiver_commit_restart_duplicate_and_drain() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(enroll(*store));
     auto frame = data(1); Frame ack{};
-    expect(Result::Ok, receive(binding(), frame, *store, ack)); TEST_ASSERT_GREATER_THAN_UINT32(0, ack.size);
+    EXPECT_RESULT(Result::Ok, receive(binding(), frame, *store, ack)); TEST_ASSERT_GREATER_THAN_UINT32(0, ack.size);
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(store->healthy());
-    expect(Result::Duplicate, receive(binding(), frame, *store, ack)); TEST_ASSERT_EQUAL_UINT32(1, store->queued());
+    EXPECT_RESULT(Result::Duplicate, receive(binding(), frame, *store, ack)); TEST_ASSERT_EQUAL_UINT32(1, store->queued());
     QueuedSample q{}; TEST_ASSERT_TRUE(store->peek(q)); TEST_ASSERT_EQUAL_INT32(25000, q.data.readings[0].milliValue);
-    expect(Result::Conflict, store->forwarded(2, 10, 2));
-    expect(Result::Ok, store->forwarded(q.node, q.generation, q.counter));
+    EXPECT_RESULT(Result::Conflict, store->forwarded(2, 10, 2));
+    EXPECT_RESULT(Result::Ok, store->forwarded(q.node, q.generation, q.counter));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_EQUAL_UINT32(0, store->queued());
-    expect(Result::Duplicate, receive(binding(), frame, *store, ack));
+    EXPECT_RESULT(Result::Duplicate, receive(binding(), frame, *store, ack));
     TEST_ASSERT_EQUAL_UINT32(0, store->queued()); TEST_ASSERT_FALSE(store->peek(q));
 }
 void test_commit_ambiguity_after_power_loss_is_recovered() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(enroll(*store)); Frame ack{};
-    blob.failAfter = true; expect(Result::StorageError, receive(binding(), data(1), *store, ack));
+    blob.failAfter = true; EXPECT_RESULT(Result::StorageError, receive(binding(), data(1), *store, ack));
     TEST_ASSERT_EQUAL_UINT32(0, ack.size); blob.failAfter = false;
     store.reset(); store = mounted(blob, Role::Receiver);
-    expect(Result::Duplicate, receive(binding(), data(1), *store, ack)); TEST_ASSERT_EQUAL_UINT32(1, store->queued());
+    EXPECT_RESULT(Result::Duplicate, receive(binding(), data(1), *store, ack)); TEST_ASSERT_EQUAL_UINT32(1, store->queued());
 }
 void test_queue_capacity_multiple_nodes_and_no_partial_receipt() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver);
     TEST_ASSERT_TRUE(enroll(*store)); TEST_ASSERT_TRUE(enroll(*store, 3, 11, 2)); Frame ack{};
     for (size_t i = 1; i <= QueueCapacity; ++i)
-        expect(Result::Ok, receive(binding(), data(i), *store, ack));
-    expect(Result::Full, receive(binding(3, 2), data(1, 3, 2), *store, ack));
+        EXPECT_RESULT(Result::Ok, receive(binding(), data(i), *store, ack));
+    EXPECT_RESULT(Result::Full, receive(binding(3, 2), data(1, 3, 2), *store, ack));
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
     Receipt receipt{}; TEST_ASSERT_TRUE(store->load(binding(3, 2), receipt)); TEST_ASSERT_EQUAL_UINT64(0, receipt.counter);
-    expect(Result::Duplicate, receive(binding(), data(QueueCapacity), *store, ack));
+    EXPECT_RESULT(Result::Duplicate, receive(binding(), data(QueueCapacity), *store, ack));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(store->healthy());
-    expect(Result::Ok, store->forwarded(2, 10, 1));
-    expect(Result::Ok, receive(binding(3, 2), data(1, 3, 2), *store, ack));
+    EXPECT_RESULT(Result::Ok, store->forwarded(2, 10, 1));
+    EXPECT_RESULT(Result::Ok, receive(binding(3, 2), data(1, 3, 2), *store, ack));
     TEST_ASSERT_EQUAL_UINT32(QueueCapacity, store->queued());
 }
 void test_rotation_revocation_and_retired_keys_are_persistent() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(enroll(*store)); Frame ack{};
-    expect(Result::Ok, receive(binding(), data(1), *store, ack));
-    expect(Result::Ok, store->prepare(42, 1, 2, 11, key(2), 1));
-    expect(Result::Ok, store->activate(2, 11));
+    EXPECT_RESULT(Result::Ok, receive(binding(), data(1), *store, ack));
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 11, key(2), 1));
+    EXPECT_RESULT(Result::Ok, store->activate(2, 11));
     Receipt receipt{}; TEST_ASSERT_FALSE(store->load(binding(), receipt));
-    expect(Result::Conflict, store->prepare(42, 1, 2, 12, key(1), 1));
-    expect(Result::Conflict, store->activate(2, 10));
+    EXPECT_RESULT(Result::Conflict, store->prepare(42, 1, 2, 12, key(1), 1));
+    EXPECT_RESULT(Result::Conflict, store->activate(2, 10));
     QueuedSample q{}; TEST_ASSERT_TRUE(store->peek(q)); TEST_ASSERT_EQUAL_UINT64(10, q.generation);
     store.reset(); store = mounted(blob, Role::Receiver);
     Binding b{}; TEST_ASSERT_TRUE(store->binding(2, b)); TEST_ASSERT_EQUAL_HEX8_ARRAY(key(2).data(), b.key.data(), 16);
-    expect(Result::Ok, store->revoke(2, 11)); expect(Result::Ok, store->revoke(2, 11));
+    EXPECT_RESULT(Result::Ok, store->revoke(2, 11)); EXPECT_RESULT(Result::Ok, store->revoke(2, 11));
     TEST_ASSERT_FALSE(store->binding(2, b)); TEST_ASSERT_TRUE(store->peek(q));
 }
 void test_bad_provisioning_and_identity_do_not_mutate_state() {
     MemoryBlob blob; auto store = mounted(blob);
-    expect(Result::Invalid, store->prepare(0, 1, 2, 10, key(), 1));
-    expect(Result::Invalid, store->prepare(42, 2, 2, 10, key(), 1));
-    expect(Result::Invalid, store->prepare(42, 1, 3, 10, key(), 1));
-    expect(Result::Invalid, store->prepare(42, 1, 2, 0, key(), 1));
-    expect(Result::Invalid, store->prepare(42, 1, 2, 10, key(0), 1));
-    expect(Result::Invalid, store->prepare(42, 1, 2, 10, key(), 2));
+    EXPECT_RESULT(Result::Invalid, store->prepare(0, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 2, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 1, 3, 10, key(), 1));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 1, 2, 0, key(), 1));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 1, 2, 10, key(0), 1));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 1, 2, 10, key(), 2));
     TEST_ASSERT_EQUAL_UINT32(0, blob.writes); TEST_ASSERT_TRUE(enroll(*store));
-    expect(Result::Conflict, store->prepare(43, 1, 2, 11, key(2), 1));
-    expect(Result::Conflict, store->prepare(42, 1, 2, 10, key(2), 1));
-    expect(Result::NotFound, store->activate(2, 100)); expect(Result::NotFound, store->revoke(2, 100));
+    EXPECT_RESULT(Result::Conflict, store->prepare(43, 1, 2, 11, key(2), 1));
+    EXPECT_RESULT(Result::Conflict, store->prepare(42, 1, 2, 10, key(2), 1));
+    EXPECT_RESULT(Result::NotFound, store->activate(2, 100)); EXPECT_RESULT(Result::NotFound, store->revoke(2, 100));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_FALSE(store->healthy());
 }
 void test_full_binding_registry_and_prepared_conflict() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver);
-    expect(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
-    expect(Result::Conflict, store->prepare(42, 1, 2, 11, key(2), 1));
-    expect(Result::Conflict, store->prepare(42, 1, 3, 10, key(2), 1));
-    expect(Result::Ok, store->activate(2, 10));
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Conflict, store->prepare(42, 1, 2, 11, key(2), 1));
+    EXPECT_RESULT(Result::Conflict, store->prepare(42, 1, 3, 10, key(2), 1));
+    EXPECT_RESULT(Result::Ok, store->activate(2, 10));
     for (size_t i = 1; i < BindingCapacity; ++i) TEST_ASSERT_TRUE(enroll(*store, i + 2, i + 10, uint8_t(i + 1)));
-    expect(Result::Full, store->prepare(42, 1, 100, 100, key(100), 1));
+    EXPECT_RESULT(Result::Full, store->prepare(42, 1, 100, 100, key(100), 1));
     store.reset(); store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(store->healthy());
 }
 void repairChecksum(MemoryBlob& blob) {
@@ -142,7 +142,7 @@ void test_semantically_invalid_snapshots_fail_closed_even_with_valid_crc() {
 }
 void test_corrupt_receiver_receipts_and_queued_frames_are_rejected() {
     MemoryBlob blob; auto store = mounted(blob, Role::Receiver); TEST_ASSERT_TRUE(enroll(*store));
-    Frame ack{}; expect(Result::Ok, receive(binding(), data(1), *store, ack)); store.reset();
+    Frame ack{}; EXPECT_RESULT(Result::Ok, receive(binding(), data(1), *store, ack)); store.reset();
     const auto good = blob.bytes;
     // Header receiver, tx-only counter, receipt, queue index/size and authenticated frame.
     const size_t invalidOffsets[] = {37, 82, 90, 92, 93, 228, 229, 231};
@@ -181,24 +181,25 @@ void test_counter_revision_exhaustion_and_operation_guards() {
     uint64_t counter = 1; TEST_ASSERT_FALSE(store->reserve(binding(), counter)); TEST_ASSERT_EQUAL_UINT64(0, counter);
     store.reset(); for (size_t i = 14; i < 22; ++i) blob.bytes[i] = 0xff;
     repairChecksum(blob); store = mounted(blob); TEST_ASSERT_TRUE(store->healthy());
-    expect(Result::StorageError, store->revoke(2, 10));
-    expect(Result::StorageError, store->revoke(2, 10));
-    expect(Result::StorageError, store->forwarded(2, 10, 1));
+    EXPECT_RESULT(Result::StorageError, store->revoke(2, 10));
+    EXPECT_RESULT(Result::StorageError, store->revoke(2, 10));
+    EXPECT_RESULT(Result::StorageError, store->forwarded(2, 10, 1));
     Binding b{}; EnrollmentInfo info{}; TEST_ASSERT_FALSE(store->binding(2, b)); TEST_ASSERT_FALSE(store->info(2, 10, info));
     store.reset(); MemoryBlob receiverBlob; store = mounted(receiverBlob, Role::Receiver);
-    expect(Result::Invalid, store->prepare(42, 3, 2, 10, key(), 1)); TEST_ASSERT_TRUE(enroll(*store));
+    EXPECT_RESULT(Result::Invalid, store->prepare(42, 3, 2, 10, key(), 1)); TEST_ASSERT_TRUE(enroll(*store));
     TEST_ASSERT_FALSE(store->reserve(binding(), counter));
     Receipt receipt{}; receipt.counter = 1; receipt.last = data(1);
-    expect(Result::Conflict, store->commit(binding(), 1, receipt, sample()));
-    receipt.counter = 2; expect(Result::Invalid, store->commit(binding(), 0, receipt, sample()));
-    expect(Result::Unauthorized, store->commit(binding(3), 0, receipt, sample()));
+    EXPECT_RESULT(Result::Conflict, store->commit(binding(), 1, receipt, sample()));
+    receipt.counter = 2; EXPECT_RESULT(Result::Invalid, store->commit(binding(), 0, receipt, sample()));
+    EXPECT_RESULT(Result::Unauthorized, store->commit(binding(3), 0, receipt, sample()));
     auto wrong = binding(); wrong.active = false; TEST_ASSERT_FALSE(store->load(wrong, receipt));
     wrong = binding(); wrong.network = 99; TEST_ASSERT_FALSE(store->load(wrong, receipt));
-    expect(Result::Conflict, store->forwarded(2, 10, 1));
+    EXPECT_RESULT(Result::Conflict, store->forwarded(2, 10, 1));
 }
 
 }
 void runStorageTests() {
+    UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
     RUN_TEST(test_durable_enrollment_and_counter_restart);
     RUN_TEST(test_uncertain_counter_write_cannot_reuse_nonce);
     RUN_TEST(test_failed_counter_write_and_corruption_fail_closed);

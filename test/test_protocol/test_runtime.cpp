@@ -90,12 +90,13 @@ struct Rig {
         transmit();
     }
 };
-void completion(Completion expected, const Rig& rig) {
-    TEST_ASSERT_EQUAL_INT(int(expected), int(rig.controller.report().completion));
-    TEST_ASSERT_FALSE(rig.controller.active());
-    TEST_ASSERT_TRUE(rig.controller.report().radioSleeping);
-    TEST_ASSERT_NULL(rig.radio.retained);
+void completion(Completion expected, const Rig& rig, UNITY_LINE_TYPE line) {
+    UNITY_TEST_ASSERT_EQUAL_INT(int(expected), int(rig.controller.report().completion), line, nullptr);
+    UNITY_TEST_ASSERT(!rig.controller.active(), line, "Controller still active");
+    UNITY_TEST_ASSERT(rig.controller.report().radioSleeping, line, "Radio not sleeping");
+    UNITY_TEST_ASSERT_NULL(rig.radio.retained, line, "Radio retains a frame");
 }
+#define COMPLETION(expected, rig) completion(expected, rig, __LINE__)
 Frame ackFor(const Frame& frame, const Binding& b = binding()) {
     Message data{}; TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(open(b, frame, data)));
     Message ack{}; ack.type = Type::Ack; ack.counter = data.counter;
@@ -110,12 +111,12 @@ void test_runtime_idle_and_success_reuse() {
     TEST_ASSERT_EQUAL_INT(int(StartResult::Busy), int(r.controller.start(binding(), sample(), r.counter)));
     r.enterChannelCheck(); r.transmit(); r.controller.poll(); // No incoming frame.
     r.radio.incoming = ackFor(r.radio.sent[0]); r.radio.rx = ReceiveStatus::Received;
-    r.controller.poll(); completion(Completion::Acknowledged, r);
+    r.controller.poll(); COMPLETION(Completion::Acknowledged, r);
     TEST_ASSERT_EQUAL_UINT8(1, r.controller.report().attempts);
     auto sleeps = r.radio.sleepCalls; r.controller.poll(); r.controller.cancel();
     TEST_ASSERT_EQUAL_UINT(sleeps, r.radio.sleepCalls);
     r.start(); TEST_ASSERT_EQUAL_UINT64(2, r.counter.last); r.controller.cancel();
-    completion(Completion::Cancelled, r);
+    COMPLETION(Completion::Cancelled, r);
 }
 void test_runtime_jitter_and_busy_channel_are_bounded() {
     Rig r; r.jitter.high = true; r.start(); r.controller.poll();
@@ -125,7 +126,7 @@ void test_runtime_jitter_and_busy_channel_are_bounded() {
     TEST_ASSERT_EQUAL_UINT32(100, r.jitter.bounds[2]);
     TEST_ASSERT_EQUAL_UINT32(500, r.jitter.bounds[3]);
     r.clock.advance(9499); r.controller.poll(); // One ms remains: CAD may start, no TX.
-    r.clock.advance(1); r.controller.poll(); completion(Completion::Deadline, r);
+    r.clock.advance(1); r.controller.poll(); COMPLETION(Completion::Deadline, r);
     TEST_ASSERT_EQUAL_UINT(0, r.radio.sent.size());
 }
 void test_runtime_retries_identical_frames_then_exhausts() {
@@ -138,7 +139,7 @@ void test_runtime_retries_identical_frames_then_exhausts() {
     TEST_ASSERT_EQUAL_UINT32(200, r.jitter.bounds[4]);
     TEST_ASSERT_EQUAL_UINT32(1000, r.jitter.bounds[5]);
     r.clock.advance(1499); r.controller.poll(); TEST_ASSERT_TRUE(r.controller.active());
-    r.clock.advance(1); r.controller.poll(); completion(Completion::AttemptsExhausted, r);
+    r.clock.advance(1); r.controller.poll(); COMPLETION(Completion::AttemptsExhausted, r);
     TEST_ASSERT_EQUAL_UINT8(3, r.controller.report().attempts);
 }
 void test_runtime_lost_ack_replays_without_duplicate_commit() {
@@ -150,7 +151,7 @@ void test_runtime_lost_ack_replays_without_duplicate_commit() {
     TEST_ASSERT_EQUAL_INT(int(Result::Duplicate), int(receive(binding(), r.radio.sent[1], *store, r.radio.incoming)));
     TEST_ASSERT_TRUE(sameFrame(firstAck, r.radio.incoming));
     TEST_ASSERT_EQUAL_UINT(1, store->queued());
-    r.radio.rx = ReceiveStatus::Received; r.controller.poll(); completion(Completion::Acknowledged, r);
+    r.radio.rx = ReceiveStatus::Received; r.controller.poll(); COMPLETION(Completion::Acknowledged, r);
 }
 void test_runtime_storage_failures_never_produce_transmission_or_ack() {
     Rig r; fixtures::MemoryBlob blob; auto tx = fixtures::mounted(blob);
@@ -168,7 +169,7 @@ void test_runtime_storage_failures_never_produce_transmission_or_ack() {
     Frame ack{}; TEST_ASSERT_EQUAL_INT(int(Result::StorageError), int(receive(binding(), r.radio.sent[0], *rx, ack)));
     TEST_ASSERT_EQUAL_UINT(0, ack.size);
     r.retry(100); r.retry(200); r.clock.advance(1500); r.controller.poll();
-    completion(Completion::AttemptsExhausted, r);
+    COMPLETION(Completion::AttemptsExhausted, r);
 }
 void test_runtime_bad_acks_do_not_extend_the_window() {
     Rig r; r.start(); r.enterChannelCheck(); r.transmit(); r.radio.rx = ReceiveStatus::Received;
@@ -187,11 +188,11 @@ void test_runtime_bad_acks_do_not_extend_the_window() {
     r.clock.advance(1500); r.radio.incoming = good; r.controller.poll();
     TEST_ASSERT_EQUAL_UINT(calls, r.radio.readCalls); // ACK at deadline is not processed.
     TEST_ASSERT_EQUAL_INT(int(SendState::Waiting), int(r.controller.state()));
-    r.controller.cancel(); completion(Completion::Cancelled, r);
+    r.controller.cancel(); COMPLETION(Completion::Cancelled, r);
 }
 void test_runtime_persistence_latency_counts_toward_deadline() {
     Rig r; r.counter.clock = &r.clock; r.counter.latencyMs = 10000;
-    r.start(); r.controller.poll(); completion(Completion::Deadline, r);
+    r.start(); r.controller.poll(); COMPLETION(Completion::Deadline, r);
     TEST_ASSERT_EQUAL_UINT64(1, r.counter.last);
     TEST_ASSERT_EQUAL_UINT(0, r.radio.cadCalls);
     TEST_ASSERT_TRUE(r.radio.sent.empty());
@@ -209,7 +210,7 @@ void test_runtime_deadline_overrides_queued_valid_ack() {
     SendPolicy p; p.cycleTimeoutMs = 4000; Rig r(p);
     r.start(); r.enterChannelCheck(); r.transmit();
     r.radio.incoming = ackFor(r.radio.sent[0]); r.radio.rx = ReceiveStatus::Received;
-    r.clock.advance(4000); r.controller.poll(); completion(Completion::Deadline, r);
+    r.clock.advance(4000); r.controller.poll(); COMPLETION(Completion::Deadline, r);
     TEST_ASSERT_EQUAL_UINT(0, r.radio.readCalls);
 }
 void test_runtime_time_wrap_and_hardware_completion_timestamp() {
@@ -221,7 +222,7 @@ void test_runtime_time_wrap_and_hardware_completion_timestamp() {
     r.controller.poll(); TEST_ASSERT_EQUAL_INT(int(SendState::Waiting), int(r.controller.state()));
     TEST_ASSERT_EQUAL_UINT(0, r.radio.readCalls);
     r.clock.advance(100); r.controller.poll(); r.transmit();
-    r.radio.incoming = ackFor(r.radio.sent[1]); r.controller.poll(); completion(Completion::Acknowledged, r);
+    r.radio.incoming = ackFor(r.radio.sent[1]); r.controller.poll(); COMPLETION(Completion::Acknowledged, r);
 }
 void test_runtime_pending_operations_have_timeouts() {
     for (int stage = 0; stage < 2; ++stage) {
@@ -230,7 +231,7 @@ void test_runtime_pending_operations_have_timeouts() {
         else { r.controller.poll(); r.radio.tx = TransmitStatus::Pending; }
         r.controller.poll(); TEST_ASSERT_TRUE(r.controller.active());
         r.clock.advance(stage == 0 ? 1000 : 3000); r.controller.poll();
-        completion(Completion::RadioTimeout, r);
+        COMPLETION(Completion::RadioTimeout, r);
     }
 }
 void test_runtime_driver_failures_stop_the_cycle() {
@@ -250,7 +251,7 @@ void test_runtime_driver_failures_stop_the_cycle() {
             r.controller.poll();
         }
         if (stage == 6) { r.radio.rx = ReceiveStatus::Error; r.controller.poll(); }
-        completion(Completion::RadioError, r);
+        COMPLETION(Completion::RadioError, r);
     }
 }
 void test_runtime_sleep_failure_retains_frame_and_blocks_reuse() {
@@ -279,7 +280,7 @@ void test_runtime_random_failure_or_out_of_range_stops() {
         else {
             r.enterChannelCheck(); r.radio.channel = ChannelStatus::Busy; r.jitter.outside = -1;
         }
-        r.controller.poll(); completion(Completion::RandomError, r);
+        r.controller.poll(); COMPLETION(Completion::RandomError, r);
         TEST_ASSERT_TRUE(r.radio.sent.empty());
     }
 }
@@ -319,7 +320,7 @@ void test_runtime_cancel_each_phase_consumes_counter_without_reuse() {
     for (int phase = 0; phase < 5; ++phase) {
         Rig r; r.start();
         for (int i = 0; i < phase; ++i) r.controller.poll();
-        r.controller.cancel(); completion(Completion::Cancelled, r);
+        r.controller.cancel(); COMPLETION(Completion::Cancelled, r);
         auto count = r.radio.sent.size(); r.controller.poll(); TEST_ASSERT_EQUAL_UINT(count, r.radio.sent.size());
         r.start(); TEST_ASSERT_EQUAL_UINT64(2, r.counter.last); r.controller.cancel();
     }
@@ -338,6 +339,7 @@ void test_codec_matches_pre_refactor_wire_fixture() {
 }
 }
 void runRuntimeTests() {
+    UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
     RUN_TEST(test_runtime_idle_and_success_reuse);
     RUN_TEST(test_runtime_jitter_and_busy_channel_are_bounded);
     RUN_TEST(test_runtime_retries_identical_frames_then_exhausts);
