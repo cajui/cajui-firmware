@@ -8,19 +8,19 @@
 
 namespace cajui {
 namespace {
-bool crypt(bool sealing, const Key& key, const uint8_t nonce[12],
+bool crypt(bool sealing, const Key& key, const uint8_t nonce[NonceSize],
            const uint8_t* aad, size_t aadSize, const uint8_t* input,
-           size_t size, uint8_t* output, uint8_t tag[16]) {
+           size_t size, uint8_t* output, uint8_t tag[TagSize]) {
     if (aadSize > MaxFrame || size > MaxPayload) return false;
     bool ok = false;
 #ifdef ARDUINO
     mbedtls_gcm_context ctx;
     mbedtls_gcm_init(&ctx);
-    if (mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key.data(), 128) == 0) {
+    if (mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key.data(), KeySize * 8) == 0) {
         const int result = sealing ?
-            mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, size, nonce, 12,
-                                     aad, aadSize, input, output, 16, tag) :
-            mbedtls_gcm_auth_decrypt(&ctx, size, nonce, 12, aad, aadSize, tag, 16,
+            mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, size, nonce, NonceSize,
+                                     aad, aadSize, input, output, TagSize, tag) :
+            mbedtls_gcm_auth_decrypt(&ctx, size, nonce, NonceSize, aad, aadSize, tag, TagSize,
                                     input, output);
         ok = result == 0;
     }
@@ -34,12 +34,12 @@ bool crypt(bool sealing, const Key& key, const uint8_t nonce[12],
              EVP_EncryptUpdate(ctx, nullptr, &written, aad, int(aadSize)) == 1 &&
              EVP_EncryptUpdate(ctx, output, &written, input, int(size)) == 1 &&
              EVP_EncryptFinal_ex(ctx, output + written, &finalSize) == 1 &&
-             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag) == 1;
+             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TagSize, tag) == 1;
     } else {
         ok = EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, key.data(), nonce) == 1 &&
              EVP_DecryptUpdate(ctx, nullptr, &written, aad, int(aadSize)) == 1 &&
              EVP_DecryptUpdate(ctx, output, &written, input, int(size)) == 1 &&
-             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, tag) == 1 &&
+             EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TagSize, tag) == 1 &&
              EVP_DecryptFinal_ex(ctx, output + written, &finalSize) == 1;
     }
     EVP_CIPHER_CTX_free(ctx);
@@ -49,12 +49,12 @@ bool crypt(bool sealing, const Key& key, const uint8_t nonce[12],
     return ok;
 }
 }
-bool encrypt(const Key& key, const uint8_t nonce[12], const uint8_t* aad, size_t aadSize,
-             const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[16]) {
+bool encrypt(const Key& key, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
+             const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[TagSize]) {
     return crypt(true, key, nonce, aad, aadSize, input, size, output, tag);
 }
-bool decrypt(const Key& key, const uint8_t nonce[12], const uint8_t* aad, size_t aadSize,
-             const uint8_t* input, size_t size, const uint8_t tag[16], uint8_t* output) {
+bool decrypt(const Key& key, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
+             const uint8_t* input, size_t size, const uint8_t tag[TagSize], uint8_t* output) {
     Tag copy{};
     std::memcpy(copy.data(), tag, copy.size());
     return crypt(false, key, nonce, aad, aadSize, input, size, output, copy.data());

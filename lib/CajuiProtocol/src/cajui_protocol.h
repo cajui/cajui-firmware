@@ -5,10 +5,13 @@
 
 namespace cajui {
 // Binary wire v1. Not compatible with earlier text formats.
-constexpr size_t HeaderSize = 32, TagSize = 16, MaxReadings = 8;
-constexpr size_t MaxPayload = 7 + MaxReadings * 10;
+constexpr size_t HeaderSize = 32, TagSize = 16, NonceSize = 12, KeySize = 16, MaxReadings = 8;
+// DATA payload: battery u16, next interval u32 and count u8, then fixed-size readings.
+constexpr size_t DataPrefixSize = 7, ReadingSize = 10;
+constexpr size_t MinDataPayload = DataPrefixSize + ReadingSize;
+constexpr size_t MaxPayload = DataPrefixSize + MaxReadings * ReadingSize;
 constexpr size_t MaxFrame = HeaderSize + MaxPayload + TagSize;
-using Key = std::array<uint8_t, 16>;
+using Key = std::array<uint8_t, KeySize>;
 using Tag = std::array<uint8_t, TagSize>;
 enum class Type : uint8_t { Data = 1, Ack = 2 };
 enum class Status : uint8_t { Ok = 0, Error = 1, Skipped = 2 };
@@ -43,10 +46,10 @@ struct Message {
 };
 // AES-128-GCM backend: mbedTLS on ESP32, OpenSSL on the host.
 // Use established crypto libraries. Input and output buffers must be distinct.
-bool encrypt(const Key&, const uint8_t nonce[12], const uint8_t* aad, size_t aadSize,
-             const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[16]);
-bool decrypt(const Key&, const uint8_t nonce[12], const uint8_t* aad, size_t aadSize,
-             const uint8_t* input, size_t size, const uint8_t tag[16], uint8_t* output);
+bool encrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
+             const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[TagSize]);
+bool decrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
+             const uint8_t* input, size_t size, const uint8_t tag[TagSize], uint8_t* output);
 Result seal(const Binding&, const Message&, Frame&);
 Result open(const Binding&, const Frame&, Message&);
 bool sameFrame(const Frame&, const Frame&);
