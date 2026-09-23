@@ -38,7 +38,7 @@ StartResult SendController::start(const Binding& binding, const Data& data, Coun
 
 void SendController::finish(Completion completion) {
     // Stop the driver BEFORE releasing the frame it may still reference.
-    radioAvailable_ = radio_.sleep();
+    radioAvailable_ = radioAvailable_ && radio_.sleep();
     report_.radioSleeping = radioAvailable_;
     report_.attempts = sender_.attempts();
     report_.completion = completion;
@@ -50,6 +50,8 @@ void SendController::finish(Completion completion) {
 
 void SendController::wait(uint32_t minimum, uint32_t maximum) {
     if (!radio_.sleep()) {
+        // Latch an uncertain stop; never retry a failed shutdown implicitly.
+        radioAvailable_ = false;
         finish(Completion::RadioError);
         return;
     }

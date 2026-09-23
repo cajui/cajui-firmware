@@ -42,7 +42,7 @@ public:
     ChannelStatus channel = ChannelStatus::Clear;
     TransmitStatus tx = TransmitStatus::Complete;
     ReceiveStatus rx = ReceiveStatus::Empty;
-    bool cadStart = true, txStart = true, sleepOk = true;
+    bool cadStart = true, txStart = true, sleepOk = true, failOneSleep = false;
     unsigned cadCalls = 0, readCalls = 0, sleepCalls = 0;
     uint32_t completedAt = 0;
     Frame incoming{};
@@ -57,6 +57,7 @@ public:
     ReceiveStatus receive(Frame& out) override { ++readCalls; out = incoming; return rx; }
     bool sleep() override {
         ++sleepCalls;
+        if (failOneSleep) { failOneSleep = false; return false; }
         if (sleepOk) retained = nullptr;
         return sleepOk;
     }
@@ -263,9 +264,12 @@ void test_runtime_sleep_failure_retains_frame_and_blocks_reuse() {
     TEST_ASSERT_EQUAL_UINT64(1, r.counter.last);
     // The adapter owner must recover/quiesce the radio before destroying the controller.
     r.radio.sleepOk = true; TEST_ASSERT_TRUE(r.radio.sleep());
-    Rig initial; initial.start(); initial.radio.sleepOk = false; initial.controller.poll();
+    Rig initial; initial.start(); initial.radio.failOneSleep = true; initial.controller.poll();
     TEST_ASSERT_EQUAL_INT(int(Completion::RadioError), int(initial.controller.report().completion));
     TEST_ASSERT_FALSE(initial.controller.report().radioSleeping);
+    TEST_ASSERT_EQUAL_UINT(1, initial.radio.sleepCalls); // No automatic retry after uncertain stop.
+    TEST_ASSERT_EQUAL_INT(int(StartResult::RadioUnavailable),
+        int(initial.controller.start(binding(), sample(), initial.counter)));
 }
 void test_runtime_random_failure_or_out_of_range_stops() {
     for (int scenario = 0; scenario < 3; ++scenario) {
