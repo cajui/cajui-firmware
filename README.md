@@ -6,10 +6,10 @@ Firmware foundations for a direct LoRa telemetry network: sensor nodes send read
 to a receiver, which acknowledges accepted samples and eventually forwards them to
 a server.
 
-**Experimental development code.** The shared protocol core, persistent storage,
-USB enrollment and a host-tested delivery scheduler are implemented.
-Administration-only ESP32 images are available; they keep the radio in reset.
-Hardware integration of sensors/radio and server forwarding are still pending. No production transmitter or receiver image is released.
+**Experimental development code.** The shared protocol core, persistent storage, USB
+enrollment and a host-tested delivery scheduler are implemented. Administration-only
+ESP32 images are available; they keep the radio in reset. No production transmitter or
+receiver image is released.
 
 ## Implemented
 
@@ -20,12 +20,20 @@ Hardware integration of sensors/radio and server forwarding are still pending. N
 - Two-phase USB enrollment, resumable setup, key rotation and revocation.
 - A local Python tool with private recovery files and a software-restart check.
 - A nonblocking send controller with injected radio, clock and jitter, bounded
-  channel waits, ACK deadlines and cancellation. The hardware adapter is pending.
+  channel waits, ACK deadlines and cancellation.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
-Host tests inject storage failures. The real adapter relies on NVS atomic blob
-replacement; arbitrary power-loss behavior and flash endurance still require field
-validation. The USB restart check does not establish radio communication.
+## Pending and unvalidated
+
+This list is the single record of implementation status; the other documents describe
+contracts and link here.
+
+- Radio adapter, sensor drivers, receiver radio loop and server forwarding.
+- Execution on hardware: CI only compiles the ESP32 targets, and no physical radio
+  exchange has been tested. The USB restart check does not establish radio communication.
+- Arbitrary power-loss behavior and flash endurance of the NVS adapter. Host tests inject
+  storage failures; the adapter relies on NVS atomic blob replacement.
+- RF coexistence, regulatory configuration and an independent security review.
 
 [Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
 [Persistent storage](docs/persistence.md)

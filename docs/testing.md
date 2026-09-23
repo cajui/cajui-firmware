@@ -26,10 +26,11 @@ On macOS the runner locates OpenSSL via Homebrew and LLVM via `xcrun`. Elsewhere
 OpenSSL and LLVM must be on the compiler/tool search paths. `OPENSSL_ROOT_DIR`
 can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 
-Coverage gates include `codec.cpp`, `delivery.cpp`, `cajui_runtime.cpp`, the host branch of `crypto.cpp`,
-`cajui_storage.cpp`, `snapshot.cpp` and `cajui_provisioning.cpp`: 95% lines and 85% branches. Compiler/library allocation failures are
-not all induced. Neither a high coverage percentage nor a passing ESP32 build
-proves security, radio performance, durable flash behavior or battery life.
+Coverage gates include `codec.cpp`, `delivery.cpp`, `cajui_runtime.cpp`, the host
+branch of `crypto.cpp`, `cajui_storage.cpp`, `snapshot.cpp` and
+`cajui_provisioning.cpp`: 95% lines and 85% branches. Compiler/library allocation
+failures are not all induced. Neither a high coverage percentage nor a passing ESP32
+build proves security, radio performance, durable flash behavior or battery life.
 
 The ESP32 target compiles the same tests with mbedTLS. Build-only success is not a
 physical test result. CI does not connect to devices or upload firmware.

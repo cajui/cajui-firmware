@@ -1,8 +1,8 @@
 # Direct LoRa protocol v1
 
-Draft implementation contract. The shared core is implemented; storage and USB provisioning
-are implemented, while radio integration remains pending. This
-specification has not undergone an independent security audit.
+Draft implementation contract; it has not undergone an independent security audit.
+For what is implemented and validated, see [pending and
+unvalidated](../README.md#pending-and-unvalidated).
 
 ## Scope
 
@@ -87,12 +87,12 @@ primitive; production senders must reserve counters durably through `Sender` and
 `CounterStore` instead of choosing them directly.
 
 `CounterStore::reserve` must atomically persist a monotonically increasing
-reservation BEFORE encryption/transmission. Missing, corrupt or exhausted state,
-or a failed write, must prevent transmission. Restarting or waking from sleep
-must not reset counters while retaining a key. Block reservation may reduce flash
-wear only if the reservation high-water mark is durable before any counter in the
-block is used. Skipped counters are valid. New keys permit new counter state;
-restoring an old key with reset counters is forbidden. The NVS adapter is implemented; physical power-loss validation remains pending.
+reservation BEFORE encryption/transmission. Missing, corrupt or exhausted state, or a
+failed write, must prevent transmission. Restarting or waking from sleep must not
+reset counters while retaining a key. Block reservation may reduce flash wear only if
+the reservation high-water mark is durable before any counter in the block is used.
+Skipped counters are valid. New keys permit new counter state; restoring an old key
+with reset counters is forbidden.
 
 Retries reuse the identical serialized frame. Duplicate ACKs have identical bytes.
 Do not re-encrypt changed content with an existing counter. Adding variable ACK
@@ -122,10 +122,10 @@ continuity cannot be trusted. The real adapter must uphold these guarantees acro
 power loss. In-memory unit tests do not prove that behavior.
 
 An initial integration target is a bounded global queue of 128 DATA frames, without
-overwriting unforwarded samples. This capacity is implemented by the persistent store. Forwarding must use a stable identity including network, node, credential
-generation, sample counter, sensor and metric. Delete queued samples only after
-server acceptance. The server adapter is pending; avoid representing u64 IDs as
-JSON numbers in consumers that lose integer precision.
+overwriting unforwarded samples. Forwarding must use a stable identity including
+network, node, credential generation, sample counter, sensor and metric. Delete
+queued samples only after server acceptance. Avoid representing u64 IDs as JSON
+numbers in consumers that lose integer precision.
 
 ## Sender and radio scheduling
 
@@ -136,14 +136,14 @@ success or silently discard the frame. The caller may explicitly `abandon` after
 the final ACK window closes and account for an unconfirmed sample.
 
 The host-tested `SendController` implements the initial scheduling policy: channel
-activity detection before transmission, 0–500 ms initial jitter, 1,500 ms ACK timeout measured from the
-end of transmission, 100–500 ms backoff after the first failure, and 200–1,000 ms
-after the second. A 10-second overall send-cycle deadline must include busy-channel
-waiting. Scheduling is implemented over injected radio, clock and jitter interfaces;
-the hardware adapter is still pending. CAD/TX watchdogs and adapter contracts are
-described in [runtime](runtime.md). Adjust timers against radio airtime and durable
-storage latency when selecting a radio profile. Activity
-detection reduces collisions but cannot eliminate hidden nodes or interference.
+activity detection before transmission, 0–500 ms initial jitter, 1,500 ms ACK timeout
+measured from the end of transmission, 100–500 ms backoff after the first failure,
+and 200–1,000 ms after the second. A 10-second overall send-cycle deadline must
+include busy-channel waiting. Scheduling runs over injected radio, clock and jitter
+interfaces. CAD/TX watchdogs and adapter contracts are described in
+[runtime](runtime.md). Adjust timers against radio airtime and durable storage
+latency when selecting a radio profile. Activity detection reduces collisions but
+cannot eliminate hidden nodes or interference.
 
 After a cycle is exhausted, the initial integration policy is to count the sample
 as unconfirmed and sleep until the next measurement. There is no planned persistent
@@ -161,16 +161,16 @@ the receiver and configuration/counter state on the node, verifies both, and the
 validates an authenticated radio exchange. Configuration success and a validated
 link are separate states.
 
-Partial setup must be resumable or replaced with fresh credentials consistently
-on both devices. Never offer a reset operation that erases counters while retaining
-the key. Serial commands, the provisioning tool and NVS adapter are implemented; radio tests
-remain pending. See [USB enrollment](provisioning.md) and [storage](persistence.md). There are no over-the-air enrollment messages in v1.
+Partial setup must be resumable or replaced with fresh credentials consistently on
+both devices. Never offer a reset operation that erases counters while retaining the
+key. See [USB enrollment](provisioning.md) and [storage](persistence.md). There are
+no over-the-air enrollment messages in v1.
 
 ## Validation and references
 
-[Tests](testing.md) exercise the host core and compile the same suite for ESP32.
-The public fixtures use fixed keys solely as test vectors. Hardware execution,
-power-loss testing, RF coexistence and independent security review remain pending.
+[Tests](testing.md) exercise the host core and compile the same suite for ESP32. The
+public fixtures use fixed keys solely as test vectors. Open validation work is listed
+in [pending and unvalidated](../README.md#pending-and-unvalidated).
 
 - [NIST SP 800-38D: GCM](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
 - [OpenSSL EVP](https://docs.openssl.org/3.0/man3/EVP_EncryptInit/)
