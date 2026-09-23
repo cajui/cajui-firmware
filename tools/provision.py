@@ -6,6 +6,7 @@
 """Enroll devices over local USB. Recovery files contain secrets; never publish them."""
 
 import argparse
+from enum import IntEnum
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,20 @@ STORAGE_FAILURES = {
 }
 
 
+# Error codes the firmware may send; anything else is reported as UNKNOWN.
+DEVICE_ERRORS = {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED"}
+# Recovery file phases in order; progress is recorded and never moves backwards.
+PHASES = ("new", "receiver_prepared", "both_prepared", "receiver_active", "configured")
+NO_NETWORK = "0" * 16
+
+
+class Enrollment(IntEnum):
+    # Mirrors cajui::Enrollment as reported by INFO.
+    PREPARED = 1
+    ACTIVE = 2
+    REVOKED = 3
+
+
 class ProvisioningError(Exception):
     pass
 
@@ -48,6 +63,8 @@ class SerialLink:
     def __init__(self, port):
         import serial  # Optional during unit tests; pinned in the script metadata.
 
+        # Open with DTR/RTS low: toggling them drives the board's auto-reset circuit,
+        # which would restart the ESP32 (or enter its bootloader) on every connection.
         self.serial = serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2)
         self.serial.dtr = False
         self.serial.rts = False
@@ -69,12 +86,7 @@ class SerialLink:
                 continue
             fields = response.decode("ascii", errors="replace").strip().split()
             if len(fields) >= 3 and fields[:2] == ["CJ1", "ERR"]:
-                code = (
-                    fields[2]
-                    if fields[2]
-                    in {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED"}
-                    else "UNKNOWN"
-                )
+                code = fields[2] if fields[2] in DEVICE_ERRORS else "UNKNOWN"
                 raise ProvisioningError("Device rejected request: " + code)
             if len(fields) >= 3 and fields[:2] == ["CJ1", "OK"] and fields[2] == command.split()[0]:
                 return fields[3:]
@@ -113,32 +125,50 @@ def ready(link):
             time.sleep(0.2)
 
 
-def save(path, transaction, create=False):
-    path = Path(path)
-    content = (json.dumps(transaction, sort_keys=True) + "\n").encode()
-    if create:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as output:
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-    else:
-        # Atomic replacement prevents a host interruption from truncating recovery state.
-        fd, temporary = tempfile.mkstemp(prefix=".cajui-", dir=path.parent)
-        try:
-            with os.fdopen(fd, "wb") as output:
-                output.write(content)
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+def write_durably(fd, transaction):
+    with os.fdopen(fd, "wb") as output:
+        output.write((json.dumps(transaction, sort_keys=True) + "\n").encode())
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def sync_directory(path):
     directory = os.open(path.parent, os.O_RDONLY)
     try:
         os.fsync(directory)
     finally:
         os.close(directory)
+
+
+def create(path, transaction):
+    """Write a new owner-only recovery file; never overwrite an existing one."""
+    path = Path(path)
+    write_durably(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), transaction)
+    sync_directory(path)
+
+
+def save(path, transaction):
+    """Replace an existing recovery file atomically."""
+    path = Path(path)
+    # Atomic replacement prevents a host interruption from truncating recovery state.
+    fd, temporary = tempfile.mkstemp(prefix=".cajui-", dir=path.parent)
+    try:
+        write_durably(fd, transaction)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    sync_directory(path)
+
+
+def random_id():
+    return f"{secrets.randbelow((1 << 64) - 1) + 1:016x}"  # Nonzero, 64 bits.
+
+
+def advance(path, transaction, phase):
+    if PHASES.index(phase) > PHASES.index(transaction["phase"]):
+        transaction["phase"] = phase
+        save(path, transaction)
 
 
 def load(path):
@@ -168,13 +198,7 @@ def load(path):
             raise ProvisioningError("Recovery identifiers must not be zero")
     if not int(identifier(transaction["key"], 32), 16) or transaction["profile"] != "0001":
         raise ProvisioningError("Invalid credential or radio profile")
-    if transaction["phase"] not in {
-        "new",
-        "receiver_prepared",
-        "both_prepared",
-        "receiver_active",
-        "configured",
-    }:
+    if transaction["phase"] not in PHASES:
         raise ProvisioningError("Invalid enrollment phase")
     return transaction
 
@@ -194,7 +218,7 @@ def check_devices(tx, rx, transaction=None):
         ):
             raise ProvisioningError("Device identity changed; select the intended USB ports")
         for device in (transmitter, receiver):
-            if device["network"] != "0" * 16 and any(
+            if device["network"] != NO_NETWORK and any(
                 device[field] != transaction[field] for field in ("network", "receiver", "profile")
             ):
                 raise ProvisioningError("Device belongs to a different network/profile")
@@ -203,9 +227,9 @@ def check_devices(tx, rx, transaction=None):
 
 def get_info(link, device, transaction):
     values = link.request(f"INFO {device} {transaction['node']} {transaction['generation']}")
-    if len(values) != 2 or values[0] not in {"1", "2", "3"}:
+    if len(values) != 2 or values[0] not in {str(state.value) for state in Enrollment}:
         raise ProvisioningError("Invalid enrollment status")
-    return int(values[0]), int(identifier(values[1]), 16)
+    return Enrollment(int(values[0])), int(identifier(values[1]), 16)
 
 
 def enroll(tx, rx, path, resume=False):
@@ -219,23 +243,19 @@ def enroll(tx, rx, path, resume=False):
             get_info(tx, transaction["node"], transaction)
     else:
         transmitter, receiver = check_devices(tx, rx)
-        network = (
-            receiver["network"]
-            if int(receiver["network"], 16)
-            else f"{secrets.randbelow((1 << 64) - 1) + 1:016x}"
-        )
+        network = receiver["network"] if receiver["network"] != NO_NETWORK else random_id()
         transaction = {
             "version": 1,
             "network": network,
             "receiver": receiver["device"],
             "node": transmitter["device"],
-            "generation": f"{secrets.randbelow((1 << 64) - 1) + 1:016x}",
+            "generation": random_id(),
             "key": secrets.token_hex(16),
             "profile": "0001",
             "phase": "new",
         }
         check_devices(tx, rx, transaction)
-        save(path, transaction, create=True)  # Persist the secret BEFORE mutating either device.
+        create(path, transaction)  # Persist the secret BEFORE mutating either device.
     for link, device, phase in (
         (rx, transaction["receiver"], "receiver_prepared"),
         (tx, transaction["node"], "both_prepared"),
@@ -244,21 +264,15 @@ def enroll(tx, rx, path, resume=False):
             f"PREPARE {device} {transaction['network']} {transaction['receiver']} "
             f"{transaction['node']} {transaction['generation']} {transaction['key']} {transaction['profile']}"
         )
-        # Never roll recovery metadata back when replaying earlier steps.
-        order = ["new", "receiver_prepared", "both_prepared", "receiver_active", "configured"]
-        if order.index(phase) > order.index(transaction["phase"]):
-            transaction["phase"] = phase
-            save(path, transaction)
+        advance(path, transaction, phase)
     for link, device, phase in (
         (rx, transaction["receiver"], "receiver_active"),
         (tx, transaction["node"], "configured"),
     ):
         link.request(f"ACTIVATE {device} {transaction['node']} {transaction['generation']}")
-        if get_info(link, device, transaction)[0] != 2:
+        if get_info(link, device, transaction)[0] != Enrollment.ACTIVE:
             raise ProvisioningError("Device did not activate the enrollment")
-        if phase == "configured" or transaction["phase"] != "configured":
-            transaction["phase"] = phase
-            save(path, transaction)
+        advance(path, transaction, phase)
     return {
         "node": transaction["node"],
         "receiver": transaction["receiver"],
@@ -270,24 +284,25 @@ def enroll(tx, rx, path, resume=False):
 
 def verify_restart(tx, rx, path):
     transaction = load(path)
-    previous = check_devices(tx, rx, transaction)
+    boots_before = [device["boot"] for device in check_devices(tx, rx, transaction)]
     for link, device in ((tx, transaction["node"]), (rx, transaction["receiver"])):
-        if get_info(link, device, transaction)[0] != 2:
+        if get_info(link, device, transaction)[0] != Enrollment.ACTIVE:
             raise ProvisioningError("Both devices must have active enrollment")
-    command = f"RESERVE {transaction['node']} {transaction['node']} {transaction['generation']}"
+    transmitter = transaction["node"]  # A transmitter's device ID is its node ID.
+    command = f"RESERVE {transmitter} {transaction['node']} {transaction['generation']}"
     before = int(identifier(tx.request(command)[0]), 16)
-    tx.request("REBOOT " + transaction["node"])
+    tx.request("REBOOT " + transmitter)
     rx.request("REBOOT " + transaction["receiver"])
     deadline = time.monotonic() + 15
     while True:
-        current = check_devices(tx, rx, transaction)
-        if all(now["boot"] != before["boot"] for now, before in zip(current, previous)):
+        boots = [device["boot"] for device in check_devices(tx, rx, transaction)]
+        if all(boot != old for boot, old in zip(boots, boots_before)):
             break
         if time.monotonic() >= deadline:
             raise ProvisioningError("Devices did not complete a new boot")
         time.sleep(0.1)
     for link, device in ((tx, transaction["node"]), (rx, transaction["receiver"])):
-        if get_info(link, device, transaction)[0] != 2:
+        if get_info(link, device, transaction)[0] != Enrollment.ACTIVE:
             raise ProvisioningError("Enrollment did not survive restart")
     after = int(identifier(tx.request(command)[0]), 16)
     if after <= before:
