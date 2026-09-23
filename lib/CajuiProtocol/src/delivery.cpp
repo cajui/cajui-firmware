@@ -64,7 +64,8 @@ Result Sender::acknowledge(const Frame& ack) {
     const auto result = open(binding_, ack, m);
     if (result != Result::Ok) return result;
     if (m.type != Type::Ack || m.counter != counter_ ||
-        std::memcmp(m.dataTag.data(), pending_.bytes.data() + pending_.size - TagSize, TagSize))
+        std::memcmp(m.dataTag.data(), pending_.bytes.data() + pending_.size - TagSize, TagSize) !=
+            0)
         return Result::Invalid;
     delivered_ = true;
     return Result::Ok;

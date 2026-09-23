@@ -28,7 +28,8 @@ bool crypt(bool sealing, const Key& key, const uint8_t nonce[NonceSize], const u
 #else
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return false;
-    int written = 0, finalSize = 0;
+    int written = 0;
+    int finalSize = 0;
     if (sealing) {
         ok = EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, key.data(), nonce) == 1 &&
              EVP_EncryptUpdate(ctx, nullptr, &written, aad, int(aadSize)) == 1 &&

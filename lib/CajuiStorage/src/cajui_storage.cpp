@@ -4,11 +4,12 @@
 namespace cajui {
 namespace {
 // CRC detects accidental snapshot corruption; it is not authentication.
+constexpr uint32_t Crc32Polynomial = 0xedb88320u; // Reflected IEEE 802.3.
 uint32_t checksum(const uint8_t* data, size_t length) {
     uint32_t crc = UINT32_MAX;
     for (size_t i = 0; i < length; ++i) {
         crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (Crc32Polynomial & (0u - (crc & 1u)));
     }
     return ~crc;
 }
@@ -138,7 +139,7 @@ Health PersistentStore::decode() {
     Reader r{bytes_.data()};
     uint8_t magic[sizeof(SnapshotMagic)]{};
     r.block(magic, sizeof(magic));
-    if (std::memcmp(magic, SnapshotMagic, sizeof(magic)) || r.number(1) != SnapshotVersion)
+    if (std::memcmp(magic, SnapshotMagic, sizeof(magic)) != 0 || r.number(1) != SnapshotVersion)
         return Health::Format;
     if (r.number(1) != uint8_t(role_)) return Health::Role;
     if (r.number(8) != device_) return Health::Device;

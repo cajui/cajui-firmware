@@ -3,6 +3,10 @@
 #include <cstring>
 namespace cajui {
 namespace {
+// Word counts include "CJ1", the command and the device ID.
+constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWords = 9;
+constexpr size_t IdDigits = 16, ProfileDigits = 4;
+constexpr char FirstPrintable = ' ', LastPrintable = '~';
 bool hex(const char* text, size_t length, uint64_t& result) {
     if (std::strlen(text) != length) return false;
     result = 0;
@@ -15,7 +19,7 @@ bool hex(const char* text, size_t length, uint64_t& result) {
     return true;
 }
 bool parseKey(const char* text, Key& key) {
-    if (std::strlen(text) != 32) return false;
+    if (std::strlen(text) != key.size() * 2) return false;
     for (size_t i = 0; i < key.size(); ++i) {
         char byte[3] = {text[i * 2], text[i * 2 + 1], 0};
         uint64_t value = 0;
@@ -24,6 +28,22 @@ bool parseKey(const char* text, Key& key) {
     }
     return true;
 }
+// Reads command arguments in their documented order.
+class Fields {
+public:
+    explicit Fields(char* const* words) : next_(words) {}
+    bool id(uint64_t& value) { return hex(*next_++, IdDigits, value); }
+    bool key(Key& value) { return parseKey(*next_++, value); }
+    bool profile(uint16_t& value) {
+        uint64_t parsed = 0;
+        if (!hex(*next_++, ProfileDigits, parsed)) return false;
+        value = uint16_t(parsed);
+        return true;
+    }
+
+private:
+    char* const* next_;
+};
 const char* name(Result r) {
     switch (r) {
     case Result::Ok: return "OK";
@@ -57,13 +77,13 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     if (!input || !length || length >= CommandCapacity) return true;
     char buffer[CommandCapacity]{};
     for (size_t i = 0; i < length; ++i)
-        if (input[i] < 32 || input[i] > 126) return true;
+        if (input[i] < FirstPrintable || input[i] > LastPrintable) return true;
     std::memcpy(buffer, input, length);
-    char* words[10]{};
+    char* words[MaxWords]{};
     size_t count = 0;
     char* cursor = buffer;
     while (*cursor) {
-        if (count == 10 || *cursor == ' ') return true;
+        if (count == MaxWords || *cursor == ' ') return true;
         words[count++] = cursor;
         while (*cursor && *cursor != ' ') ++cursor;
         if (*cursor) {
@@ -71,7 +91,7 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
             if (!*cursor) return true;
         }
     }
-    if (count < 2 || std::strcmp(words[0], "CJ1")) return true;
+    if (count < 2 || std::strcmp(words[0], "CJ1") != 0) return true;
     const char* command = words[1];
     if (!std::strcmp(command, "HELLO") && count == 2) {
         std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx",
@@ -83,10 +103,11 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
                       static_cast<unsigned long>(boot_));
         return true;
     }
+    Fields fields(words + 2);
     uint64_t device = 0;
-    if (count < 3 || !hex(words[2], 16, device) || device != store_.device()) return true;
+    if (count < RebootWords || !fields.id(device) || device != store_.device()) return true;
     // An unhealthy store stays latched until remounted, and only a restart remounts it.
-    if (!std::strcmp(command, "REBOOT") && count == 3) {
+    if (!std::strcmp(command, "REBOOT") && count == RebootWords) {
         restart_ = true;
         std::snprintf(reply, capacity, "CJ1 OK REBOOT");
         return true;
@@ -96,15 +117,20 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
         return true;
     }
     Result result = Result::Invalid;
-    if (!std::strcmp(command, "PREPARE") && count == 9) {
-        uint64_t network = 0, receiver = 0, node = 0, generation = 0, profile = 0;
+    if (!std::strcmp(command, "PREPARE") && count == PrepareWords) {
+        uint64_t network = 0;
+        uint64_t receiver = 0;
+        uint64_t node = 0;
+        uint64_t generation = 0;
+        uint16_t profile = 0;
         Key key{};
-        if (hex(words[3], 16, network) && hex(words[4], 16, receiver) && hex(words[5], 16, node) &&
-            hex(words[6], 16, generation) && parseKey(words[7], key) && hex(words[8], 4, profile))
-            result = store_.prepare(network, receiver, node, generation, key, uint16_t(profile));
-    } else if (count == 5) {
-        uint64_t node = 0, generation = 0;
-        if (!hex(words[3], 16, node) || !hex(words[4], 16, generation)) return true;
+        if (fields.id(network) && fields.id(receiver) && fields.id(node) && fields.id(generation) &&
+            fields.key(key) && fields.profile(profile))
+            result = store_.prepare(network, receiver, node, generation, key, profile);
+    } else if (count == EnrollmentWords) {
+        uint64_t node = 0;
+        uint64_t generation = 0;
+        if (!fields.id(node) || !fields.id(generation)) return true;
         if (!std::strcmp(command, "ACTIVATE"))
             result = store_.activate(node, generation);
         else if (!std::strcmp(command, "REVOKE"))

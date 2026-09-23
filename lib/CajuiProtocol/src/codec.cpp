@@ -8,6 +8,9 @@ constexpr uint8_t Magic[4] = {'C', 'J', 'L', 'R'};
 constexpr uint8_t ProtocolVersion = 1;
 constexpr size_t VersionAt = 4, TypeAt = 5, NetworkAt = 6, NodeAt = 14, CounterAt = 22,
                  LengthAt = 30;
+// DATA payload offsets, then offsets within each reading.
+constexpr size_t BatteryAt = 0, NextSecondsAt = 2, CountAt = 6;
+constexpr size_t SensorAt = 0, MetricAt = 2, UnitAt = 4, StatusAt = 5, ValueAt = 6;
 void put(uint8_t* out, uint64_t value, size_t size) {
     for (size_t i = 0; i < size; ++i) out[size - 1 - i] = uint8_t(value >> (i * 8));
 }
@@ -53,17 +56,17 @@ Result seal(const Binding& b, const Message& m, Frame& out) {
     if (m.type == Type::Data) {
         if (!detail::validData(m.data)) return Result::Invalid;
         length = DataPrefixSize + size_t(m.data.count) * ReadingSize;
-        put(plain, m.data.batteryMv, 2);
-        put(plain + 2, m.data.nextSeconds, 4);
-        plain[6] = m.data.count;
+        put(plain + BatteryAt, m.data.batteryMv, 2);
+        put(plain + NextSecondsAt, m.data.nextSeconds, 4);
+        plain[CountAt] = m.data.count;
         for (size_t i = 0; i < m.data.count; ++i) {
             const auto& r = m.data.readings[i];
             uint8_t* p = plain + DataPrefixSize + i * ReadingSize;
-            put(p, r.sensor, 2);
-            put(p + 2, r.metric, 2);
-            p[4] = r.unit;
-            p[5] = uint8_t(r.status);
-            put(p + 6, static_cast<uint32_t>(r.milliValue), 4);
+            put(p + SensorAt, r.sensor, 2);
+            put(p + MetricAt, r.metric, 2);
+            p[UnitAt] = r.unit;
+            p[StatusAt] = uint8_t(r.status);
+            put(p + ValueAt, static_cast<uint32_t>(r.milliValue), 4);
         }
     } else {
         std::memcpy(plain, m.dataTag.data(), TagSize);
@@ -92,7 +95,7 @@ Result open(const Binding& b, const Frame& frame, Message& out) {
     if (!detail::usable(b)) return Result::Unauthorized;
     if (frame.size < HeaderSize + TagSize || frame.size > MaxFrame) return Result::Invalid;
     const auto* h = frame.bytes.data();
-    if (std::memcmp(h, Magic, sizeof(Magic)) || h[VersionAt] != ProtocolVersion ||
+    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || h[VersionAt] != ProtocolVersion ||
         (h[TypeAt] != uint8_t(Type::Data) && h[TypeAt] != uint8_t(Type::Ack)))
         return Result::Invalid;
     if (get(h + NetworkAt, 8) != b.network || get(h + NodeAt, 8) != b.node)
@@ -105,7 +108,8 @@ Result open(const Binding& b, const Frame& frame, Message& out) {
         (type == Type::Data &&
          (length < MinDataPayload || (length - DataPrefixSize) % ReadingSize)))
         return Result::Invalid;
-    uint8_t plain[MaxPayload]{}, nonce[NonceSize];
+    uint8_t plain[MaxPayload]{};
+    uint8_t nonce[NonceSize];
     nonceFor(type, counter, nonce);
     if (!decrypt(b.key, nonce, h, HeaderSize, h + HeaderSize, length, h + HeaderSize + length,
                  plain))
@@ -117,19 +121,19 @@ Result open(const Binding& b, const Frame& frame, Message& out) {
         std::memcpy(decoded.dataTag.data(), plain, TagSize);
     } else {
         auto& d = decoded.data;
-        d.batteryMv = uint16_t(get(plain, 2));
-        d.nextSeconds = uint32_t(get(plain + 2, 4));
-        d.count = plain[6];
+        d.batteryMv = uint16_t(get(plain + BatteryAt, 2));
+        d.nextSeconds = uint32_t(get(plain + NextSecondsAt, 4));
+        d.count = plain[CountAt];
         if (d.count > MaxReadings || length != DataPrefixSize + size_t(d.count) * ReadingSize)
             return Result::Invalid;
         for (size_t i = 0; i < d.count; ++i) {
             const uint8_t* p = plain + DataPrefixSize + i * ReadingSize;
             auto& r = d.readings[i];
-            r.sensor = uint16_t(get(p, 2));
-            r.metric = uint16_t(get(p + 2, 2));
-            r.unit = p[4];
-            r.status = static_cast<Status>(p[5]);
-            const uint32_t value = uint32_t(get(p + 6, 4));
+            r.sensor = uint16_t(get(p + SensorAt, 2));
+            r.metric = uint16_t(get(p + MetricAt, 2));
+            r.unit = p[UnitAt];
+            r.status = static_cast<Status>(p[StatusAt]);
+            const uint32_t value = uint32_t(get(p + ValueAt, 4));
             // Defined conversion for signed two's-complement values on the wire.
             r.milliValue = value <= uint32_t(INT32_MAX)
                                ? int32_t(value)
