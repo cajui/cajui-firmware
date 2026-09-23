@@ -7,9 +7,9 @@ to a receiver, which acknowledges accepted samples and eventually forwards them 
 a server.
 
 **Experimental development code.** The shared protocol core, persistent storage, USB
-enrollment and a host-tested delivery scheduler are implemented. Administration-only
-ESP32 images are available; they keep the radio in reset. No production transmitter or
-receiver image is released.
+enrollment and host-tested delivery controllers are implemented. Experimental ESP32
+transmitter/receiver applications integrate an SX1262 adapter and a DHT22 sensor.
+Separate administration images keep the radio in reset. No production image is released.
 
 ## Implemented
 
@@ -21,6 +21,8 @@ receiver image is released.
 - A local Python tool with private recovery files and a software-restart check.
 - A nonblocking send controller with injected radio, clock and jitter, bounded
   channel waits, ACK deadlines and cancellation.
+- SX1262 CAD/TX/RX adapter with task-driven interrupt handling, a durable receiver
+  loop, DHT22 sampling and a five-minute transmitter sleep schedule.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 ## Pending and unvalidated
@@ -28,15 +30,20 @@ receiver image is released.
 This list is the single record of implementation status; the other documents describe
 contracts and link here.
 
-- Radio adapter, sensor drivers, receiver radio loop and server forwarding.
-- Execution on hardware: CI only compiles the ESP32 targets, and no physical radio
-  exchange has been tested. The USB restart check does not establish radio communication.
+- Server forwarding and field battery-voltage/power policy. Runtime battery readings
+  are explicitly unknown; use USB for development. The receiver stops accepting new
+  samples when its 128-frame durable queue is full; nothing silently drains it.
+- Physical validation is limited: a manual bench exchange achieved durable acceptance
+  and authenticated ACKs on the first attempt, including sensor-error telemetry followed
+  by valid climate readings on a subsequent boot. The queue survived that restart.
+  IRQ timing, loss/interference, sleep cadence and power use need further measurement. CI only
+  compiles the ESP32 targets; USB enrollment alone does not validate RF.
 - Arbitrary power-loss behavior and flash endurance of the NVS adapter. Host tests inject
   storage failures; the adapter relies on NVS atomic blob replacement.
 - RF coexistence, regulatory configuration and an independent security review.
 
 [Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
-[Persistent storage](docs/persistence.md)
+[Persistent storage](docs/persistence.md) · [Radio applications](docs/radio-applications.md)
 
 ## Run tests
 
@@ -65,7 +72,7 @@ CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
 Coverage gates apply to the host implementation files listed in
-`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot and
+`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot, application and
 command handler): at least 95% line and 85% branch coverage. The Python client needs 95%
 line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
@@ -83,10 +90,11 @@ ESP32-S3; the protocol core does not depend on a radio driver.
 
 ```text
 lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
+lib/CajuiApplication/src/ Receiver loop and measurement normalization
 lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
 lib/CajuiStorage/src/     Persistent state machine and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
-src/                     Radio-disabled ESP32 administration application
+src/                     ESP32 administration and experimental radio applications
 tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner
 test/test_protocol/      Unity tests and fault-injection storage doubles

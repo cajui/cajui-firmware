@@ -48,6 +48,8 @@ public:
     bool cadStart = true, txStart = true, sleepOk = true, failOneSleep = false;
     unsigned cadCalls = 0, readCalls = 0, sleepCalls = 0;
     uint32_t completedAt = 0;
+    FakeClock* advancingClock = nullptr;
+    uint32_t statusLatency = 0, receiveLatency = 0;
     Frame incoming{};
     const Frame* retained = nullptr;
     std::vector<Frame> sent;
@@ -62,11 +64,13 @@ public:
         return txStart;
     }
     TransmitStatus transmitStatus(uint32_t& time) override {
+        if (advancingClock) advancingClock->advance(statusLatency);
         time = completedAt;
         return tx;
     }
     ReceiveStatus receive(Frame& out) override {
         ++readCalls;
+        if (advancingClock) advancingClock->advance(receiveLatency);
         out = incoming;
         return rx;
     }
@@ -505,8 +509,54 @@ void test_runtime_cancel_each_phase_consumes_counter_without_reuse() {
         r.controller.cancel();
     }
 }
+void test_runtime_completion_can_arrive_during_status_call() {
+    Rig r;
+    r.start();
+    r.enterChannelCheck();
+    r.controller.poll();
+    r.radio.advancingClock = &r.clock;
+    r.radio.statusLatency = 5;
+    r.radio.completedAt = 5;
+    r.controller.poll();
+    TEST_ASSERT_EQUAL_INT(int(SendState::AwaitingAck), int(r.controller.state()));
+    r.radio.incoming = ackFor(r.radio.sent[0]);
+    r.radio.rx = ReceiveStatus::Received;
+    r.controller.poll();
+    COMPLETION(Completion::Acknowledged, r);
+}
+void test_runtime_adapter_latency_cannot_extend_deadlines() {
+    for (int scenario = 0; scenario < 4; ++scenario) {
+        Rig r;
+        r.start();
+        r.enterChannelCheck();
+        if (scenario < 2) {
+            r.controller.poll();
+            r.radio.advancingClock = &r.clock;
+            r.radio.statusLatency = scenario == 0 ? 3000 : 10000;
+            r.controller.poll();
+            COMPLETION(scenario == 0 ? Completion::RadioTimeout : Completion::Deadline, r);
+        } else {
+            r.transmit();
+            r.radio.advancingClock = &r.clock;
+            r.radio.receiveLatency = scenario == 2 ? 1500 : 10000;
+            r.radio.incoming = ackFor(r.radio.sent[0]);
+            r.radio.rx = ReceiveStatus::Received;
+            r.controller.poll();
+            if (scenario == 2) {
+                TEST_ASSERT_EQUAL_INT(int(Completion::None), int(r.controller.report().completion));
+                r.controller.poll();
+                TEST_ASSERT_EQUAL_INT(int(SendState::Waiting), int(r.controller.state()));
+                r.controller.cancel();
+            } else {
+                COMPLETION(Completion::Deadline, r);
+            }
+        }
+    }
+}
 }
 void runRuntimeTests() {
+    RUN_TEST(test_runtime_completion_can_arrive_during_status_call);
+    RUN_TEST(test_runtime_adapter_latency_cannot_extend_deadlines);
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
     RUN_TEST(test_runtime_idle_and_success_reuse);
     RUN_TEST(test_runtime_jitter_and_busy_channel_are_bounded);

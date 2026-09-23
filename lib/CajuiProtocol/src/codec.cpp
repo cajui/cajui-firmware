@@ -47,6 +47,17 @@ bool usable(const Binding& b) {
 }
 } // namespace detail
 
+uint64_t untrustedDataNode(const Frame& frame) {
+    if (frame.size < HeaderSize + MinDataPayload + TagSize || frame.size > MaxFrame) return 0;
+    const auto* h = frame.bytes.data();
+    const size_t length = size_t(get(h + LengthAt, 2));
+    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || h[VersionAt] != ProtocolVersion ||
+        h[TypeAt] != uint8_t(Type::Data) || length < MinDataPayload ||
+        frame.size != HeaderSize + length + TagSize || (length - DataPrefixSize) % ReadingSize)
+        return 0;
+    return get(h + NodeAt, 8);
+}
+
 Result seal(const Binding& b, const Message& m, Frame& out) {
     out = Frame{};
     if (!detail::usable(b)) return Result::Unauthorized;

@@ -40,3 +40,5 @@ jobs:
         run: pio test -e protocol_esp32 --without-uploading --without-testing
       - name: Compile radio-disabled administration images
         run: pio run -e admin_tx -e admin_rx
+      - name: Compile experimental radio applications (no upload)
+        run: pio run -e runtime_tx -e runtime_rx

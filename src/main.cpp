@@ -1,3 +1,4 @@
+#ifndef CAJUI_RUNTIME_ROLE
 #include <Arduino.h>
 #include <cstring>
 #include <esp_mac.h>
@@ -68,3 +69,5 @@ void loop() {
     }
     delay(1);
 }
+
+#endif

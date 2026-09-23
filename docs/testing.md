@@ -31,12 +31,13 @@ OpenSSL and LLVM must be on the compiler/tool search paths. `OPENSSL_ROOT_DIR`
 can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 
 Coverage gates include `codec.cpp`, `delivery.cpp`, `cajui_runtime.cpp`, the host
-branch of `crypto.cpp`, `cajui_storage.cpp`, `snapshot.cpp` and
+`cajui_application.cpp`, the host branch of `crypto.cpp`, `cajui_storage.cpp`, `snapshot.cpp` and
 `cajui_provisioning.cpp`: 95% lines and 85% branches. Compiler/library allocation
 failures are not all induced. Neither a high coverage percentage nor a passing ESP32
 build proves security, radio performance, durable flash behavior or battery life.
 
-The ESP32 target compiles the same tests with mbedTLS. Build-only success is not a
+The ESP32 target compiles the same tests with mbedTLS and explicit
+`UNITY_SUPPORT_64` for the protocol counters and identities. Build-only success is not a
 physical test result. CI does not connect to devices or upload firmware.
 
 Python unittest tests exercise client sequencing, resumable setup, identity checks,
@@ -46,9 +47,11 @@ check script also requires 95% line and branch coverage of `tools/provision.py`
 The gate reads the client file's JSON counts and checks each metric independently,
 without rounding. A high combined percentage cannot compensate for low branch
 coverage. Regression tests cover that distinction and missing coverage data.
-The build job also compiles `admin_tx` and `admin_rx`. No CI step uploads a device.
+The build job also compiles `admin_tx`, `admin_rx`, `runtime_tx` and `runtime_rx`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
 A fixed pre-refactor wire fixture checks compatibility in addition to round trips.
-Coverage includes the controller, but excludes any unimplemented hardware adapter.
+Coverage includes the send and receive controllers and measurement normalization.
+It excludes the board application, SX1262 adapter, FreeRTOS scheduling and sensor
+driver. Those need physical tests; compile success is not timing validation.

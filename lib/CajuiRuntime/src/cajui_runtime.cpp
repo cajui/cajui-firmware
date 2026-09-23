@@ -121,9 +121,19 @@ void SendController::poll() {
         }
         uint32_t completedAt = 0;
         const auto status = radio_.transmitStatus(completedAt);
+        // A task-backed adapter can observe TX-done after this poll began.
+        const auto observedAt = clock_.nowMs();
+        if (uint32_t(observedAt - cycleStart_) >= policy_.cycleTimeoutMs) {
+            finish(Completion::Deadline);
+            break;
+        }
+        if (uint32_t(observedAt - phaseStart_) >= policy_.transmitTimeoutMs) {
+            finish(Completion::RadioTimeout);
+            break;
+        }
         if (status == TransmitStatus::Pending) break;
         if (status != TransmitStatus::Complete ||
-            uint32_t(completedAt - phaseStart_) > uint32_t(now - phaseStart_)) {
+            uint32_t(completedAt - phaseStart_) > uint32_t(observedAt - phaseStart_)) {
             finish(Completion::RadioError);
             break;
         }
@@ -142,6 +152,12 @@ void SendController::poll() {
         }
         Frame frame{};
         const auto status = radio_.receive(frame);
+        const auto observedAt = clock_.nowMs();
+        if (uint32_t(observedAt - cycleStart_) >= policy_.cycleTimeoutMs) {
+            finish(Completion::Deadline);
+            break;
+        }
+        if (uint32_t(observedAt - phaseStart_) >= policy_.ackTimeoutMs) break;
         if (status == ReceiveStatus::Empty) break;
         if (status != ReceiveStatus::Received) {
             finish(Completion::RadioError);

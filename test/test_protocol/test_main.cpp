@@ -398,6 +398,7 @@ void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(plain, out, 16);
 }
 }
+void runApplicationTests();
 void runRuntimeTests();
 void runStorageTests();
 void runProvisioningTests();
@@ -419,6 +420,7 @@ int runTests() {
     RUN_TEST(test_wire_header_is_portable_and_ack_direction_is_separate);
     RUN_TEST(test_nist_aes_gcm_known_answer_and_failure_wipes_output);
     RUN_TEST(test_codec_matches_pre_refactor_wire_fixture);
+    runApplicationTests();
     runRuntimeTests();
     runStorageTests();
     runProvisioningTests();

@@ -129,6 +129,7 @@ def main():
                 "lib/CajuiProtocol/src/codec.cpp",
                 "lib/CajuiProtocol/src/delivery.cpp",
                 "lib/CajuiRuntime/src/cajui_runtime.cpp",
+                "lib/CajuiApplication/src/cajui_application.cpp",
                 "lib/CajuiProtocol/src/crypto.cpp",
                 "lib/CajuiStorage/src/cajui_storage.cpp",
                 "lib/CajuiStorage/src/snapshot.cpp",

@@ -1,26 +1,26 @@
 # Delivery controller and module boundaries
 
 The host-tested `SendController` schedules one already-collected sample over an
-injected radio. It does not contain an SX1262 driver, sensor reads, receiver radio
-loop, server forwarding or MCU deep sleep. The USB administration images still
+injected radio. It does not contain hardware or sensor calls. The separate [radio applications](radio-applications.md)
+provide the board adapter, sensor reads, receiver loop and MCU deep sleep. The USB administration images still
 hold the radio in reset. No physical-radio behavior is validated by these tests.
 
 ## Responsibilities
 
 | Component | Responsibility |
 | --- | --- |
-| Application (future integration) | Read sensors, form `Data`, account for the cycle result and schedule the next measurement. |
+| `CajuiApplication` / board application | Read sensors, form `Data`, account for the cycle result and schedule the next measurement. |
 | `CajuiProtocol/codec.cpp` | Validate, serialize and authenticate bounded DATA/ACK frames; expose no unauthenticated readings. |
 | `CajuiProtocol/delivery.cpp` | Reserve counters, reuse identical DATA on retries, authenticate matching ACKs and persist receiver acceptance before ACK. |
 | `CajuiRuntime` | Schedule jitter, channel checks, TX completion, ACK windows, backoff and termination. |
-| `Radio` adapter (not implemented) | Operate hardware, capture completion timestamps, bound incoming buffers and manage CAD/TX/RX events. |
+| `Radio` adapter | Operate hardware, capture completion timestamps, bound incoming buffers and manage CAD/TX/RX events. |
 | `CajuiStorage` / `CajuiProvisioning` | Durable state and local enrollment; existing public interfaces are preserved. |
 
 These are software boundaries, not seven OSI protocol headers. No wire format,
 nonce construction, public protocol API or snapshot schema changed in this split.
 The receiver acceptance path remains `receive(binding, frame, journal, ack)`.
-Its ACK means durable receiver acceptance, not server delivery. A receiver radio
-scheduler and authorized-binding lookup still need integration.
+Its ACK means durable receiver acceptance, not server delivery. `ReceiverController` resolves existing bindings using an explicitly untrusted header
+hint, then authenticates and commits through this acceptance path.
 
 ## Cycle
 
@@ -70,7 +70,9 @@ deadline; an ACK still queued then is conservatively treated as unconfirmed.
   by entering continuous RX immediately at TX completion, not at the next poll.
 - `transmitStatus` reports the actual completion timestamp in the injected clock's
   timebase. Future/stale timestamps are rejected. Polling late does not create a
-  new ACK window. Platform interrupt handling is the adapter's responsibility.
+  new ACK window. The controller samples time again after status/receive calls so
+  task handoff latency cannot extend a deadline or make a fresh TX completion
+  appear to come from the future. Platform interrupt handling is the adapter's responsibility.
 - `receive` returns at most one bounded frame; drop malformed/oversized hardware
   input safely. RF CRC does not replace software authentication.
 - `sleep()` cancels operations, clears events and releases any retained frame
@@ -100,7 +102,7 @@ When `active()` becomes false, inspect `report()`:
 
 After successful radio shutdown the RAM-only pending frame is released. The caller
 must account for an unconfirmed sample before starting the next cycle. There is no
-persistent node backlog or automatic sensor scheduling. Reconstructing the
+persistent node backlog in this controller. The board application schedules measurements. Reconstructing the
 controller after reboot must use the existing durable counter store and credentials.
 
 ## Tests

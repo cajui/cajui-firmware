@@ -60,6 +60,9 @@ bool encrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, siz
              const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[TagSize]);
 bool decrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
              const uint8_t* input, size_t size, const uint8_t tag[TagSize], uint8_t* output);
+// Unauthenticated routing hint only; callers MUST authenticate with open/receive.
+// Returns zero for malformed/non-DATA envelopes. Never creates a binding.
+uint64_t untrustedDataNode(const Frame&);
 Result seal(const Binding&, const Message&, Frame&);
 Result open(const Binding&, const Frame&, Message&);
 bool sameFrame(const Frame&, const Frame&);

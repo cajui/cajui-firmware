@@ -12,8 +12,8 @@ See [persistence](persistence.md) and [enrollment](provisioning.md) for constrai
 Next milestones:
 
 1. Hardware power-cut and flash-endurance tests for the NVS adapter.
-2. Concrete radio adapter and receiver loop, connecting the tested send controller
-   to sensor reads and MCU sleep. Keep radio validation separate from USB setup.
+2. Validate the experimental radio applications on hardware: IRQ/ACK timing, sensor
+   reads, sleep, interference and battery policy. Keep RF validation separate from USB setup.
 3. Idempotent server forwarding and queue backpressure handling.
 4. Optional local web administration and authenticated radio pairing.
 
