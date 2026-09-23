@@ -1,4 +1,4 @@
-#ifdef ARDUINO
+#ifdef ESP_PLATFORM
 #include "cajui_nvs.h"
 #include <nvs_flash.h>
 namespace cajui {

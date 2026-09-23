@@ -1,6 +1,6 @@
 #include "cajui_protocol.h"
 #include <cstring>
-#ifdef ARDUINO
+#ifdef ESP_PLATFORM
 #include <mbedtls/gcm.h>
 #else
 #include <openssl/evp.h>
@@ -8,7 +8,7 @@
 
 namespace cajui {
 namespace {
-#ifdef ARDUINO
+#ifdef ESP_PLATFORM
 bool gcmSeal(const Key& key, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
              const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[TagSize]) {
     mbedtls_gcm_context ctx;

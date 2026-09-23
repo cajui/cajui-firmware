@@ -1,5 +1,5 @@
 #pragma once
-#ifdef ARDUINO
+#ifdef ESP_PLATFORM
 #include "cajui_storage.h"
 #include <nvs.h>
 namespace cajui {
