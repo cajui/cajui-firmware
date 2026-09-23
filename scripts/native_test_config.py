@@ -13,6 +13,3 @@ env.Append(LIBS=["crypto"])
 if os.environ.get("CAJUI_COVERAGE") == "1":
     env.Append(CCFLAGS=["-fprofile-instr-generate", "-fcoverage-mapping"],
                LINKFLAGS=["-fprofile-instr-generate"])
-
-# Respect CI compiler selection, especially when enabling LLVM coverage.
-env.Replace(CC=os.environ.get("CC", "cc"), CXX=os.environ.get("CXX", "c++"))
