@@ -4,10 +4,13 @@
 #include <driver/gpio.h>
 #include <esp_mac.h>
 #include <esp_sleep.h>
+#include <esp_log.h>
 #include <esp_system.h>
 #include "cajui_nvs.h"
 #include "cajui_application.h"
 #include "board/sx1262_radio.h"
+#include "board/admin_console.h"
+#include "cajui_provisioning.h"
 #if CAJUI_RUNTIME_ROLE == 2
 #include "cajui_uplink.h"
 #include "board/mqtt_uplink.h"
@@ -94,6 +97,10 @@ void reportForwarding() {
 #endif
 uint32_t bootAt = 0;
 bool running = false;
+// Admin mode keeps the radio in reset and serves only the USB console.
+bool adminMode = false, restartPending = false;
+cajui::Provisioning* provisioning = nullptr;
+board::Console* console = nullptr;
 uint64_t deviceId() {
     uint8_t mac[6]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;
@@ -147,19 +154,35 @@ void setup() {
     output(board::Vext, HIGH);
     output(board::Led, LOW);
     Serial.begin(SerialBaud);
+    // USB serial carries the CJ1 console. ESP-IDF components log from other tasks and
+    // interleaved an MQTT error into the middle of a HELLO reply on hardware; CJAPP lines
+    // remain the diagnostic output.
+    esp_log_level_set("*", ESP_LOG_NONE);
+    const bool requested = board::adminBootRequested();
     static cajui::PersistentStore store(blob, cajui::Role(CAJUI_RUNTIME_ROLE), deviceId());
-    if (!blob.begin() || !store.mount() || !store.network() ||
-        store.profile() != board::RadioProfile) {
-        halt("STORAGE_OR_PROFILE");
-        return;
-    }
+    const bool mounted = blob.begin() && store.mount();
+    bool enrolled = mounted && store.network() && store.profile() == board::RadioProfile;
 #if CAJUI_RUNTIME_ROLE == 1
     cajui::Binding binding{};
-    if (!store.binding(store.device(), binding)) {
-        halt("NOT_ENROLLED");
+    enrolled = enrolled && store.binding(store.device(), binding);
+    cajui::AtomicBlob* settings = nullptr;
+#else
+    cajui::AtomicBlob* settings = uplinkBlob.begin() ? &uplinkBlob : nullptr;
+#endif
+    // Without enrollment, or with unusable storage, administer over USB instead of halting.
+    adminMode = requested || !enrolled;
+    static cajui::Provisioning commands(store, esp_random(), settings,
+                                        adminMode ? cajui::ConsoleMode::Admin
+                                                  : cajui::ConsoleMode::Operation);
+    static board::Console usb(commands);
+    provisioning = &commands;
+    console = &usb;
+    if (adminMode) {
+        Serial.printf("CJAPP ADMIN reason=%s\n", requested  ? "requested"
+                                                 : !mounted ? "storage"
+                                                            : "not_enrolled");
         return;
     }
-#endif
     if (!radio.begin()) {
         halt("RADIO_INIT");
         return;
@@ -200,6 +223,13 @@ void setup() {
     running = true;
 }
 void loop() {
+    // The restart waits until the radio is idle; admin mode and halted devices restart now.
+    if (console && console->poll()) restartPending = true;
+    if (adminMode || !running) {
+        if (restartPending) board::restartFor(*provisioning);
+        delay(1);
+        return;
+    }
     if (running) {
 #if CAJUI_RUNTIME_ROLE == 1
         sender.poll();
@@ -207,6 +237,7 @@ void loop() {
             const auto& report = sender.report();
             Serial.printf("CJAPP DELIVERY completion=%u attempts=%u\n", unsigned(report.completion),
                           unsigned(report.attempts));
+            if (restartPending) board::restartFor(*provisioning);
             sleepNode();
         }
 #else
@@ -228,6 +259,7 @@ void loop() {
         if (running && setupButton.update(digitalRead(board::SetupButton) == LOW, millis()))
             portal->active() ? portal->close() : portal->open();
         if (running) portal->poll(listening);
+        if (restartPending && listening) board::restartFor(*provisioning);
 #endif
     }
     delay(1);
