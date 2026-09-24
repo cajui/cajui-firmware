@@ -9,7 +9,8 @@ a server.
 **Experimental development code.** The shared protocol core, persistent storage, USB
 enrollment and host-tested delivery controllers are implemented. Experimental ESP32
 transmitter/receiver applications integrate an SX1262 adapter and a DHT22 sensor.
-Separate administration images keep the radio in reset. No production image is released.
+Each image has a USB administration mode that keeps the radio in reset. No production image is
+released.
 
 ## Implemented
 

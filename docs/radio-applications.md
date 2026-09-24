@@ -17,17 +17,19 @@ minimum power does not make operation without a suitable antenna safe.
 
 ## Enrollment and image changes
 
-Enroll using `admin_tx`/`admin_rx` and the [USB tool](provisioning.md), then load the
-corresponding runtime image. All four images share `partitions.csv` and the same
-snapshot format. Preserve the `cajui` NVS partition; never erase or restore older
+Load `runtime_tx` or `runtime_rx` and enroll with the [USB tool](provisioning.md); a
+device without enrollment boots in admin mode, with the radio in reset. Both images share
+`partitions.csv` and the same snapshot format. Preserve the `cajui` NVS partition; never erase or restore older
 counter/receipt state under an existing key. Keep the local recovery file private.
-Runtime startup requires healthy storage, enrollment and profile 1. The transmitter
-also requires its own active binding. Failure leaves the radio in reset.
+Radio operation requires healthy storage, enrollment and profile 1; the transmitter also
+requires its own active binding. Otherwise the device boots in admin mode
+(`CJAPP ADMIN reason=storage|not_enrolled|requested`).
 
-Runtime serial output is diagnostic `CJAPP` text, not the CJ1 administration protocol.
-To enroll another node, rotate/revoke keys or inspect the queue through CJ1, stop RF
-operation and return the receiver to its admin image. There is no concurrent USB
-credential mutation while a frame is in flight. Only one `PersistentStore` owns
+In operation the serial port carries diagnostic `CJAPP` text and a restricted CJ1
+console. `CJ1 ADMIN` restarts into admin mode once the radio is idle: after the
+transmitter's delivery cycle, or while the receiver is listening. There is no
+concurrent USB credential mutation while a frame is in flight. ESP-IDF component logs are disabled at startup because
+they are written from other tasks and can split a console reply. Only one `PersistentStore` owns
 its backing snapshot.
 
 ## Transmitter

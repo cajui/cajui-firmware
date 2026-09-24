@@ -2,8 +2,8 @@
 
 The host-tested `SendController` schedules one already-collected sample over an
 injected radio. It does not contain hardware or sensor calls. The separate [radio applications](radio-applications.md)
-provide the board adapter, sensor reads, receiver loop and MCU deep sleep. The USB administration images still
-hold the radio in reset. No physical-radio behavior is validated by these tests.
+provide the board adapter, sensor reads, receiver loop and MCU deep sleep. In their USB administration mode the
+images hold the radio in reset. No physical-radio behavior is validated by these tests.
 
 ## Responsibilities
 

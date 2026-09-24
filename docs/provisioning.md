@@ -1,9 +1,15 @@
 # USB enrollment
 
-The `admin_tx` and `admin_rx` images provide USB administration and persistent
-storage on the Heltec WiFi LoRa 32 V3 (ESP32-S3) compile target. They hold SX1262 in
-reset and do not link a radio driver. They do not sample sensors or forward data.
-These images replace any application currently running on the device.
+Each radio image (`runtime_tx`, `runtime_rx`) has a USB administration mode for the
+Heltec WiFi LoRa 32 V3 (ESP32-S3). In admin mode the SX1262 stays in reset: nothing is
+transmitted, so enrollment is safe without an antenna, and credentials never change
+while a frame is in flight. A device boots in admin mode when it has no usable
+enrollment or storage, or when the previous boot asked for it with `CJ1 ADMIN`.
+Otherwise it runs its radio application, where the console answers only read-only
+queries (`HELLO`, `INFO`, `UPLINKINFO`) and `ADMIN`. `REBOOT` leaves admin mode.
+The tool switches modes itself: it wakes a sleeping transmitter by pulsing RTS (the
+board's reset line), requests `ADMIN`, waits for the new boot, and sends `REBOOT` when
+it is done.
 
 ## Build and install
 
@@ -13,11 +19,12 @@ identities. Back up existing flash/state before changing the partition layout.
 The images use the [dedicated storage layout](persistence.md), not an OTA update.
 
 ```sh
-pio run -e admin_tx -e admin_rx
 # Replace these placeholders with the independently identified serial ports.
-pio run -e admin_tx -t upload --upload-port <transmitter-port>
-pio run -e admin_rx -t upload --upload-port <receiver-port>
+pio run -e runtime_tx -t upload --upload-port <transmitter-port>
+pio run -e runtime_rx -t upload --upload-port <receiver-port>
 ```
+
+A new device starts in admin mode and waits for enrollment.
 
 Do not upload the Unity test image as an application. CI never accesses devices.
 
@@ -83,7 +90,9 @@ ASCII commands end in LF, at most 255 bytes excluding LF. Fields are separated b
 exactly one space. Embedded control characters, CRLF, extra fields and overlong lines
 are rejected. Overflow discards the complete line before accepting another command.
 Requests are never echoed. Non-HELLO operations include the expected 16-digit device
-ID to prevent accidental writes to a swapped port. Identifiers are lowercase fixed
+ID to prevent accidental writes to a swapped port. `HELLO` ends with the mode, `admin` or
+`run`; older admin-only images omitted it. `CJ1 ADMIN <device>` restarts into admin mode
+from either mode; in operation, other mutations answer `CJ1 ERR ADMIN`. Identifiers are lowercase fixed
 width hex, not decimal JSON numbers.
 
 ```text
@@ -120,7 +129,7 @@ administration authentication, network migration or reset command is provided.
 
 The receiver forwards queued samples to an MQTT broker when Wi-Fi and broker settings
 are stored. The [setup page](radio-applications.md#receiver-setup-page) configures them
-without a computer. Over USB, load `admin_rx`, configure, then load `runtime_rx` again:
+without a computer. Over USB, the tool switches the receiver to admin mode and back:
 
 ```sh
 python3 tools/provision.py uplink --receiver /dev/cu.RECEIVER \

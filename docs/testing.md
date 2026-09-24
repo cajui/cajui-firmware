@@ -4,7 +4,7 @@ Unity 2.6.1 runs the shared C++11 suite through PlatformIO. Native tests use rea
 OpenSSL AES-GCM with ASan/UBSan. Protocol tests use journal/counter doubles; storage
 tests exercise the real snapshot state machine over a fault-injection blob adapter.
 This is not a flash simulation with a proven power-loss model. The NVS adapter and
-administration images are also compiled, without physical access during CI.
+radio images are also compiled, without physical access during CI.
 
 The suite covers multiple metrics, zero and negative readings, field limits,
 header serialization, truncation, tampering with each packet byte, wrong keys and
@@ -51,7 +51,7 @@ check script also requires 95% line and branch coverage of `tools/provision.py`
 The gate reads the client file's JSON counts and checks each metric independently,
 without rounding. A high combined percentage cannot compensate for low branch
 coverage. Regression tests cover that distinction and missing coverage data.
-The build job also compiles `admin_tx`, `admin_rx`, `runtime_tx` and `runtime_rx`. No CI step uploads a device.
+The build job also compiles `runtime_tx` and `runtime_rx`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
