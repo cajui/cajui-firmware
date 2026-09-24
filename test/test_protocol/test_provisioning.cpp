@@ -236,6 +236,17 @@ void test_operation_console_allows_only_queries_and_admin_restart() {
     Provisioning again(*store);
     COMMAND(again, "CJ1 ADMIN 0000000000000001", "CJ1 OK ADMIN"); // Restart staying in admin.
     TEST_ASSERT_TRUE(again.adminRequested());
+    TEST_ASSERT_FALSE(again.pairRequested());
+    Provisioning receiverPair(*store, 1, nullptr, ConsoleMode::Operation);
+    COMMAND(receiverPair, "CJ1 PAIR 0000000000000001", "CJ1 ERR INVALID"); // Receivers host.
+    TEST_ASSERT_FALSE(receiverPair.restartRequested());
+    MemoryBlob txBlob;
+    auto transmitter = mounted(txBlob);
+    Provisioning pair(*transmitter, 1, nullptr, ConsoleMode::Operation);
+    COMMAND(pair, "CJ1 PAIR 0000000000000002", "CJ1 OK PAIR");
+    TEST_ASSERT_TRUE(pair.restartRequested());
+    TEST_ASSERT_TRUE(pair.pairRequested());
+    TEST_ASSERT_FALSE(pair.adminRequested());
 }
 void runProvisioningTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
