@@ -103,7 +103,8 @@ queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 Holding the PRG button (GPIO0) for three seconds opens an access point named
 `Cajui-XXXX`, from the last two bytes of the device ID, and a page at `192.168.4.1`.
 A captive-portal DNS makes phones open it automatically; the OLED shows a Wi-Fi QR code
-plus the network name and address. Holding the button again, the page's close button or
+plus the network name and address, and the LED blinks while setup is open, for boards
+without a display. The address is always `192.168.4.1`, the ESP32 access point default. Holding the button again, the page's close button or
 ten minutes without requests closes it. Final hardware can wire an external button to any
 GPIO with a pull-up by changing `board::SetupButton`.
 

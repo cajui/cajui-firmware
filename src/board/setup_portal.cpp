@@ -1,6 +1,7 @@
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "setup_portal.h"
 #include "display.h"
+#include "sx1262_radio.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -21,6 +22,8 @@ constexpr uint32_t ScanRetryMs = 3000;
 constexpr uint32_t ScanPatienceMs = 15000;
 constexpr uint8_t ScanRetries = 2;
 constexpr uint16_t DnsPort = 53;
+// Visible feedback on boards without a display: the LED blinks while setup is open.
+constexpr uint32_t BlinkMs = 500;
 constexpr uint32_t DiscoveryStack = 4096;
 constexpr int IdDigits = 16;
 bool parseId(const String& text, uint64_t& value) {
@@ -67,12 +70,14 @@ void SetupPortal::close() {
     WiFi.softAPdisconnect(true);
     WiFi.mode(saved_ ? WIFI_STA : WIFI_OFF);
     displayOff();
+    digitalWrite(Led, LOW);
     cajui::wipe(pending_);
     active_ = false;
     Serial.println("CJAPP SETUP closed");
 }
 void SetupPortal::poll(bool quiet) {
     if (!active_) return;
+    digitalWrite(Led, (millis() / BlinkMs) % 2 ? HIGH : LOW);
     dns_.processNextRequest();
     if (quiet) server_.handleClient();
     if (reconnect_) {
