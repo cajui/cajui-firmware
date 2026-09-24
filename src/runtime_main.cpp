@@ -11,6 +11,7 @@
 #if CAJUI_RUNTIME_ROLE == 2
 #include "cajui_uplink.h"
 #include "board/mqtt_uplink.h"
+#include "board/setup_portal.h"
 #endif
 
 namespace {
@@ -44,6 +45,16 @@ board::MqttUplink uplink;
 cajui::Forwarder* forwarder = nullptr;
 uint32_t reportedForwards = 0, reportedRetries = 0;
 bool reportedOnline = false;
+board::SetupPortal* portal = nullptr;
+cajui::LongPress setupButton(board::SetupHoldMs);
+// Called by the setup page after saving: restarts MQTT and forwarding without a reboot.
+bool applyUplink(const cajui::UplinkConfig& settings) {
+    if (!uplink.startMqtt(settings, receiverStore->device())) return false;
+    if (forwarder) return forwarder->setSource(settings.username);
+    static cajui::Forwarder instance(uplink, clockSource, *receiverStore, settings.username);
+    forwarder = &instance;
+    return forwarder->state() != cajui::ForwardState::Failed;
+}
 // Forwarding is optional: without a stored configuration the receiver keeps queueing.
 void startForwarding(cajui::PersistentStore& store) {
     static cajui::UplinkConfig settings;
@@ -182,6 +193,9 @@ void setup() {
     }
     Serial.printf("CJAPP RECEIVER queued=%u\n", unsigned(store.queued()));
     startForwarding(store);
+    pinMode(board::SetupButton, INPUT_PULLUP);
+    static board::SetupPortal setupPortal(store, uplink, uplinkBlob, applyUplink);
+    portal = &setupPortal;
 #endif
     running = true;
 }
@@ -202,14 +216,18 @@ void loop() {
             receiver->state() == cajui::ReceiverState::Acknowledging)
             Serial.printf("CJAPP ACCEPT result=%u queued=%u\n", unsigned(receiver->lastResult()),
                           unsigned(receiverStore->queued()));
+        const bool listening = receiver->state() == cajui::ReceiverState::Listening;
         if (receiver->state() == cajui::ReceiverState::Failed) {
             halt("RECEIVER");
         } else if (forwarder) {
             // Only while listening: forwarding writes flash and must not delay an ACK.
-            forwarder->poll(receiver->state() == cajui::ReceiverState::Listening);
+            forwarder->poll(listening);
             reportForwarding();
             if (forwarder->state() == cajui::ForwardState::Failed) halt("FORWARDER");
         }
+        if (running && setupButton.update(digitalRead(board::SetupButton) == LOW, millis()))
+            portal->active() ? portal->close() : portal->open();
+        if (running) portal->poll(listening);
 #endif
     }
     delay(1);

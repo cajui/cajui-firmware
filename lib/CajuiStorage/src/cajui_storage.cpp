@@ -126,7 +126,22 @@ bool PersistentStore::info(uint64_t node, uint64_t generation, EnrollmentInfo& o
     out.node = e.node;
     out.generation = e.generation;
     out.counter = e.counter;
+    out.received = e.receipt.counter;
     return true;
+}
+size_t PersistentStore::list(EnrollmentInfo* output, size_t capacity) const {
+    size_t count = 0;
+    if (!healthy() || !output) return 0;
+    for (const auto& e : state_.entries) {
+        if (e.state == Enrollment::Empty || count == capacity) continue;
+        auto& info = output[count++];
+        info.state = e.state;
+        info.node = e.node;
+        info.generation = e.generation;
+        info.counter = e.counter;
+        info.received = e.receipt.counter;
+    }
+    return count;
 }
 bool PersistentStore::binding(uint64_t node, Binding& out) const {
     out = Binding{};

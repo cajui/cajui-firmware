@@ -13,7 +13,8 @@ public:
 };
 struct EnrollmentInfo {
     Enrollment state = Enrollment::Empty;
-    uint64_t node = 0, generation = 0, counter = 0;
+    // counter: last reserved (transmitter). received: last accepted (receiver).
+    uint64_t node = 0, generation = 0, counter = 0, received = 0;
 };
 struct QueuedSample {
     uint64_t node = 0, generation = 0, counter = 0;
@@ -41,6 +42,8 @@ public:
     Result activate(uint64_t node, uint64_t generation);
     Result revoke(uint64_t node, uint64_t generation);
     bool info(uint64_t node, uint64_t generation, EnrollmentInfo&) const;
+    // Copies up to capacity occupied enrollments in slot order; returns how many.
+    size_t list(EnrollmentInfo* output, size_t capacity) const;
     bool binding(uint64_t node, Binding&) const;
     bool reserve(const Binding&, uint64_t&) override;
     bool load(const Binding&, Receipt&) override;
