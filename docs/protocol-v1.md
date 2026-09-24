@@ -7,8 +7,8 @@ unvalidated](../README.md#pending-and-unvalidated).
 ## Scope
 
 A star network has one receiver and multiple sensor nodes. Each node can report
-multiple sensor metrics. Nodes and their receiver share a radio profile. The first
-version uses local USB provisioning, not automatic radio pairing. It does not
+multiple sensor metrics. Nodes and their receiver share a radio profile. Nodes are
+enrolled over USB or through operator-initiated [radio pairing](radio-pairing.md). It does not
 implement LoRaWAN, mesh routing, TDMA, actuator commands or radio firmware updates.
 
 Network IDs and node IDs are nonzero unsigned 64-bit values. They are public
@@ -163,8 +163,8 @@ link are separate states.
 
 Partial setup must be resumable or replaced with fresh credentials consistently on
 both devices. Never offer a reset operation that erases counters while retaining the
-key. See [USB enrollment](provisioning.md) and [storage](persistence.md). There are
-no over-the-air enrollment messages in v1.
+key. See [USB enrollment](provisioning.md) and [storage](persistence.md). Radio
+enrollment uses the separate [pairing](radio-pairing.md) frames (types 3–6).
 
 ## Validation and references
 

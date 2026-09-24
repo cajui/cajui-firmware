@@ -136,6 +136,7 @@ def main():
                 "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
                 "lib/CajuiUplink/src/cajui_uplink.cpp",
                 "lib/CajuiSetup/src/cajui_setup.cpp",
+                "lib/CajuiPairing/src/cajui_pairing.cpp",
             ]
             run(prefix + ["llvm-cov", "report"] + inputs)
             report = subprocess.check_output(

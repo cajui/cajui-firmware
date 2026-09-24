@@ -1,0 +1,93 @@
+# Radio pairing
+
+Draft extension of [protocol v1](protocol-v1.md); it has not undergone an independent
+security audit. It enrolls a node over the radio instead of USB. USB enrollment remains
+available and produces the same bindings.
+
+## Model and security
+
+Pairing follows the "permit join" model: the receiver accepts join requests only while
+an administrator has opened a two-minute window on its setup page, and the node sends
+them only after its button is held. The administrator sees each requesting node's ID and
+signal strength and explicitly adds one.
+
+Both sides generate ephemeral X25519 key pairs and derive the binding key from the shared
+secret. A passive listener cannot compute the key. The exchange is **not authenticated
+against an active attacker** in radio range during the window: the node has no display
+on which to compare a code, so an attacker who answers first could pair with either side.
+Mitigations are the physical action on both devices, the short window, the displayed node
+ID and signal strength, and radio proximity. A per-device secret printed on a label can
+later authenticate the exchange; it is not part of this version.
+
+Cryptography uses established libraries: X25519 through mbedTLS on ESP32 and OpenSSL on
+the host, HKDF-SHA256 through OpenSSL on the host, and the existing AES-128-GCM adapter.
+The prebuilt Arduino-ESP32 mbedTLS is compiled without HKDF (neither `mbedtls_hkdf` nor
+PSA HKDF is available), so on ESP32 the RFC 5869 extract and expand steps are composed
+from the library's HMAC-SHA256. Both X25519 and HKDF were checked against the RFC 7748 and
+RFC 5869 test vectors on a Heltec board; the shared test suite checks them on the host.
+
+## Wire format
+
+Pairing frames reuse the 32-byte v1 header. `counter` carries the **attempt nonce**, a
+random nonzero u64 chosen by the node for one pairing attempt; it is not a sample counter.
+
+| Type | Name | Direction | network | Payload | Tag | Size |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | JOIN_REQUEST | node → receiver | 0 | node public key (32) | none | 64 |
+| 4 | JOIN_OFFER | receiver → node | receiver network | receiver public key (32), receiver ID (8), generation (8), profile (2) | yes | 98 |
+| 5 | JOIN_CONFIRM | node → receiver | receiver network | empty | yes | 48 |
+| 6 | JOIN_DONE | receiver → node | receiver network | empty | yes | 48 |
+
+`node` is always the joining node's ID. JOIN_REQUEST is unauthenticated and must be
+treated as untrusted input. The tagged frames are AES-128-GCM with an empty plaintext:
+the tag authenticates the header and payload as additional data and proves possession of
+the derived key. Their nonce is `43 4a <type> 01` followed by the attempt nonce. Types 4–6
+never occur under a binding key's DATA (1) or ACK (2) nonces, and each key is fresh per
+attempt, so nonces are never reused.
+
+## Key derivation
+
+```text
+shared = X25519(own private key, peer public key)      -- rejected if all zero
+key    = HKDF-SHA256(ikm = shared, salt = "cajui-pair-v1",
+                     info = network || receiver || node || generation
+                            || node public key || receiver public key)  -- 16 bytes
+```
+
+Identifiers are big-endian u64. Binding the identifiers and both public keys into the
+key means a changed offer cannot be confirmed. The derived key becomes the binding key
+of a new credential generation, exactly as a USB enrollment would store it.
+
+## Exchange
+
+1. The node sends JOIN_REQUEST, then listens 1.5 s for an offer; it repeats every 2 s with
+   jitter for up to two minutes.
+2. While the window is open, the receiver lists requesting nodes (at most four, with the
+   latest signal strength). When the administrator adds one, it chooses a random
+   generation (and a random network if it has none), derives the key, stores a
+   **prepared** binding and answers with JOIN_OFFER. A repeated request with the same
+   attempt nonce receives the identical offer.
+3. The node validates the offer (its own ID and attempt nonce, nonzero identifiers,
+   profile 1, a receiver ID different from its own, a valid tag under the derived key),
+   stores a prepared binding and sends JOIN_CONFIRM, then listens 1.5 s for JOIN_DONE, up
+   to five times.
+4. On a valid confirmation the receiver activates the binding and answers JOIN_DONE; a
+   repeated confirmation receives the identical reply. On JOIN_DONE the node activates
+   its binding and restarts into operation.
+
+Prepared bindings that do not complete are revoked: by the receiver when the window
+closes, and by the node when it gives up. If JOIN_DONE is lost after the receiver
+activated, the node revokes its copy and the administrator pairs it again; the receiver's
+unused binding stays active until revoked on the setup page.
+
+A node that already belongs to a network can only pair again within that network:
+storage holds a single network per device, and there is no reset that would keep keys.
+Pairing again within the network creates a new generation and revokes the previous one
+on both sides, as USB rotation does.
+
+## Devices
+
+The node enters pairing mode when its button (PRG) is held for three seconds, at boot,
+while waking, or in admin mode; its LED blinks quickly while pairing. The receiver
+handles pairing frames in its normal receive loop, so it keeps accepting DATA from other
+nodes during the window. See [radio applications](radio-applications.md).
