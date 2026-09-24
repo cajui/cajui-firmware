@@ -191,7 +191,36 @@ void transmitters(Html& page, const SetupView& v) {
         }
         page.raw("</table>");
     }
-    page.raw("<p><small>New transmitters are enrolled over USB for now.</small></p></section>");
+    const PairingView* pairing = v.pairing;
+    if (!pairing) {
+        page.raw("<p><small>New transmitters are enrolled over USB.</small></p></section>");
+        return;
+    }
+    page.raw("<h3>Add a transmitter</h3>");
+    if (!pairing->open) {
+        page.raw("<form method=\"post\" action=\"/pair/open\"><button>Search for transmitters "
+                 "(2 minutes)</button></form>");
+    } else {
+        page.raw("<p>Searching, %u s left. Hold the PRG button of the transmitter for 3 seconds; "
+                 "its LED blinks fast while it asks to join.</p>",
+                 unsigned(pairing->remainingSeconds));
+        if (!pairing->count) page.raw("<p><small>No transmitter asking to join yet.</small></p>");
+        for (size_t i = 0; i < pairing->count && i < MaxPairingCandidates; ++i) {
+            page.raw("<form method=\"post\" action=\"/pair/add\"><p>%016" PRIx64
+                     " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
+                     "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
+                     pairing->nodes[i], int(pairing->rssi[i]), pairing->nodes[i]);
+        }
+        if (pairing->offered)
+            page.raw("<p>Waiting for %016" PRIx64 " to confirm&hellip;</p>", pairing->offered);
+        page.raw("<form method=\"post\" action=\"/pair/stop\"><button>Stop searching</button>"
+                 "</form>");
+    }
+    if (pairing->paired)
+        page.raw("<p class=\"notice\">Transmitter %016" PRIx64 " paired.</p>", pairing->paired);
+    page.raw("<p><small>Add only a transmitter you just put in pairing mode, and keep it close. "
+             "Pairing is not protected against an attacker in radio range during the search."
+             "</small></p></section>");
 }
 } // namespace
 

@@ -25,6 +25,7 @@ public:
     cajui::TransmitStatus transmitStatus(uint32_t&) override;
     cajui::ReceiveStatus receive(cajui::Frame&) override;
     bool sleep() override;
+    int16_t lastRssi() const override;
 
 private:
     enum class Mode { Idle, Cad, Tx, Rx, Failed };
@@ -36,6 +37,7 @@ private:
     cajui::ChannelStatus cad_ = cajui::ChannelStatus::Pending;
     cajui::TransmitStatus tx_ = cajui::TransmitStatus::Pending;
     cajui::Frame received_{};
+    int16_t rssi_ = 0;
     uint32_t completedAt_ = 0;
     bool initialized_ = false;
     static Sx1262Radio* instance_;

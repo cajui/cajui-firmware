@@ -19,8 +19,11 @@ private:
     size_t used_ = 0;
     bool overflow_ = false;
 };
-// Consumes the request left by the previous boot: true means start in admin mode.
-bool adminBootRequested();
-// Restarts now; the next boot starts in admin mode if the console asked for it.
+enum class BootRequest { None, Admin, Pair };
+// Consumes the request left by the previous boot.
+BootRequest takeBootRequest();
+// Restarts now; the next boot honours the request (admin mode or radio pairing).
+[[noreturn]] void restartInto(BootRequest);
+// Restarts as the console asked: admin, pairing or plain operation.
 [[noreturn]] void restartFor(const cajui::Provisioning&);
 } // namespace board

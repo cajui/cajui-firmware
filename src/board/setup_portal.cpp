@@ -250,6 +250,20 @@ void SetupPortal::home() {
         view.prefillHost = host.c_str();
         view.prefillPort = uint16_t(port);
     }
+    cajui::PairingView pairing{};
+    if (pairing_) {
+        pairing.open = pairing_->state() != cajui::HostState::Closed;
+        pairing.remainingSeconds = pairing_->remainingMs() / 1000;
+        pairing.count = pairing_->candidateCount();
+        for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
+            pairing.nodes[i] = pairing_->candidates()[i].node;
+            pairing.rssi[i] = pairing_->candidates()[i].rssi;
+        }
+        if (pairing_->state() == cajui::HostState::Offered)
+            pairing.offered = pairing_->offeredNode();
+        pairing.paired = pairing_->pairedNode();
+        view.pairing = &pairing;
+    }
     view.notice = notice_;
     notice_ = nullptr;
     if (!cajui::renderSetup(view, page_, sizeof(page_))) {
@@ -314,6 +328,29 @@ void SetupPortal::route() {
         const auto result = store_.revoke(node, generation);
         Serial.printf("CJAPP SETUP revoke node=%016" PRIx64 " result=%u\n", node, unsigned(result));
         redirect(result == cajui::Result::Ok ? "Transmitter revoked." : "Could not revoke.");
+    });
+    server_.on("/pair/open", HTTP_POST, [this] {
+        touch();
+        if (!pairing_) return redirect("Radio pairing is not available.");
+        pairing_->open();
+        Serial.println("CJAPP PAIR window_open");
+        redirect("Searching for transmitters for 2 minutes.");
+    });
+    server_.on("/pair/stop", HTTP_POST, [this] {
+        touch();
+        if (pairing_) pairing_->close();
+        redirect("Stopped searching.");
+    });
+    server_.on("/pair/add", HTTP_POST, [this] {
+        touch();
+        uint64_t node = 0;
+        if (!pairing_ || !parseId(server_.arg("node"), node))
+            return redirect("Unknown transmitter.");
+        const auto result = pairing_->accept(node);
+        Serial.printf("CJAPP PAIR accept node=%016" PRIx64 " result=%u\n", node, unsigned(result));
+        redirect(result == cajui::Result::Ok
+                     ? "Offer sent. The transmitter confirms on its next request."
+                     : "Could not add this transmitter; search again.");
     });
     server_.on("/close", HTTP_POST, [this] {
         cajui::renderClosed(page_, sizeof(page_));
