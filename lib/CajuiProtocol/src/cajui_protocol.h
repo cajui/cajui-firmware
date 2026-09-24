@@ -13,7 +13,10 @@ constexpr size_t MaxPayload = DataPrefixSize + MaxReadings * ReadingSize;
 constexpr size_t MaxFrame = HeaderSize + MaxPayload + TagSize;
 using Key = std::array<uint8_t, KeySize>;
 using Tag = std::array<uint8_t, TagSize>;
+// Pairing types 3-6 are defined in docs/radio-pairing.md and handled by CajuiPairing.
 enum class Type : uint8_t { Data = 1, Ack = 2 };
+constexpr size_t X25519Size = 32;
+using X25519Key = std::array<uint8_t, X25519Size>;
 enum class Status : uint8_t { Ok = 0, Error = 1, Skipped = 2 };
 enum class Result {
     Ok,
@@ -60,6 +63,14 @@ bool encrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, siz
              const uint8_t* input, size_t size, uint8_t* output, uint8_t tag[TagSize]);
 bool decrypt(const Key&, const uint8_t nonce[NonceSize], const uint8_t* aad, size_t aadSize,
              const uint8_t* input, size_t size, const uint8_t tag[TagSize], uint8_t* output);
+// X25519 (RFC 7748) and HKDF-SHA256 (RFC 5869) through the same established libraries.
+// x25519Shared rejects an all-zero result (a low-order peer key).
+bool x25519Public(const X25519Key& privateKey, X25519Key& publicKey);
+bool x25519Shared(const X25519Key& privateKey, const X25519Key& peerPublic, X25519Key& shared);
+bool hkdfSha256(const uint8_t* ikm, size_t ikmSize, const uint8_t* salt, size_t saltSize,
+                const uint8_t* info, size_t infoSize, uint8_t* output, size_t outputSize);
+// Header type of a well-formed v1 envelope, or zero. Unauthenticated: routing only.
+uint8_t untrustedType(const Frame&);
 // Unauthenticated routing hint only; callers MUST authenticate with open/receive.
 // Returns zero for malformed/non-DATA envelopes. Never creates a binding.
 uint64_t untrustedDataNode(const Frame&);
