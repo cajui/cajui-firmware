@@ -66,7 +66,7 @@ class Device:
             ]
         if words[1] != self.identity:
             raise provision.ProvisioningError("Wrong device identity")
-        if self.mode == "run" and verb not in {"INFO", "UPLINKINFO", "ADMIN", "REBOOT"}:
+        if self.mode == "run" and verb not in {"INFO", "UPLINKINFO", "ADMIN", "REBOOT", "PAIR"}:
             raise provision.ProvisioningError("Device rejected request: ADMIN")
         if verb == "PREPARE":
             proposed = words[2:]
@@ -94,6 +94,10 @@ class Device:
             # Durable state survives; C++ tests cover storage. Enrolled devices resume operation.
             self.boot += int(self.reboots)
             self.mode = "run" if self.state == 2 else "admin"
+        elif verb == "PAIR":
+            if self.role != "tx":
+                raise provision.ProvisioningError("Device rejected request: INVALID")
+            self.boot += 1
         elif verb == "ADMIN":
             self.boot += int(self.reboots)
             self.mode = "admin"
@@ -719,6 +723,19 @@ class UplinkCommandLineTests(unittest.TestCase):
         ):
             code = provision.main()
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_pair_starts_on_a_transmitter_only(self):
+        self.devices["tx-port"] = Device("tx", "0000000000000002", [])
+        self.devices["tx-port"].mode, self.devices["tx-port"].asleep = "run", True
+        code, output, _ = self.run_cli("pair", "--transmitter", "tx-port")
+        self.assertEqual(0, code)
+        self.assertEqual(
+            {"pairing": True, "node": "0000000000000002", "window_seconds": 120}, json.loads(output)
+        )
+        self.assertEqual(1, self.devices["tx-port"].resets)  # Woken from sleep first.
+        code, _, error = self.run_cli("pair", "--transmitter", "rx-port")
+        self.assertEqual(1, code)
+        self.assertIn("transmitter", error)
 
     def test_uplink_and_status_print_json_without_secrets(self):
         code, output, _ = self.run_cli(

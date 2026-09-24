@@ -188,6 +188,15 @@ def ready(link):
     return await_boot(link, status["boot"], "admin")
 
 
+def start_pairing(link):
+    """Restart a transmitter into radio pairing (docs/radio-pairing.md); no admin mode needed."""
+    status = wake(link)
+    if status["role"] != "tx":
+        raise ProvisioningError("Radio pairing starts on a transmitter")
+    link.request("PAIR " + status["device"])
+    return {"pairing": True, "node": status["device"], "window_seconds": 120}
+
+
 def release(link, device):
     """Leave admin mode: the device restarts its radio application if enrolled."""
     link.request("REBOOT " + device)
@@ -489,6 +498,8 @@ def main():
     uplink.add_argument("--mqtt-password-file", type=Path, help="Prompts when omitted")
     uplink_status = sub.add_parser("uplink-status")
     uplink_status.add_argument("--receiver", required=True)
+    pair = sub.add_parser("pair", help="Start radio pairing on a transmitter")
+    pair.add_argument("--transmitter", required=True)
     args = parser.parse_args()
     links = []
     try:
@@ -513,6 +524,8 @@ def main():
                 read_secret(args.mqtt_password_file, "MQTT password: "),
             )
             output = configure_uplink(connect(args.receiver), fields)
+        elif args.action == "pair":
+            output = start_pairing(connect(args.transmitter))
         elif args.action == "uplink-status":
             link = connect(args.receiver)
             output = uplink_info(link, wake(link)["device"])
