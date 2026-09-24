@@ -34,7 +34,7 @@ STORAGE_FAILURES = {
 
 
 # Error codes the firmware may send; anything else is reported as UNKNOWN.
-DEVICE_ERRORS = {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED"}
+DEVICE_ERRORS = {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED", "ADMIN"}
 # Recovery file phases in order; progress is recorded and never moves backwards.
 PHASES = ("new", "receiver_prepared", "both_prepared", "receiver_active", "configured")
 NO_NETWORK = "0" * 16
@@ -53,6 +53,10 @@ class Enrollment(IntEnum):
 
 class ProvisioningError(Exception):
     pass
+
+
+class DeviceTimeout(ProvisioningError):
+    """No CJ1 answer: the device may be asleep, rebooting or on another port."""
 
 
 def identifier(value, digits=16):
@@ -80,14 +84,25 @@ class SerialLink:
     def close(self):
         self.serial.close()
 
-    def request(self, command):
+    def reset(self):
+        """Pulse RTS (wired to EN) to restart the board, e.g. to wake a sleeping transmitter."""
+        self.serial.rts = True
+        time.sleep(0.1)
+        self.serial.rts = False
+
+    def request(self, command, timeout=5):
         # Never include a request in an exception: PREPARE carries a secret.
         self.serial.reset_input_buffer()
         self.serial.write(("CJ1 " + command + "\n").encode("ascii"))
         self.serial.flush()
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + timeout
+        pending = b""
         while time.monotonic() < deadline:
-            response = self.serial.readline(512)
+            # A read can time out mid-line while the device is busy; keep the fragment.
+            pending += self.serial.readline(512)
+            if not pending.endswith(b"\n"):
+                continue
+            response, pending = pending, b""
             if not response.startswith(b"CJ1 "):
                 continue
             fields = response.decode("ascii", errors="replace").strip().split()
@@ -97,12 +112,24 @@ class SerialLink:
             if len(fields) >= 3 and fields[:2] == ["CJ1", "OK"] and fields[2] == command.split()[0]:
                 return fields[3:]
             raise ProvisioningError("Unexpected device response")
-        raise ProvisioningError("USB response timed out; retain the recovery file and resume")
+        raise DeviceTimeout("USB response timed out; retain the recovery file and resume")
+
+    def probe(self, command, window):
+        """Repeat a read-only command until answered: bytes sent while booting are lost."""
+        deadline = time.monotonic() + window
+        while True:
+            try:
+                return self.request(command, timeout=0.3)
+            except DeviceTimeout:
+                if time.monotonic() >= deadline:
+                    raise
 
 
-def hello(link):
-    fields = link.request("HELLO")
-    if len(fields) != 8 or fields[1] not in {"tx", "rx"}:
+def parse_hello(fields):
+    # Nine fields since the single-image firmware; eight from older admin-only images.
+    if len(fields) == 8:
+        fields = [*fields, "admin"]
+    if len(fields) != 9 or fields[1] not in {"tx", "rx"} or fields[8] not in {"admin", "run"}:
         raise ProvisioningError("Unexpected device status")
     if fields[2] != "ready":
         reason = fields[2] if fields[2] in STORAGE_FAILURES else "unknown"
@@ -117,18 +144,53 @@ def hello(link):
         "profile": identifier(fields[5], 4),
         "queued": int(fields[6]),
         "boot": identifier(fields[7], 8),
+        "mode": fields[8],
     }
 
 
-def ready(link):
-    deadline = time.monotonic() + 12
+def hello(link):
+    return parse_hello(link.request("HELLO"))
+
+
+# A transmitter sleeps between samples; restarting it opens a short awake window.
+WAKE_WINDOW = 8
+ADMIN_WINDOW = 15
+
+
+def wake(link):
+    try:
+        return hello(link)
+    except DeviceTimeout:
+        link.reset()
+        return parse_hello(link.probe("HELLO", WAKE_WINDOW))
+
+
+def await_boot(link, previous, mode, window=ADMIN_WINDOW):
+    """Wait for a new boot in the given mode; the device restarts after replying."""
+    deadline = time.monotonic() + window
     while True:
         try:
-            return hello(link)
-        except ProvisioningError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.2)
+            status = parse_hello(link.probe("HELLO", 2))
+            if status["boot"] != previous and status["mode"] == mode:
+                return status
+        except DeviceTimeout:
+            pass
+        if time.monotonic() >= deadline:
+            raise ProvisioningError("Device did not restart in " + mode + " mode")
+
+
+def ready(link):
+    """Return the device in admin mode (radio stopped), switching modes if needed."""
+    status = wake(link)
+    if status["mode"] == "admin":
+        return status
+    link.request("ADMIN " + status["device"])
+    return await_boot(link, status["boot"], "admin")
+
+
+def release(link, device):
+    """Leave admin mode: the device restarts its radio application if enrolled."""
+    link.request("REBOOT " + device)
 
 
 def write_durably(fd, transaction):
@@ -279,6 +341,8 @@ def enroll(tx, rx, path, resume=False):
         if get_info(link, device, transaction)[0] != Enrollment.ACTIVE:
             raise ProvisioningError("Device did not activate the enrollment")
         advance(path, transaction, phase)
+    release(rx, transaction["receiver"])
+    release(tx, transaction["node"])
     return {
         "node": transaction["node"],
         "receiver": transaction["receiver"],
@@ -297,22 +361,20 @@ def verify_restart(tx, rx, path):
     transmitter = transaction["node"]  # A transmitter's device ID is its node ID.
     command = f"RESERVE {transmitter} {transaction['node']} {transaction['generation']}"
     before = int(identifier(tx.request(command)[0]), 16)
-    tx.request("REBOOT " + transmitter)
-    rx.request("REBOOT " + transaction["receiver"])
-    deadline = time.monotonic() + 15
-    while True:
-        boots = [device["boot"] for device in check_devices(tx, rx, transaction)]
-        if all(boot != old for boot, old in zip(boots, boots_before)):
-            break
-        if time.monotonic() >= deadline:
-            raise ProvisioningError("Devices did not complete a new boot")
-        time.sleep(0.1)
+    # ADMIN restarts like REBOOT but keeps the radio stopped for the checks below.
+    tx.request("ADMIN " + transmitter)
+    rx.request("ADMIN " + transaction["receiver"])
+    for link, old in zip((tx, rx), boots_before):
+        await_boot(link, old, "admin")
+    check_devices(tx, rx, transaction)
     for link, device in ((tx, transaction["node"]), (rx, transaction["receiver"])):
         if get_info(link, device, transaction)[0] != Enrollment.ACTIVE:
             raise ProvisioningError("Enrollment did not survive restart")
     after = int(identifier(tx.request(command)[0]), 16)
     if after <= before:
         raise ProvisioningError("Counter did not advance across restart")
+    release(tx, transaction["node"])
+    release(rx, transaction["receiver"])
     return {
         "configured": True,
         "restart_verified": True,
@@ -327,6 +389,7 @@ def revoke(rx, transaction):
     if device["device"] != transaction["receiver"] or device["role"] != "rx":
         raise ProvisioningError("Wrong receiver")
     rx.request(f"REVOKE {device['device']} {transaction['node']} {transaction['generation']}")
+    release(rx, device["device"])
     return {"revoked": True, "node": transaction["node"]}
 
 
@@ -394,6 +457,7 @@ def configure_uplink(rx, fields):
         or stored["username"] != expected["user"]
     ):
         raise ProvisioningError("Receiver did not store the requested uplink settings")
+    release(rx, device["device"])
     return {**stored, "receiver": device["device"], "forwarding_validated": False}
 
 
@@ -435,7 +499,7 @@ def main():
             return link
 
         if args.action == "status":
-            output = ready(connect(args.port))
+            output = wake(connect(args.port))  # Read-only: reports the mode, never switches.
         elif args.action == "revoke":
             transaction = load(args.state)
             output = revoke(connect(args.receiver), transaction)
@@ -451,7 +515,7 @@ def main():
             output = configure_uplink(connect(args.receiver), fields)
         elif args.action == "uplink-status":
             link = connect(args.receiver)
-            output = uplink_info(link, ready(link)["device"])
+            output = uplink_info(link, wake(link)["device"])
         else:
             tx, rx = connect(args.transmitter), connect(args.receiver)
             if args.action == "verify-restart":

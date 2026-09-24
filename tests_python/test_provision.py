@@ -29,13 +29,25 @@ class Device:
         self.reboots = True
         self.closed = False
         self.staged, self.uplink, self.info = {}, {}, None
+        # A fresh device boots in admin mode; asleep simulates a transmitter between samples.
+        self.mode, self.asleep, self.resets = "admin", False, 0
+
+    def reset(self):
+        self.resets += 1
+        self.asleep = False
+        self.boot += 1
+
+    def probe(self, command, window):
+        return self.request(command)
 
     def close(self):
         self.closed = True
 
-    def request(self, command):
+    def request(self, command, timeout=5):
         words = command.split()
         verb = words[0]
+        if self.asleep:
+            raise provision.DeviceTimeout("Simulated sleep")
         self.events.append((self.role, verb))
         if self.fail == verb:
             self.fail = None
@@ -50,9 +62,12 @@ class Device:
                 self.profile,
                 "0",
                 f"{self.boot:08x}",
+                self.mode,
             ]
         if words[1] != self.identity:
             raise provision.ProvisioningError("Wrong device identity")
+        if self.mode == "run" and verb not in {"INFO", "UPLINKINFO", "ADMIN", "REBOOT"}:
+            raise provision.ProvisioningError("Device rejected request: ADMIN")
         if verb == "PREPARE":
             proposed = words[2:]
             if self.enrollment == proposed:
@@ -76,7 +91,12 @@ class Device:
                 raise provision.ProvisioningError("Device rejected request: NOT_FOUND")
             self.state = 3
         elif verb == "REBOOT":
-            self.boot += int(self.reboots)  # Durable state survives; C++ tests cover storage.
+            # Durable state survives; C++ tests cover storage. Enrolled devices resume operation.
+            self.boot += int(self.reboots)
+            self.mode = "run" if self.state == 2 else "admin"
+        elif verb == "ADMIN":
+            self.boot += int(self.reboots)
+            self.mode = "admin"
         elif verb == "UPLINKSET":
             self.staged[words[2]] = bytes.fromhex(words[3]).decode("utf-8")
         elif verb == "UPLINKSAVE":
@@ -117,6 +137,9 @@ class ProvisionTests(unittest.TestCase):
             mutations,
         )
         self.assertEqual("configured", transaction["phase"])
+        # Both devices leave admin mode and resume their radio application.
+        self.assertEqual(("run", "run"), (self.tx.mode, self.rx.mode))
+        self.assertEqual([("rx", "REBOOT"), ("tx", "REBOOT")], self.events[-2:])
 
     def test_each_interruption_resumes_with_the_original_credentials(self):
         # Counter continuity is firmware state, covered by the C++ provisioning tests.
@@ -204,8 +227,8 @@ class ProvisionTests(unittest.TestCase):
         provision.enroll(self.tx, self.rx, self.path)
         original = self.tx.request
 
-        def resetting(command):
-            if command.startswith("REBOOT"):
+        def resetting(command, timeout=5):
+            if command.startswith("ADMIN"):
                 self.tx.counter = 0
             return original(command)
 
@@ -255,21 +278,40 @@ class FailureTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_ready_retries_until_the_deadline(self):
-        self.tx.fail = "HELLO"
-        with patch.object(provision.time, "sleep"):
-            self.assertEqual("tx", provision.ready(self.tx)["role"])
+    def test_ready_wakes_a_sleeping_device_and_enters_admin_mode(self):
+        self.tx.mode, self.tx.asleep = "run", True
+        status = provision.ready(self.tx)
+        self.assertEqual(("tx", "admin"), (status["role"], status["mode"]))
+        self.assertEqual(1, self.tx.resets)  # Woken once, then asked to restart in admin.
+        self.assertEqual("admin", self.tx.mode)
+        self.rx.mode = "run"
+        self.assertEqual("admin", provision.ready(self.rx)["mode"])
+        self.assertEqual(0, self.rx.resets)  # An awake receiver answers without a reset.
 
         class Down:
-            def request(self, command):
-                raise provision.ProvisioningError("Simulated disconnect")
+            def request(self, command, timeout=5):
+                raise provision.DeviceTimeout("Simulated silence")
 
-        with (
-            patch.object(provision.time, "sleep"),
-            patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)),
-        ):
-            with self.assertRaises(provision.ProvisioningError):
-                provision.ready(Down())
+            def probe(self, command, window):
+                raise provision.DeviceTimeout("Simulated silence")
+
+            def reset(self):
+                pass
+
+        with self.assertRaises(provision.DeviceTimeout):
+            provision.ready(Down())
+
+    def test_admin_switch_times_out_when_the_device_stays_in_operation(self):
+        self.rx.mode = "run"
+        original = self.rx.request
+
+        def ignores_admin(command, timeout=5):
+            return [] if command.startswith("ADMIN") else original(command)
+
+        self.rx.request = ignores_admin
+        with patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)):
+            with self.assertRaisesRegex(provision.ProvisioningError, "did not restart"):
+                provision.ready(self.rx)
 
     def test_restart_without_a_new_boot_fails(self):
         provision.enroll(self.tx, self.rx, self.path)
@@ -278,7 +320,7 @@ class FailureTests(unittest.TestCase):
             patch.object(provision.time, "sleep"),
             patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)),
         ):
-            with self.assertRaisesRegex(provision.ProvisioningError, "new boot"):
+            with self.assertRaisesRegex(provision.ProvisioningError, "did not restart"):
                 provision.verify_restart(self.tx, self.rx, self.path)
 
     def test_changed_identity_or_network_is_rejected_on_resume(self):
@@ -335,20 +377,25 @@ class FailureTests(unittest.TestCase):
     def test_restart_requires_active_enrollment_before_any_reservation(self):
         provision.enroll(self.tx, self.rx, self.path)
         self.tx.state = provision.Enrollment.PREPARED
+        boots = self.tx.boot, self.rx.boot
         with self.assertRaisesRegex(provision.ProvisioningError, "active enrollment"):
             provision.verify_restart(self.tx, self.rx, self.path)
         self.assertEqual(0, self.tx.counter)
-        self.assertEqual(1, self.tx.boot)
-        self.assertEqual(1, self.rx.boot)
+        # Only the switch into admin mode restarted them; no verification restart happened.
+        self.assertEqual((boots[0] + 1, boots[1] + 1), (self.tx.boot, self.rx.boot))
 
     def test_restart_rejects_enrollment_lost_after_reboot(self):
         provision.enroll(self.tx, self.rx, self.path)
         original = self.rx.request
 
-        def lost_enrollment(command):
+        admin_requests = []
+
+        def lost_enrollment(command, timeout=5):
             response = original(command)
-            if command.startswith("REBOOT"):
-                self.rx.state = provision.Enrollment.PREPARED
+            if command.startswith("ADMIN"):
+                admin_requests.append(command)
+                if len(admin_requests) == 2:  # The verification restart, not the mode switch.
+                    self.rx.state = provision.Enrollment.PREPARED
             return response
 
         self.rx.request = lost_enrollment
@@ -478,6 +525,10 @@ class TransportTests(unittest.TestCase):
             link.request("PREPARE " + secret)
         self.assertNotIn(secret, str(caught.exception))
 
+    def test_a_line_split_across_reads_is_reassembled(self):
+        link = self.link([b"boot noise\n", b"CJ1 OK HELLO a b", b"", b" c\n"])
+        self.assertEqual(["a", "b", "c"], link.request("HELLO"))
+
     def test_timeout_and_wrong_response_type(self):
         link = self.link([])
         with patch.object(provision.time, "monotonic", side_effect=[0, 1, 6]):
@@ -485,6 +536,44 @@ class TransportTests(unittest.TestCase):
                 link.request("HELLO")
         with self.assertRaises(provision.ProvisioningError):
             self.link([b"CJ1 OK PREPARE\n"]).request("HELLO")
+
+    def test_reset_pulses_rts_and_probe_repeats_until_answered(self):
+        states = []
+
+        class Lines(FakeSerial):
+            def __setattr__(self, name, value):
+                if name == "rts":
+                    states.append(value)
+                object.__setattr__(self, name, value)
+
+        link = provision.SerialLink.__new__(provision.SerialLink)
+        link.serial = Lines([])
+        with patch.object(provision.time, "sleep"):
+            link.reset()
+        self.assertEqual([True, False], states)
+        answers = iter([provision.DeviceTimeout("boot"), provision.DeviceTimeout("boot"), ["ok"]])
+
+        def request(command, timeout=5):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        link.request = request
+        self.assertEqual(["ok"], link.probe("HELLO", 10))
+        link.request = lambda command, timeout=5: (_ for _ in ()).throw(
+            provision.DeviceTimeout("x")
+        )
+        with patch.object(provision.time, "monotonic", side_effect=itertools.count(0, 5)):
+            with self.assertRaises(provision.DeviceTimeout):
+                link.probe("HELLO", 1)
+
+    def test_hello_reports_mode_and_accepts_legacy_admin_images(self):
+        base = ["0" * 16, "rx", "ready", "0" * 16, "0" * 16, "0001", "0", "00000001"]
+        self.assertEqual("admin", provision.parse_hello(base)["mode"])  # Old admin image.
+        self.assertEqual("run", provision.parse_hello(base + ["run"])["mode"])
+        with self.assertRaises(provision.ProvisioningError):
+            provision.parse_hello(base + ["sleeping"])
 
     def test_malformed_hello_is_rejected(self):
         class Reply:
@@ -547,7 +636,7 @@ class UplinkTests(unittest.TestCase):
         )
         self.assertEqual("wifi secret", self.rx.uplink["wifipass"])
         self.assertEqual(
-            ["HELLO"] + ["UPLINKSET"] * 6 + ["UPLINKSAVE", "UPLINKINFO"],
+            ["HELLO"] + ["UPLINKSET"] * 6 + ["UPLINKSAVE", "UPLINKINFO", "REBOOT"],
             [verb for _, verb in self.events],
         )
         self.assertNotIn("secret", json.dumps(output))
