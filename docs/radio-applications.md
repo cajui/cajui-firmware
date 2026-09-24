@@ -17,8 +17,12 @@ minimum power does not make operation without a suitable antenna safe.
 
 ## Enrollment and image changes
 
-Load `runtime_tx` or `runtime_rx` and enroll with the [USB tool](provisioning.md); a
-device without enrollment boots in admin mode, with the radio in reset. Both images share
+Load `runtime_tx` or `runtime_rx` and enroll with the [USB tool](provisioning.md) or by
+[radio pairing](radio-pairing.md); a transmitter without enrollment boots in admin mode,
+with the radio in reset, and a receiver without bindings starts listening. Holding PRG
+for three seconds on a transmitter (at boot, when waking it from sleep, or in admin mode)
+or sending `CJ1 PAIR` starts pairing: its LED blinks fast for up to two minutes, then it
+restarts. PRG is a deep-sleep wake source for this reason. Both images share
 `partitions.csv` and the same snapshot format. Preserve the `cajui` NVS partition; never erase or restore older
 counter/receipt state under an existing key. Keep the local recovery file private.
 Radio operation requires healthy storage, enrollment and profile 1; the transmitter also
@@ -117,6 +121,10 @@ accepted counter and a confirmed revoke action. Settings are staged and saved to
 uplink blob as the USB commands once both sections are complete, then applied without
 a reboot: MQTT restarts with the new identity and an in-flight publication is republished.
 Saved passwords are never shown; an empty password field keeps the saved one.
+
+The page also adds transmitters by [radio pairing](radio-pairing.md): "Search for
+transmitters" opens a two-minute window, requesting nodes are listed with their ID and
+signal strength, and "Add" sends the offer; the result appears on the page.
 
 **TODO (security): the access point is open, without a password.** While it is open,
 anyone in range can use the page, and so can any client on the home network through the

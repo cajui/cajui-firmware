@@ -29,6 +29,8 @@ released.
 - A receiver setup page on a temporary access point opened by holding the PRG button:
   Wi-Fi, MQTT broker (with mDNS discovery), status and transmitter revocation, applied
   without a reboot. The OLED shows a QR code to join the setup network.
+- [Radio pairing](docs/radio-pairing.md): add a transmitter from the setup page with an
+  X25519/HKDF key exchange; the transmitter joins after a long PRG press or `CJ1 PAIR`.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 ## Pending and unvalidated
@@ -41,7 +43,10 @@ contracts and link here.
   the receiver stops accepting new samples once its 128-frame durable queue is full.
 - **TODO (security): the setup access point is open.** Anyone within Wi-Fi range while
   it is open can change the uplink settings or revoke transmitters. A per-device password
-  on a label/QR is planned. Enrolling new transmitters still requires USB.
+  on a label/QR is planned.
+- **Radio pairing is not authenticated against an active attacker** in radio range during
+  the two-minute window; a per-device label code is planned. Signal strength is shown,
+  not enforced.
 - Broker TLS and an application-level receipt from Central. Forwarding uses plain MQTT
   3.1.1 on a trusted network; PUBACK proves broker acceptance only.
 - Physical validation is limited: a manual bench exchange achieved durable acceptance
