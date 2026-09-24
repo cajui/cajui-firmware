@@ -62,6 +62,9 @@ public:
     Forwarder& operator=(const Forwarder&) = delete;
     // quiet=false defers all work, including flash writes, while the radio needs the loop.
     void poll(bool quiet);
+    // Switches to a new broker identity. An in-flight publication is abandoned; the
+    // sample stays queued and is republished under the new source.
+    bool setSource(const char* source);
     ForwardState state() const { return state_; }
     uint32_t forwarded() const { return forwarded_; }
     uint32_t retries() const { return retries_; }

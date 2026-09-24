@@ -231,6 +231,13 @@ Forwarder::Forwarder(Publisher& publisher, Clock& clock, PersistentStore& store,
     else
         state_ = ForwardState::Failed;
 }
+bool Forwarder::setSource(const char* source) {
+    if (!source || !validIdentity(source)) return false;
+    std::memcpy(source_, source, std::strlen(source) + 1);
+    if (state_ == ForwardState::Waiting) state_ = ForwardState::Idle;
+    delayed_ = false;
+    return true;
+}
 void Forwarder::retryLater(uint32_t now) {
     delayed_ = true;
     retryAt_ = now + RetryDelayMs;

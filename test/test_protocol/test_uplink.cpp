@@ -368,6 +368,27 @@ void test_forwarder_stops_on_storage_failure_and_handles_changed_front() {
     EXPECT_RESULT(ForwardState::Failed, missing.state());
 }
 
+void test_forwarder_switches_source_and_republishes() {
+    ForwardRig rig;
+    rig.receive(1);
+    rig.forwarder.poll(true);
+    TEST_ASSERT_FALSE(rig.forwarder.setSource("bad source"));
+    TEST_ASSERT_FALSE(rig.forwarder.setSource(nullptr));
+    EXPECT_RESULT(ForwardState::Waiting, rig.forwarder.state());
+    TEST_ASSERT_TRUE(rig.forwarder.setSource("receiver-2"));
+    EXPECT_RESULT(ForwardState::Idle, rig.forwarder.state());
+    rig.publisher.acks.push_back(1); // PUBACK for the abandoned publication.
+    rig.forwarder.poll(true);
+    TEST_ASSERT_EQUAL_size_t(2, rig.publisher.payloads.size());
+    TEST_ASSERT_EQUAL_STRING("telemetry/v1/receiver-2/0000000000000002/samples",
+                             rig.publisher.topics.back().c_str());
+    TEST_ASSERT_EQUAL_size_t(1, rig.store->queued());
+    rig.publisher.acks.push_back(2);
+    rig.forwarder.poll(true);
+    TEST_ASSERT_EQUAL_size_t(0, rig.store->queued());
+    TEST_ASSERT_TRUE(rig.forwarder.setSource("receiver-3")); // Idle: nothing abandoned.
+}
+
 // --- USB administration ----------------------------------------------------------------
 void command(Provisioning& admin, const char* input, const char* expected, UNITY_LINE_TYPE line) {
     char out[ReplyCapacity]{};
@@ -456,6 +477,7 @@ void runUplinkTests() {
     RUN_TEST(test_forwarder_removes_only_after_matching_puback);
     RUN_TEST(test_forwarder_republishes_the_same_sample_after_loss);
     RUN_TEST(test_forwarder_stops_on_storage_failure_and_handles_changed_front);
+    RUN_TEST(test_forwarder_switches_source_and_republishes);
     RUN_TEST(test_usb_uplink_settings_are_staged_saved_and_never_echoed);
     RUN_TEST(test_usb_uplink_rejects_bad_values_roles_and_devices);
 }
