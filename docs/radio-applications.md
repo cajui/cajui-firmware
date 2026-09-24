@@ -98,6 +98,39 @@ the snapshot, doubling flash writes per sample compared with queueing alone.
 Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
 queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 
+## Receiver setup page
+
+Holding the PRG button (GPIO0) for three seconds opens an access point named
+`Cajui-XXXX`, from the last two bytes of the device ID, and a page at `192.168.4.1`.
+A captive-portal DNS makes phones open it automatically; the OLED shows a Wi-Fi QR code
+plus the network name and address. Holding the button again, the page's close button or
+ten minutes without requests closes it. Final hardware can wire an external button to any
+GPIO with a pull-up by changing `board::SetupButton`.
+
+The page configures Wi-Fi (scanned 2.4 GHz networks or typed name) and the MQTT broker
+(address discovered through mDNS `_mqtt._tcp`, or typed, plus username and password),
+shows Wi-Fi, broker and queue status, and lists enrolled transmitters with their last
+accepted counter and a confirmed revoke action. Settings are staged and saved to the same
+uplink blob as the USB commands once both sections are complete, then applied without
+a reboot: MQTT restarts with the new identity and an in-flight publication is republished.
+Saved passwords are never shown; an empty password field keeps the saved one.
+
+**TODO (security): the access point is open, without a password.** While it is open,
+anyone in range can use the page, and so can any client on the home network through the
+receiver's station address, because the server listens on both interfaces. It opens only
+by physical action and closes on its own; a per-device password on a label/QR is planned.
+HTTP is not encrypted. Revoking needs USB to re-enroll. New transmitters are still
+enrolled over USB.
+
+The page runs in the radio loop and serves requests only while the receiver is listening.
+A slow HTTP client can still delay radio processing, so an acknowledgement may be late
+while the page is in use. Wi-Fi scans and mDNS discovery never overlap, because a scan
+hops channels and drops mDNS traffic; a scan that starts while the station connects
+aborts the connection, so scans wait for it. With the access point active, a scan takes
+longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.
+These behaviors were observed on a Heltec WiFi LoRa 32 V3, not derived from documentation.
+Diagnostic lines start with `CJAPP SETUP`.
+
 ## Radio adapter
 
 The adapter pins RadioLib 7.1.2. A DIO1 ISR records the millisecond timestamp and wakes

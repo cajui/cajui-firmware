@@ -34,7 +34,9 @@ Coverage gates include `codec.cpp`, `delivery.cpp`, `cajui_runtime.cpp`, the hos
 `cajui_application.cpp`, the host branch of `crypto.cpp`, `cajui_storage.cpp`, `snapshot.cpp` and
 `cajui_provisioning.cpp` and `cajui_uplink.cpp`: 95% lines and 85% branches. Uplink tests
 check the exact Central JSON, the settings blob and PUBACK-gated queue removal against a
-publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Compiler/library allocation
+publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Setup tests cover button timing, the
+Wi-Fi QR code, field staging and HTML escaping; the access point, DNS, HTTP server,
+scanning and mDNS discovery run only on hardware. Compiler/library allocation
 failures are not all induced. Neither a high coverage percentage nor a passing ESP32
 build proves security, radio performance, durable flash behavior or battery life.
 

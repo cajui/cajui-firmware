@@ -25,6 +25,9 @@ Separate administration images keep the radio in reset. No production image is r
   loop, DHT22 sampling and a five-minute transmitter sleep schedule.
 - Receiver forwarding to an MQTT broker over Wi-Fi in Cajuí Central's JSON contract,
   removing each queued sample only after its PUBACK, with USB-provisioned settings.
+- A receiver setup page on a temporary access point opened by holding the PRG button:
+  Wi-Fi, MQTT broker (with mDNS discovery), status and transmitter revocation, applied
+  without a reboot. The OLED shows a QR code to join the setup network.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 ## Pending and unvalidated
@@ -35,6 +38,9 @@ contracts and link here.
 - Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
   use USB for development. Without uplink settings, or while the broker is unreachable,
   the receiver stops accepting new samples once its 128-frame durable queue is full.
+- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range while
+  it is open can change the uplink settings or revoke transmitters. A per-device password
+  on a label/QR is planned. Enrolling new transmitters still requires USB.
 - Broker TLS and an application-level receipt from Central. Forwarding uses plain MQTT
   3.1.1 on a trusted network; PUBACK proves broker acceptance only.
 - Physical validation is limited: a manual bench exchange achieved durable acceptance
@@ -78,7 +84,7 @@ CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 
 Coverage gates apply to the host implementation files listed in
 `scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot, application,
-command handler and uplink): at least 95% line and 85% branch coverage. The Python client needs 95%
+command handler, uplink and setup): at least 95% line and 85% branch coverage. The Python client needs 95%
 line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
 
@@ -100,6 +106,7 @@ lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contra
 lib/CajuiStorage/src/     Persistent state machine and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
 lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
+lib/CajuiSetup/src/       Setup page rendering, field validation and button handling
 src/                     ESP32 administration and experimental radio applications
 tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner

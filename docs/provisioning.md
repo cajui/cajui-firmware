@@ -119,7 +119,8 @@ administration authentication, network migration or reset command is provided.
 ## Receiver uplink settings
 
 The receiver forwards queued samples to an MQTT broker when Wi-Fi and broker settings
-are stored. Configure them with `admin_rx` loaded, then load `runtime_rx` again:
+are stored. The [setup page](radio-applications.md#receiver-setup-page) configures them
+without a computer. Over USB, load `admin_rx`, configure, then load `runtime_rx` again:
 
 ```sh
 python3 tools/provision.py uplink --receiver /dev/cu.RECEIVER \
