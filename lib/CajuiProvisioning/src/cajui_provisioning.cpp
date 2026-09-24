@@ -91,13 +91,15 @@ void respond(Result result, const char* command, char* reply, size_t capacity) {
     else
         std::snprintf(reply, capacity, "CJ1 ERR %s", name(result));
 }
-void hello(const PersistentStore& store, uint32_t boot, char* reply, size_t capacity) {
-    std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx",
+void hello(const PersistentStore& store, uint32_t boot, ConsoleMode mode, char* reply,
+           size_t capacity) {
+    std::snprintf(reply, capacity, "CJ1 OK HELLO %016llx %s %s %016llx %016llx %04x %u %08lx %s",
                   static_cast<unsigned long long>(store.device()),
                   store.role() == Role::Transmitter ? "tx" : "rx", name(store.health()),
                   static_cast<unsigned long long>(store.network()),
                   static_cast<unsigned long long>(store.receiver()), unsigned(store.profile()),
-                  unsigned(store.queued()), static_cast<unsigned long>(boot));
+                  unsigned(store.queued()), static_cast<unsigned long>(boot),
+                  mode == ConsoleMode::Admin ? "admin" : "run");
 }
 Result prepare(PersistentStore& store, Fields& fields) {
     uint64_t network = 0;
@@ -185,6 +187,10 @@ bool setField(UplinkConfig& pending, const char* field, const char* value) {
 void Provisioning::uplink(const char* command, size_t count, char* const* words, char* reply,
                           size_t capacity) {
     if (!uplink_ || store_.role() != Role::Receiver) return; // Reply stays CJ1 ERR INVALID.
+    if (mode_ == ConsoleMode::Operation && std::strcmp(command, "UPLINKINFO") != 0) {
+        std::snprintf(reply, capacity, "CJ1 ERR ADMIN");
+        return;
+    }
     if (!std::strcmp(command, "UPLINKSET") && count == UplinkSetWords) {
         respond(setField(pending_, words[3], words[4]) ? Result::Ok : Result::Invalid, command,
                 reply, capacity);
@@ -223,7 +229,7 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     if (count < 2 || std::strcmp(words[0], "CJ1") != 0) return true;
     const char* command = words[1];
     if (!std::strcmp(command, "HELLO") && count == 2) {
-        hello(store_, boot_, reply, capacity);
+        hello(store_, boot_, mode_, reply, capacity);
         return true;
     }
     Fields fields(words + 2);
@@ -235,8 +241,17 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
         std::snprintf(reply, capacity, "CJ1 OK REBOOT");
         return true;
     }
+    if (!std::strcmp(command, "ADMIN") && count == RebootWords) {
+        restart_ = admin_ = true;
+        std::snprintf(reply, capacity, "CJ1 OK ADMIN");
+        return true;
+    }
     if (!std::strncmp(command, "UPLINK", std::strlen("UPLINK"))) {
         uplink(command, count, words, reply, capacity);
+        return true;
+    }
+    if (mode_ == ConsoleMode::Operation && std::strcmp(command, "INFO") != 0) {
+        std::snprintf(reply, capacity, "CJ1 ERR ADMIN"); // Mutations need the radio stopped.
         return true;
     }
     if (!store_.healthy()) {

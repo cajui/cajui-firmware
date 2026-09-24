@@ -21,7 +21,8 @@ void test_usb_enrollment_resumes_without_resetting_counter() {
     Provisioning admin(*store);
     COMMAND(
         admin, "CJ1 HELLO",
-        "CJ1 OK HELLO 0000000000000002 tx ready 0000000000000000 0000000000000000 0000 0 00000001");
+        "CJ1 OK HELLO 0000000000000002 tx ready 0000000000000000 0000000000000000 0000 0 00000001 "
+        "admin");
     COMMAND(admin, prepare, "CJ1 OK PREPARE");
     COMMAND(admin, "CJ1 INFO 0000000000000002 0000000000000002 000000000000000a",
             "CJ1 OK INFO 1 0000000000000000");
@@ -196,6 +197,46 @@ void test_usb_hello_reports_why_storage_is_unavailable() {
     TEST_ASSERT_EQUAL_STRING("write", health(*other).c_str());
 }
 }
+void test_operation_console_allows_only_queries_and_admin_restart() {
+    MemoryBlob blob, settings;
+    auto store = mounted(blob, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    Provisioning run(*store, 7, &settings, ConsoleMode::Operation);
+    COMMAND(run, "CJ1 HELLO",
+            "CJ1 OK HELLO 0000000000000001 rx ready 000000000000002a 0000000000000001 0001 0 "
+            "00000007 run");
+    COMMAND(run, "CJ1 INFO 0000000000000001 0000000000000002 000000000000000a",
+            "CJ1 OK INFO 2 0000000000000000");
+    COMMAND(run, "CJ1 UPLINKINFO 0000000000000001", "CJ1 OK UPLINKINFO 0");
+    const char* prepareAnother = "CJ1 PREPARE 0000000000000001 000000000000002a 0000000000000001 "
+                                 "0000000000000003 000000000000000b "
+                                 "02020202020202020202020202020202 0001";
+    const char* refused[] = {
+        "CJ1 REVOKE 0000000000000001 0000000000000002 000000000000000a",
+        "CJ1 ACTIVATE 0000000000000001 0000000000000002 000000000000000a",
+        "CJ1 RESERVE 0000000000000001 0000000000000002 000000000000000a",
+        prepareAnother,
+        "CJ1 UPLINKSET 0000000000000001 ssid 41",
+        "CJ1 UPLINKSAVE 0000000000000001",
+    };
+    for (auto input : refused) {
+        UNITY_SET_DETAIL(input);
+        COMMAND(run, input, "CJ1 ERR ADMIN");
+    }
+    TEST_ASSERT_EQUAL_size_t(0, settings.writes);
+    TEST_ASSERT_FALSE(run.restartRequested());
+    COMMAND(run, "CJ1 ADMIN 0000000000000002", "CJ1 ERR INVALID"); // Another device.
+    COMMAND(run, "CJ1 ADMIN 0000000000000001", "CJ1 OK ADMIN");
+    TEST_ASSERT_TRUE(run.restartRequested());
+    TEST_ASSERT_TRUE(run.adminRequested());
+    Provisioning admin(*store);
+    COMMAND(admin, "CJ1 REBOOT 0000000000000001", "CJ1 OK REBOOT");
+    TEST_ASSERT_TRUE(admin.restartRequested());
+    TEST_ASSERT_FALSE(admin.adminRequested()); // REBOOT returns to operation.
+    Provisioning again(*store);
+    COMMAND(again, "CJ1 ADMIN 0000000000000001", "CJ1 OK ADMIN"); // Restart staying in admin.
+    TEST_ASSERT_TRUE(again.adminRequested());
+}
 void runProvisioningTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
     RUN_TEST(test_usb_enrollment_resumes_without_resetting_counter);
@@ -205,4 +246,5 @@ void runProvisioningTests() {
     RUN_TEST(test_usb_unknown_enrollment_is_not_found);
     RUN_TEST(test_usb_reserve_reports_why_it_was_refused);
     RUN_TEST(test_usb_hello_reports_why_storage_is_unavailable);
+    RUN_TEST(test_operation_console_allows_only_queries_and_admin_restart);
 }
