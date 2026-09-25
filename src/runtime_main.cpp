@@ -13,6 +13,7 @@
 #include "cajui_application.h"
 #include "board/sx1262_radio.h"
 #include "board/admin_console.h"
+#include "board/display.h"
 #include "cajui_provisioning.h"
 #include "cajui_pairing.h"
 #include "cajui_setup.h"
@@ -258,8 +259,7 @@ void setup() {
 #if CAJUI_RUNTIME_ROLE == 1
     output(board::Vext, LOW);
     // Hold the shared-rail display in reset; this application does not initialize it.
-    constexpr uint8_t DisplayReset = 21;
-    output(DisplayReset, LOW);
+    output(board::OledReset, LOW);
     DHT sensor(board::SensorData, DHT22);
     sensor.begin();
     delay(SensorWarmupMs);

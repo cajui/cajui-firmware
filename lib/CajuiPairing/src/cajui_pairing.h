@@ -8,6 +8,9 @@ namespace cajui {
 // Radio pairing, docs/radio-pairing.md. Frames reuse the v1 header; `counter` carries
 // the node's random attempt nonce.
 enum class PairingType : uint8_t { Request = 3, Offer = 4, Confirm = 5, Done = 6 };
+static_assert(uint8_t(PairingType::Request) == FirstPairingType &&
+                  uint8_t(PairingType::Done) == LastPairingType,
+              "Pairing types must match the range the receiver routes to pairing");
 constexpr uint16_t PairingProfile = 1;
 
 // Cryptographically secure random bytes (keys, nonces, generations). Unlike Jitter,

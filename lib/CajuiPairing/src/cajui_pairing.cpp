@@ -1,12 +1,19 @@
 #include "cajui_pairing.h"
+#include "cajui_wire.h"
 #include <cstring>
 
 namespace cajui {
 namespace {
-// v1 header layout, see docs/protocol-v1.md.
-constexpr uint8_t Magic[4] = {'C', 'J', 'L', 'R'};
-constexpr uint8_t Version = 1;
-constexpr size_t TypeAt = 5, NetworkAt = 6, NodeAt = 14, CounterAt = 22, LengthAt = 30;
+using wire::CounterAt;
+using wire::get;
+using wire::LengthAt;
+using wire::Magic;
+using wire::NetworkAt;
+using wire::NodeAt;
+using wire::put;
+using wire::TypeAt;
+using wire::Version;
+using wire::VersionAt;
 constexpr size_t RequestPayload = X25519Size;
 constexpr size_t OfferPayload = X25519Size + 8 + 8 + 2;
 constexpr size_t RequestSize = HeaderSize + RequestPayload;
@@ -15,20 +22,12 @@ constexpr size_t TaggedSize = HeaderSize + TagSize;
 constexpr char Salt[] = "cajui-pair-v1";
 constexpr int RandomAttempts = 8;
 
-void put(uint8_t* out, uint64_t value, size_t size) {
-    for (size_t i = 0; i < size; ++i) out[size - 1 - i] = uint8_t(value >> (i * 8));
-}
-uint64_t get(const uint8_t* in, size_t size) {
-    uint64_t value = 0;
-    for (size_t i = 0; i < size; ++i) value = (value << 8) | in[i];
-    return value;
-}
 void header(PairingType type, uint64_t network, uint64_t node, uint64_t nonce, size_t length,
             Frame& frame) {
     frame = Frame{};
     auto* h = frame.bytes.data();
     std::memcpy(h, Magic, sizeof(Magic));
-    h[4] = Version;
+    h[VersionAt] = Version;
     h[TypeAt] = uint8_t(type);
     put(h + NetworkAt, network, 8);
     put(h + NodeAt, node, 8);
@@ -37,15 +36,11 @@ void header(PairingType type, uint64_t network, uint64_t node, uint64_t nonce, s
 }
 bool shaped(const Frame& frame, PairingType type, size_t size, size_t length) {
     const auto* h = frame.bytes.data();
-    return frame.size == size && std::memcmp(h, Magic, sizeof(Magic)) == 0 && h[4] == Version &&
-           h[TypeAt] == uint8_t(type) && get(h + LengthAt, 2) == length;
+    return frame.size == size && std::memcmp(h, Magic, sizeof(Magic)) == 0 &&
+           h[VersionAt] == Version && h[TypeAt] == uint8_t(type) && get(h + LengthAt, 2) == length;
 }
 void nonceFor(PairingType type, uint64_t nonce, uint8_t out[NonceSize]) {
-    out[0] = 'C';
-    out[1] = 'J';
-    out[2] = uint8_t(type);
-    out[3] = Version;
-    put(out + 4, nonce, 8);
+    wire::nonce(uint8_t(type), nonce, out);
 }
 bool nonzero(const X25519Key& key) {
     uint8_t any = 0;
@@ -284,8 +279,8 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     // A repeated confirmation of the last completed exchange, even after the window closed
     // or while another node is being added: answer with the identical JOIN_DONE, within
     // the bounds a genuine node needs.
-    if (last_.node && (uint32_t(clock_.nowMs() - last_.at) >= DoneReplayMs ||
-                       last_.replies >= MaxDoneReplies))
+    if (last_.node &&
+        (uint32_t(clock_.nowMs() - last_.at) >= DoneReplayMs || last_.replies >= MaxDoneReplies))
         forgetCompleted();
     if (type == uint8_t(PairingType::Confirm) && last_.node &&
         verifyTagged(frame, PairingType::Confirm, last_.network, last_.node, last_.nonce,

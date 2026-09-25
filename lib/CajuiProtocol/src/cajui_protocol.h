@@ -13,8 +13,9 @@ constexpr size_t MaxPayload = DataPrefixSize + MaxReadings * ReadingSize;
 constexpr size_t MaxFrame = HeaderSize + MaxPayload + TagSize;
 using Key = std::array<uint8_t, KeySize>;
 using Tag = std::array<uint8_t, TagSize>;
-// Pairing types 3-6 are defined in docs/radio-pairing.md and handled by CajuiPairing.
 enum class Type : uint8_t { Data = 1, Ack = 2 };
+// Pairing types, defined in docs/radio-pairing.md and handled by CajuiPairing.
+constexpr uint8_t FirstPairingType = 3, LastPairingType = 6;
 constexpr size_t X25519Size = 32;
 using X25519Key = std::array<uint8_t, X25519Size>;
 enum class Status : uint8_t { Ok = 0, Error = 1, Skipped = 2 };

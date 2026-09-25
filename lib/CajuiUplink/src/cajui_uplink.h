@@ -26,6 +26,10 @@ constexpr size_t UplinkBlobCapacity = MinUplinkSize + SsidCapacity + WifiPasswor
 // Open networks and hidden-length secrets are not supported: every field is required.
 bool validUplink(const UplinkConfig&);
 bool validIdentity(const char*);
+// IPv4 address or host name characters, 1..HostCapacity bytes.
+bool validHost(const char*);
+// Decimal 1..65535 without sign, spaces or leading text.
+bool parsePort(const char*, uint16_t&);
 void wipe(UplinkConfig&);
 // Stored values are validated again on load; a false/Error result disables forwarding.
 ReadResult loadUplink(AtomicBlob&, UplinkConfig&);

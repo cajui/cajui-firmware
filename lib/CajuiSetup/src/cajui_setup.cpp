@@ -1,61 +1,39 @@
 #include "cajui_setup.h"
+#include "cajui_text.h"
 #include <cinttypes>
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
 namespace cajui {
 namespace {
-constexpr unsigned long MaxPort = 65535, Decimal = 10;
-constexpr size_t PortDigits = 5;
-// Bounded HTML builder; any truncation invalidates the page.
-class Html {
+// HTML on top of the bounded text builder; any truncation invalidates the page.
+class Html : public TextBuffer {
 public:
-    Html(char* output, size_t capacity) : output_(output), capacity_(capacity) {
-        if (capacity_) output_[0] = 0;
-    }
-    // NOLINTNEXTLINE(cert-dcl50-cpp): bounded printf-style helper over vsnprintf.
-    void raw(const char* format, ...) __attribute__((format(printf, 2, 3))) {
-        if (!ok_) return;
-        va_list arguments;
-        va_start(arguments, format);
-        const int written = std::vsnprintf(output_ + used_, capacity_ - used_, format, arguments);
-        va_end(arguments);
-        if (written < 0 || size_t(written) >= capacity_ - used_)
-            ok_ = false;
-        else
-            used_ += size_t(written);
-    }
+    using TextBuffer::TextBuffer;
     // Escapes text for element content and quoted attribute values.
     void text(const char* value) {
-        for (const char* c = value ? value : ""; *c && ok_; ++c) {
+        for (const char* c = value ? value : ""; *c && ok(); ++c) {
             switch (*c) {
-            case '&': raw("&amp;"); break;
-            case '<': raw("&lt;"); break;
-            case '>': raw("&gt;"); break;
-            case '"': raw("&quot;"); break;
-            case '\'': raw("&#39;"); break;
-            default: raw("%c", *c);
+            case '&': format("&amp;"); break;
+            case '<': format("&lt;"); break;
+            case '>': format("&gt;"); break;
+            case '"': format("&quot;"); break;
+            case '\'': format("&#39;"); break;
+            default: format("%c", *c);
             }
         }
     }
     // Percent-encodes a query parameter value.
     void query(const char* value) {
-        for (const char* c = value; *c && ok_; ++c) {
+        for (const char* c = value; *c && ok(); ++c) {
             const bool plain = (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') ||
                                (*c >= 'A' && *c <= 'Z') || *c == '.' || *c == '-' || *c == '_';
             if (plain)
-                raw("%c", *c);
+                format("%c", *c);
             else
-                raw("%%%02X", unsigned(uint8_t(*c)));
+                format("%%%02X", unsigned(uint8_t(*c)));
         }
     }
-    bool ok() const { return ok_; }
-
-private:
-    char* output_;
-    size_t capacity_, used_ = 0;
-    bool ok_ = true;
 };
 bool copy(char* output, size_t capacity, const char* value) {
     const size_t length = std::strlen(value);
@@ -64,10 +42,10 @@ bool copy(char* output, size_t capacity, const char* value) {
     return true;
 }
 void head(Html& page, const char* title) {
-    page.raw("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
-             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
+    page.format("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
     page.text(title);
-    page.raw(
+    page.format(
         "</title><style>body{font:16px system-ui,sans-serif;margin:0 auto;padding:16px;"
         "max-width:560px;background:#faf9f5;color:#24382f}section{background:#fff;"
         "border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:12px 0}"
@@ -90,155 +68,157 @@ const char* stateName(Enrollment state) {
     return "empty";
 }
 void status(Html& page, const SetupView& v) {
-    page.raw("<section><h2>Status</h2><p>Wi-Fi: ");
+    page.format("<section><h2>Status</h2><p>Wi-Fi: ");
     switch (v.wifi) {
     case WifiState::Connected:
-        page.raw("connected to <b>");
+        page.format("connected to <b>");
         page.text(v.wifiSsid);
-        page.raw("</b> (");
+        page.format("</b> (");
         page.text(v.address);
-        page.raw(")");
+        page.format(")");
         break;
     case WifiState::Connecting:
-        page.raw("connecting to <b>");
+        page.format("connecting to <b>");
         page.text(v.wifiSsid);
-        page.raw("</b>&hellip;");
+        page.format("</b>&hellip;");
         break;
-    case WifiState::Failed: page.raw("<b>could not connect</b>; check the password"); break;
-    case WifiState::Idle: page.raw("not configured"); break;
+    case WifiState::Failed: page.format("<b>could not connect</b>; check the password"); break;
+    case WifiState::Idle: page.format("not configured"); break;
     }
-    page.raw("<br>Broker: %s", v.brokerOnline ? "<b>online</b>" : "offline");
+    page.format("<br>Broker: %s", v.brokerOnline ? "<b>online</b>" : "offline");
     if (v.staged && v.staged->host[0]) {
-        page.raw(" (");
+        page.format(" (");
         page.text(v.staged->host);
-        page.raw(":%u, user ", unsigned(v.staged->port));
+        page.format(":%u, user ", unsigned(v.staged->port));
         page.text(v.staged->username);
-        page.raw(")");
+        page.format(")");
     }
-    page.raw("<br>Samples waiting to be forwarded: %u</p>", unsigned(v.queued));
+    page.format("<br>Samples waiting to be forwarded: %u</p>", unsigned(v.queued));
     if (v.staged && !v.saved)
-        page.raw("<p><small>Changes are staged. They are saved when both Wi-Fi and broker "
-                 "are complete.</small></p>");
-    page.raw("<p><a href=\"/\">Refresh</a></p></section>");
+        page.format("<p><small>Changes are staged. They are saved when both Wi-Fi and broker "
+                    "are complete.</small></p>");
+    page.format("<p><a href=\"/\">Refresh</a></p></section>");
 }
 void wifiForm(Html& page, const SetupView& v) {
-    page.raw(
+    page.format(
         "<section><h2>Wi-Fi</h2><form method=\"post\" action=\"/wifi\">"
         "<label for=\"ssid\">Network (2.4 GHz)</label>"
         "<input id=\"ssid\" name=\"ssid\" list=\"networks\" maxlength=\"32\" required value=\"");
     page.text(v.staged ? v.staged->ssid : "");
-    page.raw("\"><datalist id=\"networks\">");
+    page.format("\"><datalist id=\"networks\">");
     for (size_t i = 0; i < v.networkCount; ++i) {
-        page.raw("<option value=\"");
+        page.format("<option value=\"");
         page.text(v.networks[i].ssid);
-        page.raw("\">%d dBm</option>", v.networks[i].rssi);
+        page.format("\">%d dBm</option>", v.networks[i].rssi);
     }
-    page.raw("</datalist><label for=\"wifipass\">Password</label><input id=\"wifipass\" "
-             "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
-             "placeholder=\"Leave empty to keep the saved one\"><button>Connect</button></form>");
+    page.format(
+        "</datalist><label for=\"wifipass\">Password</label><input id=\"wifipass\" "
+        "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
+        "placeholder=\"Leave empty to keep the saved one\"><button>Connect</button></form>");
     if (v.scanning)
-        page.raw("<p><small>Scanning for networks&hellip;</small></p>");
+        page.format("<p><small>Scanning for networks&hellip;</small></p>");
     else
-        page.raw("<p><small>%u networks found%s. <a href=\"/scan\">Scan again</a></small></p>",
-                 unsigned(v.networkCount + v.networksOmitted),
-                 v.networksOmitted ? ", not all listed" : "");
-    page.raw("</section>");
+        page.format("<p><small>%u networks found%s. <a href=\"/scan\">Scan again</a></small></p>",
+                    unsigned(v.networkCount + v.networksOmitted),
+                    v.networksOmitted ? ", not all listed" : "");
+    page.format("</section>");
 }
 void brokerForm(Html& page, const SetupView& v) {
     const char* host = v.prefillHost ? v.prefillHost : v.staged ? v.staged->host : "";
     const unsigned port = v.prefillHost ? v.prefillPort : v.staged ? v.staged->port : 0;
-    page.raw("<section><h2>MQTT broker</h2>");
-    if (v.searching) page.raw("<p><small>Searching the network&hellip;</small></p>");
+    page.format("<section><h2>MQTT broker</h2>");
+    if (v.searching) page.format("<p><small>Searching the network&hellip;</small></p>");
     for (size_t i = 0; i < v.brokerCount; ++i) {
-        page.raw("<p>Found <b>");
+        page.format("<p>Found <b>");
         page.text(v.brokers[i].host);
-        page.raw(":%u</b> <a href=\"/?host=", unsigned(v.brokers[i].port));
+        page.format(":%u</b> <a href=\"/?host=", unsigned(v.brokers[i].port));
         page.query(v.brokers[i].host);
-        page.raw("&amp;port=%u\">Use</a></p>", unsigned(v.brokers[i].port));
+        page.format("&amp;port=%u\">Use</a></p>", unsigned(v.brokers[i].port));
     }
     if (!v.searching && !v.brokerCount)
-        page.raw("<p><small>No broker announced on this network. Enter its address below."
-                 "</small></p>");
+        page.format("<p><small>No broker announced on this network. Enter its address below."
+                    "</small></p>");
     if (v.wifi == WifiState::Connected)
-        page.raw("<p><small><a href=\"/discover\">Search again</a></small></p>");
-    page.raw("<form method=\"post\" action=\"/broker\"><label for=\"host\">Address</label>"
-             "<input id=\"host\" name=\"host\" maxlength=\"64\" required value=\"");
+        page.format("<p><small><a href=\"/discover\">Search again</a></small></p>");
+    page.format("<form method=\"post\" action=\"/broker\"><label for=\"host\">Address</label>"
+                "<input id=\"host\" name=\"host\" maxlength=\"64\" required value=\"");
     page.text(host);
-    page.raw("\"><label for=\"port\">Port</label><input id=\"port\" name=\"port\" "
-             "inputmode=\"numeric\" maxlength=\"5\" required value=\"");
-    if (port) page.raw("%u", port);
-    page.raw("\"><label for=\"user\">Username</label><input id=\"user\" name=\"username\" "
-             "maxlength=\"64\" required autocapitalize=\"none\" value=\"");
+    page.format("\"><label for=\"port\">Port</label><input id=\"port\" name=\"port\" "
+                "inputmode=\"numeric\" maxlength=\"5\" required value=\"");
+    if (port) page.format("%u", port);
+    page.format("\"><label for=\"user\">Username</label><input id=\"user\" name=\"username\" "
+                "maxlength=\"64\" required autocapitalize=\"none\" value=\"");
     page.text(v.staged ? v.staged->username : "");
-    page.raw("\"><label for=\"mqttpass\">Password</label><input id=\"mqttpass\" "
-             "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
-             "placeholder=\"Empty keeps the saved one for the same broker\"><button>Save "
-             "broker</button>"
-             "</form><p><small>The username is also the source ID of the samples. Plain MQTT: "
-             "use a trusted network.</small></p></section>");
+    page.format("\"><label for=\"mqttpass\">Password</label><input id=\"mqttpass\" "
+                "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
+                "placeholder=\"Empty keeps the saved one for the same broker\"><button>Save "
+                "broker</button>"
+                "</form><p><small>The username is also the source ID of the samples. Plain MQTT: "
+                "use a trusted network.</small></p></section>");
 }
 // Inner content of the transmitters section; also served alone for live updates.
 void transmitterList(Html& page, const SetupView& v) {
-    page.raw("<h2>Transmitters</h2>");
+    page.format("<h2>Transmitters</h2>");
     if (!v.transmitterCount) {
-        page.raw("<p>No transmitter enrolled.</p>");
+        page.format("<p>No transmitter enrolled.</p>");
     } else {
-        page.raw("<table><tr><th>Node</th><th>State</th><th>Last sample</th><th></th></tr>");
+        page.format("<table><tr><th>Node</th><th>State</th><th>Last sample</th><th></th></tr>");
         for (size_t i = 0; i < v.transmitterCount; ++i) {
             const auto& t = v.transmitters[i];
-            page.raw("<tr><td>%016" PRIx64 "</td><td>%s</td><td>%" PRIu64 "</td><td>", t.node,
-                     stateName(t.state), t.received);
+            page.format("<tr><td>%016" PRIx64 "</td><td>%s</td><td>%" PRIu64 "</td><td>", t.node,
+                        stateName(t.state), t.received);
             if (t.state == Enrollment::Active)
-                page.raw("<form method=\"post\" action=\"/revoke\"><input type=\"hidden\" "
-                         "name=\"node\" value=\"%016" PRIx64 "\"><input type=\"hidden\" "
-                         "name=\"generation\" value=\"%016" PRIx64 "\"><button>Revoke</button>"
-                         "</form>",
-                         t.node, t.generation);
-            page.raw("</td></tr>");
+                page.format("<form method=\"post\" action=\"/revoke\"><input type=\"hidden\" "
+                            "name=\"node\" value=\"%016" PRIx64 "\"><input type=\"hidden\" "
+                            "name=\"generation\" value=\"%016" PRIx64 "\"><button>Revoke</button>"
+                            "</form>",
+                            t.node, t.generation);
+            page.format("</td></tr>");
         }
-        page.raw("</table>");
+        page.format("</table>");
     }
     const PairingView* pairing = v.pairing;
     if (!pairing) {
-        page.raw("<p><small>New transmitters are enrolled over USB.</small></p>");
+        page.format("<p><small>New transmitters are enrolled over USB.</small></p>");
         return;
     }
-    page.raw("<h3>Add a transmitter</h3>");
+    page.format("<h3>Add a transmitter</h3>");
     if (!pairing->open) {
-        page.raw("<form method=\"post\" action=\"/pair/open\" data-live-form><button>Search for "
-                 "transmitters (2 minutes)</button></form>");
+        page.format("<form method=\"post\" action=\"/pair/open\" data-live-form><button>Search for "
+                    "transmitters (2 minutes)</button></form>");
     } else {
         // data-live keeps the page script refreshing this section while the window is open.
-        page.raw("<p data-live><span class=\"spin\"></span>Searching, %u s left. Hold the PRG "
-                 "button of the transmitter for 3 seconds; its LED blinks fast while it asks to "
-                 "join.</p>",
-                 unsigned(pairing->remainingSeconds));
-        if (!pairing->count) page.raw("<p><small>No transmitter asking to join yet.</small></p>");
+        page.format("<p data-live><span class=\"spin\"></span>Searching, %u s left. Hold the PRG "
+                    "button of the transmitter for 3 seconds; its LED blinks fast while it asks to "
+                    "join.</p>",
+                    unsigned(pairing->remainingSeconds));
+        if (!pairing->count)
+            page.format("<p><small>No transmitter asking to join yet.</small></p>");
         for (size_t i = 0; i < pairing->count && i < MaxPairingCandidates; ++i) {
             if (pairing->conflict[i]) {
-                page.raw("<p>%016" PRIx64 " <small>Two devices answered with this ID. Stop "
-                         "searching, keep only your transmitter in pairing mode and search "
-                         "again.</small></p>",
-                         pairing->nodes[i]);
+                page.format("<p>%016" PRIx64 " <small>Two devices answered with this ID. Stop "
+                            "searching, keep only your transmitter in pairing mode and search "
+                            "again.</small></p>",
+                            pairing->nodes[i]);
                 continue;
             }
-            page.raw("<form method=\"post\" action=\"/pair/add\" data-live-form><p>%016" PRIx64
-                     " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
-                     "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
-                     pairing->nodes[i], int(pairing->rssi[i]), pairing->nodes[i]);
+            page.format("<form method=\"post\" action=\"/pair/add\" data-live-form><p>%016" PRIx64
+                        " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
+                        "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
+                        pairing->nodes[i], int(pairing->rssi[i]), pairing->nodes[i]);
         }
         if (pairing->offered)
-            page.raw("<p><span class=\"spin\"></span>Waiting for %016" PRIx64
-                     " to confirm&hellip;</p>",
-                     pairing->offered);
-        page.raw("<form method=\"post\" action=\"/pair/stop\" data-live-form><button>Stop "
-                 "searching</button></form>");
+            page.format("<p><span class=\"spin\"></span>Waiting for %016" PRIx64
+                        " to confirm&hellip;</p>",
+                        pairing->offered);
+        page.format("<form method=\"post\" action=\"/pair/stop\" data-live-form><button>Stop "
+                    "searching</button></form>");
     }
     if (pairing->paired)
-        page.raw("<p class=\"notice\">Transmitter %016" PRIx64 " paired.</p>", pairing->paired);
-    page.raw("<p><small>Add only a transmitter you just put in pairing mode, and keep it close. "
-             "Pairing is not protected against an attacker in radio range during the search."
-             "</small></p>");
+        page.format("<p class=\"notice\">Transmitter %016" PRIx64 " paired.</p>", pairing->paired);
+    page.format("<p><small>Add only a transmitter you just put in pairing mode, and keep it close. "
+                "Pairing is not protected against an attacker in radio range during the search."
+                "</small></p>");
 }
 // Refreshes the transmitters section every second while it is live, and submits the pairing
 // forms in place. Without JavaScript the forms reload the page as before.
@@ -251,10 +231,10 @@ constexpr char LiveScript[] =
     "fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f))}).then(load,load)});"
     "setInterval(function(){if(box.querySelector('[data-live]'))load()},1000)})();</script>";
 void transmitters(Html& page, const SetupView& v) {
-    page.raw("<section id=\"transmitters\">");
+    page.format("<section id=\"transmitters\">");
     transmitterList(page, v);
-    page.raw("</section>");
-    if (v.pairing) page.raw("%s", LiveScript);
+    page.format("</section>");
+    if (v.pairing) page.format("%s", LiveScript);
 }
 } // namespace
 
@@ -279,12 +259,12 @@ bool setupSsid(uint64_t device, char* output, size_t capacity) {
 bool wifiQr(const char* ssid, char* output, size_t capacity) {
     if (!ssid || !*ssid || !output || !capacity) return false;
     Html code(output, capacity);
-    code.raw("WIFI:T:nopass;S:");
+    code.format("WIFI:T:nopass;S:");
     for (const char* c = ssid; *c; ++c) {
-        if (std::strchr("\\;,:\"", *c)) code.raw("\\");
-        code.raw("%c", *c);
+        if (std::strchr("\\;,:\"", *c)) code.format("\\");
+        code.format("%c", *c);
     }
-    code.raw(";;");
+    code.format(";;");
     return code.ok();
 }
 SetupError stageWifi(UplinkConfig& pending, const char* ssid, const char* password) {
@@ -301,19 +281,8 @@ SetupError stageWifi(UplinkConfig& pending, const char* ssid, const char* passwo
 SetupError stageBroker(UplinkConfig& pending, const char* host, const char* port,
                        const char* username, const char* password) {
     UplinkConfig next = pending;
-    if (!host || !copy(next.host, sizeof(next.host), host) || !*host) return SetupError::Host;
-    for (const char* c = host; *c; ++c)
-        if (!((*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
-              *c == '.' || *c == '-'))
-            return SetupError::Host;
-    unsigned long number = 0;
-    if (!port || !*port || std::strlen(port) > PortDigits) return SetupError::Port;
-    for (const char* c = port; *c; ++c) {
-        if (*c < '0' || *c > '9') return SetupError::Port;
-        number = number * Decimal + unsigned(*c - '0');
-    }
-    if (!number || number > MaxPort) return SetupError::Port;
-    next.port = uint16_t(number);
+    if (!validHost(host) || !copy(next.host, sizeof(next.host), host)) return SetupError::Host;
+    if (!parsePort(port, next.port)) return SetupError::Port;
     if (!username || !validIdentity(username) ||
         !copy(next.username, sizeof(next.username), username))
         return SetupError::Username;
@@ -345,20 +314,20 @@ namespace {
 bool renderPage(const SetupView& v, char* output, size_t capacity) {
     Html page(output, capacity);
     head(page, "Cajuí receiver setup");
-    page.raw("<h1>Cajuí receiver</h1><p><small>Device %016" PRIx64
-             ". Setup closes after 10 minutes without activity.</small></p>",
-             v.device);
+    page.format("<h1>Cajuí receiver</h1><p><small>Device %016" PRIx64
+                ". Setup closes after 10 minutes without activity.</small></p>",
+                v.device);
     if (v.notice) {
-        page.raw("<p class=\"notice\">");
+        page.format("<p class=\"notice\">");
         page.text(v.notice);
-        page.raw("</p>");
+        page.format("</p>");
     }
     status(page, v);
     wifiForm(page, v);
     brokerForm(page, v);
     transmitters(page, v);
-    page.raw("<form method=\"post\" action=\"/close\"><button>Close setup</button></form>"
-             "</html>");
+    page.format("<form method=\"post\" action=\"/close\"><button>Close setup</button></form>"
+                "</html>");
     return page.ok();
 }
 } // namespace
@@ -387,22 +356,22 @@ bool renderRevoke(uint64_t node, uint64_t generation, char* output, size_t capac
     if (!output || !capacity) return false;
     Html page(output, capacity);
     head(page, "Revoke transmitter");
-    page.raw("<h1>Revoke transmitter %016" PRIx64 "?</h1><p>The receiver will reject its "
-             "samples. Samples already queued are still forwarded. It can only be enrolled "
-             "again with a new key over USB.</p><form method=\"post\" action=\"/revoke\">"
-             "<input type=\"hidden\" name=\"node\" value=\"%016" PRIx64 "\"><input "
-             "type=\"hidden\" name=\"generation\" value=\"%016" PRIx64 "\"><input "
-             "type=\"hidden\" name=\"confirm\" value=\"1\"><button>Revoke</button></form>"
-             "<p><a href=\"/\">Cancel</a></p></html>",
-             node, node, generation);
+    page.format("<h1>Revoke transmitter %016" PRIx64 "?</h1><p>The receiver will reject its "
+                "samples. Samples already queued are still forwarded. It can only be enrolled "
+                "again with a new key over USB.</p><form method=\"post\" action=\"/revoke\">"
+                "<input type=\"hidden\" name=\"node\" value=\"%016" PRIx64 "\"><input "
+                "type=\"hidden\" name=\"generation\" value=\"%016" PRIx64 "\"><input "
+                "type=\"hidden\" name=\"confirm\" value=\"1\"><button>Revoke</button></form>"
+                "<p><a href=\"/\">Cancel</a></p></html>",
+                node, node, generation);
     return page.ok();
 }
 bool renderClosed(char* output, size_t capacity) {
     if (!output || !capacity) return false;
     Html page(output, capacity);
     head(page, "Setup closed");
-    page.raw("<h1>Setup closed</h1><p>The setup network is turning off. Hold the button "
-             "again to reopen it.</p></html>");
+    page.format("<h1>Setup closed</h1><p>The setup network is turning off. Hold the button "
+                "again to reopen it.</p></html>");
     return page.ok();
 }
 } // namespace cajui

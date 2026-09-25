@@ -133,6 +133,7 @@ def main():
                 "lib/CajuiProtocol/src/crypto.cpp",
                 "lib/CajuiStorage/src/cajui_storage.cpp",
                 "lib/CajuiStorage/src/snapshot.cpp",
+                "lib/CajuiStorage/src/cajui_crc32.cpp",
                 "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
                 "lib/CajuiUplink/src/cajui_uplink.cpp",
                 "lib/CajuiSetup/src/cajui_setup.cpp",

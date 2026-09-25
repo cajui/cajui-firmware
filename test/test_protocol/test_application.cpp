@@ -179,9 +179,11 @@ void test_replayed_duplicate_is_acknowledged_a_bounded_number_of_times() {
 void test_duplicate_limiter_tracks_nodes_independently() {
     DuplicateAckLimiter limiter;
     uint32_t now = UINT32_MAX - 10; // Windows survive clock wrap.
-    for (uint64_t node = 1; node <= BindingCapacity; ++node) TEST_ASSERT_TRUE(limiter.allow(node, now));
+    for (uint64_t node = 1; node <= BindingCapacity; ++node)
+        TEST_ASSERT_TRUE(limiter.allow(node, now));
     TEST_ASSERT_FALSE(limiter.allow(BindingCapacity + 1, now)); // No slot left.
-    for (int i = 1; i < DuplicateAckLimiter::PerWindow; ++i) TEST_ASSERT_TRUE(limiter.allow(1, now));
+    for (int i = 1; i < DuplicateAckLimiter::PerWindow; ++i)
+        TEST_ASSERT_TRUE(limiter.allow(1, now));
     TEST_ASSERT_FALSE(limiter.allow(1, now + 100));
     TEST_ASSERT_TRUE(limiter.allow(2, now + 100));
     now += DuplicateAckLimiter::WindowMs;

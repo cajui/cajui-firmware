@@ -9,7 +9,8 @@ constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWor
 constexpr size_t IdDigits = 16, ProfileDigits = 4;
 constexpr char FirstPrintable = ' ', LastPrintable = '~';
 int nibble(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    constexpr int Ten = 10;
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + Ten : -1;
 }
 bool hex(const char* text, size_t length, uint64_t& result) {
     if (std::strlen(text) != length) return false;
@@ -191,17 +192,10 @@ bool setField(UplinkConfig& pending, const char* field, const char* value) {
         if (!std::strcmp(field, target.name)) return hexText(value, target.output, target.capacity);
     if (std::strcmp(field, "port") != 0) return false;
     constexpr size_t PortDigits = 5;
-    constexpr unsigned long MaxPort = 65535;
-    constexpr unsigned long Decimal = 10;
     char digits[PortDigits + 1]{};
-    if (!hexText(value, digits, PortDigits)) return false;
-    unsigned long port = 0;
-    for (const char* c = digits; *c; ++c) {
-        if (*c < '0' || *c > '9') return false;
-        port = port * Decimal + unsigned(*c - '0');
-    }
-    if (!port || port > MaxPort) return false;
-    pending.port = uint16_t(port);
+    uint16_t port = 0;
+    if (!hexText(value, digits, PortDigits) || !parsePort(digits, port)) return false;
+    pending.port = port;
     return true;
 }
 }

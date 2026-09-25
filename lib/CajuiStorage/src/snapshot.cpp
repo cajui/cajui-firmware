@@ -1,19 +1,10 @@
 #include "snapshot.h"
+#include "cajui_crc32.h"
 #include <cstring>
 
 namespace cajui {
 namespace snapshot {
 namespace {
-// CRC detects accidental snapshot corruption; it is not authentication.
-constexpr uint32_t Crc32Polynomial = 0xedb88320u; // Reflected IEEE 802.3.
-uint32_t checksum(const uint8_t* data, size_t length) {
-    uint32_t crc = UINT32_MAX;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (Crc32Polynomial & (0u - (crc & 1u)));
-    }
-    return ~crc;
-}
 struct Writer {
     uint8_t* p;
     void number(uint64_t n, size_t size) {
@@ -93,14 +84,13 @@ size_t encode(const State& state, Role role, uint64_t device, uint8_t* output) {
         w.block(q.frame.bytes.data(), MaxFrame);
     }
     const size_t payload = size_t(w.p - output);
-    w.number(checksum(output, payload), ChecksumSize);
+    w.number(crc32(output, payload), ChecksumSize);
     return payload + ChecksumSize;
 }
 Health decode(const uint8_t* input, size_t size, Role role, uint64_t device, State& state) {
     if (size < MinSnapshotSize || size > SnapshotSize) return Health::Corrupt;
     Reader trailer{input + size - ChecksumSize};
-    if (trailer.number(ChecksumSize) != checksum(input, size - ChecksumSize))
-        return Health::Corrupt;
+    if (trailer.number(ChecksumSize) != crc32(input, size - ChecksumSize)) return Health::Corrupt;
     Reader r{input};
     uint8_t magic[sizeof(SnapshotMagic)]{};
     r.block(magic, sizeof(magic));

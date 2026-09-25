@@ -4,7 +4,6 @@
 namespace cajui {
 namespace {
 constexpr uint32_t AckTransmitTimeoutMs = 3000;
-constexpr uint8_t PairingFirstType = 3, PairingLastType = 6; // docs/radio-pairing.md
 constexpr float MinTemperature = -40, MaxTemperature = 80, MaxHumidity = 100;
 constexpr float MilliScale = 1000;
 Reading measurement(uint16_t metric, float value, float minimum, float maximum) {
@@ -86,7 +85,7 @@ void ReceiverController::poll() {
     }
     if (status == ReceiveStatus::Empty) return;
     const uint8_t type = untrustedType(frame);
-    if (type >= PairingFirstType && type <= PairingLastType) {
+    if (type >= FirstPairingType && type <= LastPairingType) {
         if (!pairing_ || !pairing_->handle(frame, radio_.lastRssi(), ack_)) return;
         startedAt_ = clock_.nowMs();
         if (!radio_.startTransmit(ack_)) {
