@@ -132,14 +132,17 @@ for example after uploading the wrong image), `invalid` (semantic validation) or
 authentication token or GCM nonce. INFO returns enrollment state (prepared=1,
 active=2, revoked=3) and last reserved counter (16 hex digits). RESERVE is an
 administrative persistence probe, not a radio-send operation. While storage is
-unhealthy, well-formed commands other than HELLO and REBOOT return `STORAGE`; REBOOT
-stays available because restarting remounts the store. INFO, ACTIVATE, REVOKE and
+unhealthy, the enrollment commands (PREPARE, ACTIVATE, INFO, REVOKE, RESERVE, RESET) return
+`STORAGE`; HELLO, REBOOT, ADMIN, PAIR, POWER and the UPLINK commands do not depend on the
+protocol records and stay available. REBOOT matters most, because restarting remounts the
+store. INFO, ACTIVATE, REVOKE and
 RESERVE return `NOT_FOUND` for an unknown node/generation pair. RESERVE returns
 `INVALID` on a receiver and `CONFLICT` for a prepared or revoked generation. RESET
 returns `QUEUED` while a receiver holds samples, unless `discard` is given. POWER without
 a value reports the configured transmit power (the −9 dBm default when none is stored)
-in both modes; with a signed decimal value from −9 to 22 it stores it, in admin mode
-only. It applies at the next restart.
+in both modes, or `STORAGE` if the `cajui` partition could not be opened; with a signed
+decimal value from −9 to 22, without leading zeros, it stores it, in admin mode only. It
+applies at the next restart.
 
 Profile `0001` is the initial direct-LoRa profile identifier; its field and regulatory
 validation remain pending. Radio pairing is the over-the-air alternative to USB

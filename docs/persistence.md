@@ -29,7 +29,11 @@ Every sequence between head and tail must hold a valid record; anything else is
 corruption, never a shorter queue. Forwarding a sample writes only `head`.
 
 Receipt and queue records have version 2, which added the ACK power command and the link
-quality; version 1 records still decode, without them. Each sample therefore costs two
+quality; version 1 records still decode, without them. The reverse does not hold: a
+receiver that accepted a sample with this version refuses to mount under an older image
+(`corrupt`), and only `CJ1 RESET <device> discard` recovers it, losing the queue. Forward
+queued samples before downgrading a receiver. A transmitter writes neither record and can
+be downgraded freely. Each sample therefore costs two
 writes of at most 168 bytes, and each forward one write
 of 14 bytes, whatever the number of enrollments or queued samples. The v1 layout rewrote
 the whole state, up to 20 KB, twice per sample. The registry is rewritten only by

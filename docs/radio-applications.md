@@ -23,7 +23,8 @@ Transmitters send version 2 DATA, so the receiver's ACK can command a transmit p
 ceiling; a commanded power is kept in RTC memory across deep sleep, and three cycles
 without an ACK, or a power cycle, return the node to the configured power. The receiver
 does not command any change yet: the steps of a power policy are still to be defined
-from field measurements. Update the receiver before its transmitters.
+from field measurements. Update the receiver before its transmitters, and do not downgrade
+a receiver without reading [the storage note](persistence.md#records-layout-v2).
 
 ## Enrollment and image changes
 
