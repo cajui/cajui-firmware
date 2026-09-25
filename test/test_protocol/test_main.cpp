@@ -396,6 +396,12 @@ void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     std::memset(out, 0xff, 16);
     TEST_ASSERT_FALSE(decrypt(key, nonce, plain, 0, cipher, 16, tag, out));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(plain, out, 16);
+    // Sizes beyond the protocol bounds are refused before reaching the library.
+    static uint8_t big[MaxFrame + 1];
+    TEST_ASSERT_FALSE(encrypt(key, nonce, big, MaxFrame + 1, plain, 16, cipher, tag));
+    TEST_ASSERT_FALSE(encrypt(key, nonce, plain, 0, big, MaxPayload + 1, big, tag));
+    TEST_ASSERT_FALSE(decrypt(key, nonce, big, MaxFrame + 1, cipher, 16, tag, out));
+    TEST_ASSERT_FALSE(decrypt(key, nonce, plain, 0, big, MaxPayload + 1, tag, big));
 }
 }
 void runApplicationTests();

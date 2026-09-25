@@ -37,6 +37,19 @@ public:
         return ok;
     }
 };
+// Succeeds for the first `good` requests, then fails.
+class LimitedEntropy final : public Entropy {
+public:
+    explicit LimitedEntropy(int good) : good_(good) {}
+    bool fill(uint8_t* output, size_t size) override {
+        for (size_t i = 0; i < size; ++i) output[i] = uint8_t(next_ += 29);
+        return good_-- > 0;
+    }
+
+private:
+    int good_;
+    uint8_t next_ = 3;
+};
 class ZeroEntropy final : public Entropy {
 public:
     bool fill(uint8_t* output, size_t size) override {
@@ -103,8 +116,12 @@ void test_x25519_and_hkdf_match_rfc_vectors() {
     TEST_ASSERT_EQUAL_STRING("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742",
                              hexOf(shared1.data(), 32).c_str());
     TEST_ASSERT_EQUAL_MEMORY(shared1.data(), shared2.data(), 32);
-    // A low-order peer key yields an all-zero secret, which must be rejected.
+    // Low-order peer keys (u = 0 and u = 1) yield an all-zero secret, which must be rejected.
     TEST_ASSERT_FALSE(x25519Shared(alice, X25519Key{}, shared1));
+    X25519Key one{};
+    one[0] = 1;
+    TEST_ASSERT_FALSE(x25519Shared(alice, one, shared1));
+    TEST_ASSERT_EQUAL_STRING(std::string(64, '0').c_str(), hexOf(shared1.data(), 32).c_str());
     // RFC 5869 test case 1.
     uint8_t ikm[22], salt[13], info[10], okm[42];
     std::memset(ikm, 0x0b, sizeof(ikm));
@@ -357,6 +374,293 @@ void test_lost_done_on_repairing_never_cuts_the_node_off() {
         TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
         TEST_ASSERT_TRUE(bindings[0].key == atNode.key);
     }
+}
+void test_frame_builders_and_parsers_refuse_zero_identities() {
+    CountingEntropy entropy;
+    KeyPair keys{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, keys));
+    Key key{};
+    key.fill(7);
+    for (int field = 0; field < 4; ++field) {
+        SCENARIO(field);
+        uint64_t ids[4] = {42, 1, 2, 10};
+        ids[field] = 0;
+        Key derived{};
+        TEST_ASSERT_FALSE(deriveBindingKey(keys.privateKey, keys.publicKey, ids[0], ids[1], ids[2],
+                                           ids[3], keys.publicKey, keys.publicKey, derived));
+    }
+    Offer good{};
+    good.network = 42;
+    good.receiver = 1;
+    good.node = 2;
+    good.nonce = 5;
+    good.generation = 10;
+    good.profile = PairingProfile;
+    good.receiverPublic = keys.publicKey;
+    Frame frame{};
+    for (int field = 0; field < 6; ++field) {
+        SCENARIO(field);
+        Offer offer = good;
+        if (field == 0) offer.network = 0;
+        if (field == 1) offer.receiver = 0;
+        if (field == 2) offer.node = 0;
+        if (field == 3) offer.nonce = 0;
+        if (field == 4) offer.generation = 0;
+        if (field == 5) offer.receiverPublic = X25519Key{};
+        TEST_ASSERT_FALSE(buildOffer(offer, key, frame));
+        TEST_ASSERT_EQUAL_size_t(0, frame.size);
+    }
+    // A shaped offer whose identities or key were zeroed in flight is not parsed.
+    TEST_ASSERT_TRUE(buildOffer(good, key, frame));
+    const size_t zeroed[][2] = {{6, 8}, {14, 8}, {22, 8}, {32, 32}, {64, 8}, {72, 8}};
+    for (const auto& span : zeroed) {
+        SCENARIO(span[0]);
+        Frame damaged = frame;
+        for (size_t i = 0; i < span[1]; ++i) damaged.bytes[span[0] + i] = 0;
+        Offer parsed{};
+        TEST_ASSERT_FALSE(parseOffer(damaged, parsed));
+        TEST_ASSERT_FALSE(verifyOffer(damaged, key));
+    }
+    const PairingType types[] = {PairingType::Request, PairingType::Offer};
+    for (auto type : types) TEST_ASSERT_FALSE(buildTagged(type, 42, 2, 5, key, frame));
+    TEST_ASSERT_FALSE(buildTagged(PairingType::Confirm, 0, 2, 5, key, frame));
+    TEST_ASSERT_FALSE(buildTagged(PairingType::Confirm, 42, 0, 5, key, frame));
+    TEST_ASSERT_FALSE(buildTagged(PairingType::Done, 42, 2, 0, key, frame));
+    TEST_ASSERT_TRUE(buildTagged(PairingType::Done, 42, 2, 5, key, frame));
+    TEST_ASSERT_FALSE(verifyTagged(frame, PairingType::Request, 42, 2, 5, key));
+    // Failing entropy never yields a key pair or nonce.
+    LimitedEntropy none(0);
+    TEST_ASSERT_FALSE(newKeyPair(none, keys));
+    uint64_t value = 1;
+    TEST_ASSERT_FALSE(nonzeroRandom(none, value));
+    TEST_ASSERT_EQUAL_UINT64(0, value);
+    ZeroEntropy zero;
+    TEST_ASSERT_FALSE(nonzeroRandom(zero, value)); // Never a zero identifier.
+}
+void test_host_edge_cases_never_store_or_reply() {
+    PairRig rig;
+    CountingEntropy entropy;
+    KeyPair keys{}, other{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, keys));
+    TEST_ASSERT_TRUE(newKeyPair(entropy, other));
+    Frame request{}, reply{};
+    rig.host.open();
+    TEST_ASSERT_TRUE(buildRequest(2, 5, keys.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    // The same nonce with another key is also a conflict.
+    Frame sameNonce{};
+    TEST_ASSERT_TRUE(buildRequest(2, 5, other.publicKey, sameNonce));
+    TEST_ASSERT_FALSE(rig.host.handle(sameNonce, -50, reply));
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].conflict);
+    rig.host.open();
+    Frame malformed = request;
+    malformed.bytes[6] = 1; // A request never carries a network.
+    TEST_ASSERT_FALSE(rig.host.handle(malformed, -50, reply));
+    TEST_ASSERT_EQUAL_size_t(0, rig.host.candidateCount());
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    // Entropy failing at the key pair or at the network ID refuses the offer.
+    for (int good = 0; good < 2; ++good) {
+        SCENARIO(good);
+        LimitedEntropy failing(good);
+        PairingHost host(*rig.rx, failing, rig.clock);
+        host.open();
+        TEST_ASSERT_FALSE(host.handle(request, -50, reply));
+        EXPECT_RESULT(Result::CryptoError, host.accept(2));
+        EXPECT_RESULT(HostState::Open, host.state());
+    }
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // While offered: another node's request is listed but not answered, and a
+    // confirmation with a wrong tag is ignored.
+    Frame another{};
+    TEST_ASSERT_TRUE(buildRequest(9, 1, other.publicKey, another));
+    TEST_ASSERT_FALSE(rig.host.handle(another, -60, reply));
+    TEST_ASSERT_EQUAL_size_t(2, rig.host.candidateCount());
+    Key wrong{};
+    wrong.fill(9);
+    Frame forged{};
+    TEST_ASSERT_TRUE(buildTagged(PairingType::Confirm, rig.rx->network() ? rig.rx->network() : 1, 2,
+                                 5, wrong, forged));
+    TEST_ASSERT_FALSE(rig.host.handle(forged, -50, reply));
+    EXPECT_RESULT(HostState::Offered, rig.host.state());
+    // A full, unhealthy store reports a storage error instead of Full.
+    rig.rxBlob.failBefore = true;
+    EXPECT_RESULT(Result::StorageError, rig.rx->revoke(99, 99) == Result::NotFound
+                                            ? rig.rx->prepare(42, 1, 3, 3, fixtures::key(3), 1)
+                                            : Result::StorageError);
+    EXPECT_RESULT(Result::StorageError, rig.host.accept(9));
+}
+void test_storage_failures_during_the_exchange_leave_nothing_active() {
+    // Receiver side: the confirmation cannot be stored (prepare, then activation fails).
+    for (int step = 0; step < 2; ++step) {
+        SCENARIO(step);
+        PairRig rig;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        for (int i = 0; i < 30 && rig.rxRadio.sent.empty(); ++i) {
+            rig.client.poll();
+            rig.toReceiver();
+            rig.clock.time += 100;
+        }
+        rig.toNode();
+        rig.client.poll();
+        rig.client.poll(); // Confirm transmitted.
+        rig.rxBlob.failAt = step;
+        rig.toReceiver();
+        TEST_ASSERT_TRUE(rig.rxRadio.sent.empty()); // No JOIN_DONE.
+        Binding binding{};
+        TEST_ASSERT_FALSE(rig.rx->binding(2, binding));
+    }
+    // Node side: JOIN_DONE arrives but the node cannot store its binding.
+    for (int step = 0; step < 2; ++step) {
+        SCENARIO(step);
+        PairRig rig;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        rig.txBlob.failAt = step; // The node writes nothing before JOIN_DONE.
+        rig.run(40);
+        EXPECT_RESULT(ClientState::Failed, rig.client.state());
+        rig.txBlob.failAt = -1;
+        auto reopened = fixtures::mounted(rig.txBlob, Role::Transmitter);
+        Binding binding{};
+        TEST_ASSERT_FALSE(reopened->binding(2, binding));
+    }
+}
+void test_node_edge_cases() {
+    {
+        // Offers for another node, attempt, receiver or profile are ignored; so is a DONE
+        // while listening and an OFFER while waiting for DONE.
+        PairRig rig;
+        rig.client.poll(); // Idle: nothing happens.
+        EXPECT_RESULT(ClientState::Idle, rig.client.state());
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Listening, rig.client.state());
+        CountingEntropy entropy;
+        KeyPair keys{};
+        TEST_ASSERT_TRUE(newKeyPair(entropy, keys));
+        Key key{};
+        key.fill(3);
+        for (int field = 0; field < 5; ++field) {
+            SCENARIO(field);
+            Offer offer{};
+            offer.network = 42;
+            offer.receiver = 1;
+            offer.node = 2;
+            offer.nonce = 1; // Not the node's attempt nonce (field 1 keeps it wrong).
+            offer.generation = 10;
+            offer.profile = PairingProfile;
+            offer.receiverPublic = keys.publicKey;
+            if (field == 0) offer.node = 7;
+            if (field == 2) offer.receiver = 2; // The node's own ID.
+            if (field == 3) offer.profile = 2;
+            if (field == 4) offer.receiverPublic[0] ^= 0x80;
+            Frame frame{};
+            TEST_ASSERT_TRUE(buildOffer(offer, key, frame));
+            rig.txRadio.inbox.push_back(frame);
+            rig.client.poll();
+            EXPECT_RESULT(ClientState::Listening, rig.client.state());
+        }
+        Frame done{};
+        TEST_ASSERT_TRUE(buildTagged(PairingType::Done, 42, 2, 1, key, done));
+        rig.txRadio.inbox.push_back(done);
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Listening, rig.client.state());
+        TEST_ASSERT_FALSE(rig.client.start()); // Already running.
+    }
+    {
+        // A pending transmission within its timeout keeps waiting; a forged DONE is ignored.
+        PairRig rig;
+        rig.txRadio.tx = TransmitStatus::Pending;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Sending, rig.client.state());
+        rig.txRadio.tx = TransmitStatus::Complete;
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        Frame offer{};
+        for (int i = 0; i < 40; ++i) {
+            rig.client.poll();
+            const bool confirming =
+                !rig.txRadio.sent.empty() &&
+                untrustedType(rig.txRadio.sent.back()) == uint8_t(PairingType::Confirm);
+            if (confirming) break;
+            rig.toReceiver();
+            if (!rig.rxRadio.sent.empty() &&
+                untrustedType(rig.rxRadio.sent.front()) == uint8_t(PairingType::Offer))
+                offer = rig.rxRadio.sent.front();
+            rig.toNode();
+            rig.clock.time += 100;
+        }
+        rig.txRadio.sent.clear(); // The confirmation is lost: no JOIN_DONE will come.
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::AwaitingDone, rig.client.state());
+        Key wrong{};
+        wrong.fill(5);
+        Frame forged{};
+        Offer parsed{};
+        TEST_ASSERT_TRUE(parseOffer(offer, parsed)); // Nothing is stored before confirmation.
+        TEST_ASSERT_TRUE(
+            buildTagged(PairingType::Done, parsed.network, 2, parsed.nonce, wrong, forged));
+        rig.txRadio.inbox.push_back(forged);
+        TEST_ASSERT_EQUAL_size_t(98, offer.size);
+        rig.txRadio.inbox.push_back(offer); // A late repeat of the offer is ignored now.
+        rig.client.poll();
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::AwaitingDone, rig.client.state());
+    }
+    {
+        // Same network, different receiver: refused before confirming.
+        PairRig rig;
+        TEST_ASSERT_TRUE(rig.tx->prepare(42, 5, 2, 10, fixtures::key(), 1) == Result::Ok);
+        TEST_ASSERT_TRUE(rig.rx->prepare(42, 1, 3, 20, fixtures::key(5), 1) == Result::Ok);
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        rig.run(40);
+        EXPECT_RESULT(ClientState::Failed, rig.client.state());
+    }
+    {
+        // Entropy failing at the key pair or at the attempt nonce; unhealthy storage.
+        for (int good = 0; good < 2; ++good) {
+            SCENARIO(good);
+            PairRig rig;
+            LimitedEntropy failing(good);
+            PairingClient client(rig.txRadio, rig.clock, rig.jitter, *rig.tx, failing);
+            TEST_ASSERT_FALSE(client.start());
+        }
+        PairRig rig;
+        rig.txBlob.failBefore = true;
+        TEST_ASSERT_FALSE(rig.tx->prepare(42, 1, 2, 10, fixtures::key(), 1) == Result::Ok);
+        PairingClient client(rig.txRadio, rig.clock, rig.jitter, *rig.tx, rig.txEntropy);
+        TEST_ASSERT_FALSE(client.start());
+    }
+}
+void test_stale_prepared_generations_are_replaced_on_both_sides() {
+    // A USB enrollment interrupted after PREPARE left a prepared generation on each side.
+    PairRig rig;
+    TEST_ASSERT_TRUE(rig.rx->prepare(42, 1, 2, 77, fixtures::key(7), 1) == Result::Ok);
+    TEST_ASSERT_TRUE(rig.tx->prepare(42, 1, 2, 77, fixtures::key(7), 1) == Result::Ok);
+    TEST_ASSERT_TRUE(rig.client.start());
+    rig.host.open();
+    rig.run(1);
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    rig.run(40);
+    EXPECT_RESULT(ClientState::Paired, rig.client.state());
+    EnrollmentInfo stale{};
+    TEST_ASSERT_TRUE(rig.rx->info(2, 77, stale));
+    EXPECT_RESULT(Enrollment::Revoked, stale.state);
+    TEST_ASSERT_TRUE(rig.tx->info(2, 77, stale));
+    EXPECT_RESULT(Enrollment::Revoked, stale.state);
+    Binding atNode{}, atReceiver{};
+    TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
+    TEST_ASSERT_TRUE(rig.rx->binding(2, atReceiver));
+    TEST_ASSERT_TRUE(atNode.key == atReceiver.key);
 }
 void test_host_ignores_input_outside_the_window_and_limits_candidates() {
     PairRig rig;
@@ -735,6 +1039,11 @@ void runPairingTests() {
     RUN_TEST(test_radio_pairing_creates_matching_active_bindings);
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
     RUN_TEST(test_lost_done_on_repairing_never_cuts_the_node_off);
+    RUN_TEST(test_frame_builders_and_parsers_refuse_zero_identities);
+    RUN_TEST(test_host_edge_cases_never_store_or_reply);
+    RUN_TEST(test_storage_failures_during_the_exchange_leave_nothing_active);
+    RUN_TEST(test_node_edge_cases);
+    RUN_TEST(test_stale_prepared_generations_are_replaced_on_both_sides);
     RUN_TEST(test_host_ignores_input_outside_the_window_and_limits_candidates);
     RUN_TEST(test_offers_store_nothing_and_resist_spoofed_requests);
     RUN_TEST(test_injected_request_cannot_redirect_a_listed_node);

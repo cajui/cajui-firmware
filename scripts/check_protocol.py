@@ -55,6 +55,55 @@ def check_python_coverage(report):
         print(f"Python client {label}: {covered}/{total} ({100 * covered / total:.2f}%)")
 
 
+# Host implementation files under the coverage gate; README and docs/testing.md list them.
+GATED_FILES = (
+    "lib/CajuiProtocol/src/codec.cpp",
+    "lib/CajuiProtocol/src/delivery.cpp",
+    "lib/CajuiRuntime/src/cajui_runtime.cpp",
+    "lib/CajuiApplication/src/cajui_application.cpp",
+    "lib/CajuiProtocol/src/crypto.cpp",
+    "lib/CajuiStorage/src/cajui_storage.cpp",
+    "lib/CajuiStorage/src/snapshot.cpp",
+    "lib/CajuiStorage/src/cajui_crc32.cpp",
+    "lib/CajuiStorage/src/records.cpp",
+    "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
+    "lib/CajuiUplink/src/cajui_uplink.cpp",
+    "lib/CajuiSetup/src/cajui_setup.cpp",
+    "lib/CajuiPairing/src/cajui_pairing.cpp",
+    "lib/CajuiDevice/src/cajui_device.cpp",
+)
+# Every gated host file must reach both minima on its own; an aggregate would let a
+# well-covered file hide a poorly covered one.
+LINE_MINIMUM, BRANCH_MINIMUM = 95, 85
+# Documented exceptions. crypto.cpp: its remaining host branches are OpenSSL allocation and
+# EVP failure returns, which no test can trigger without fault injection into the library;
+# known-answer vectors (NIST GCM, RFC 7748, RFC 5869) cover the success paths.
+BRANCH_FLOORS = {"lib/CajuiProtocol/src/crypto.cpp": 60}
+
+
+def check_native_coverage(export, expected=GATED_FILES):
+    """Return one message per gated file below its minimum or missing from the report."""
+    failures = []
+    try:
+        entries = export["data"][0]["files"]
+    except (KeyError, IndexError, TypeError):
+        return ["coverage report has no file data"]
+    seen = set()
+    for entry in entries:
+        name = entry["filename"]
+        path = name[name.index("lib/") :] if "lib/" in name else name
+        summary = entry["summary"]
+        lines, branches = summary["lines"], summary["branches"]
+        seen.add(path)
+        floor = BRANCH_FLOORS.get(path, BRANCH_MINIMUM)
+        if lines["count"] and lines["percent"] < LINE_MINIMUM:
+            failures.append(f"{path}: lines {lines['percent']:.2f}% < {LINE_MINIMUM}%")
+        if branches["count"] and branches["percent"] < floor:
+            failures.append(f"{path}: branches {branches['percent']:.2f}% < {floor}%")
+    failures += [f"{path}: no coverage data" for path in expected if path not in seen]
+    return failures
+
+
 def lint():
     sources = tracked("lib/*.cpp", "lib/*.h", "src/*.cpp", "test/*.cpp", "test/*.h")
     run(tool("clang-format") + ["--dry-run", "--Werror"] + sources)
@@ -123,31 +172,14 @@ def main():
                     profile,
                 ]
             )
-            inputs = [
-                ".pio/build/native/program",
-                f"-instr-profile={profile}",
-                "lib/CajuiProtocol/src/codec.cpp",
-                "lib/CajuiProtocol/src/delivery.cpp",
-                "lib/CajuiRuntime/src/cajui_runtime.cpp",
-                "lib/CajuiApplication/src/cajui_application.cpp",
-                "lib/CajuiProtocol/src/crypto.cpp",
-                "lib/CajuiStorage/src/cajui_storage.cpp",
-                "lib/CajuiStorage/src/snapshot.cpp",
-                "lib/CajuiStorage/src/cajui_crc32.cpp",
-                "lib/CajuiStorage/src/records.cpp",
-                "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
-                "lib/CajuiUplink/src/cajui_uplink.cpp",
-                "lib/CajuiSetup/src/cajui_setup.cpp",
-                "lib/CajuiPairing/src/cajui_pairing.cpp",
-                "lib/CajuiDevice/src/cajui_device.cpp",
-            ]
+            inputs = [".pio/build/native/program", f"-instr-profile={profile}", *GATED_FILES]
             run(prefix + ["llvm-cov", "report"] + inputs)
             report = subprocess.check_output(
                 prefix + ["llvm-cov", "export"] + inputs, cwd=ROOT, text=True
             )
-            totals = json.loads(report)["data"][0]["totals"]
-            if totals["lines"]["percent"] < 95 or totals["branches"]["percent"] < 85:
-                raise SystemExit("Coverage below minimum: 95% lines and 85% branches (host).")
+            failures = check_native_coverage(json.loads(report))
+            if failures:
+                raise SystemExit("Coverage below the per-file minimum:\n" + "\n".join(failures))
 
 
 if __name__ == "__main__":
