@@ -4,12 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Install Cajuí firmware</title>
-<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<!-- ESP Web Tools is served from this site: the release job checks its npm tarball hash. -->
+<script type="module" src="esp-web-tools/install-button.js"></script>
 <style>
   body { font: 16px system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 640px;
          background: #faf9f5; color: #24382f; }
   section { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px;
             margin: 12px 0; }
+  .choices { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .choice { flex: 1 1 240px; }
   small { color: #55665c; }
 </style>
 <h1>Install Cajuí firmware</h1>
@@ -17,22 +20,49 @@
 Chrome or Edge on a computer; the browser asks which serial port to use.</p>
 <section>
   <h2>Receiver</h2>
-  <esp-web-install-button manifest="manifest-receiver.json"></esp-web-install-button>
+  <div class="choices">
+    <div class="choice">
+      <esp-web-install-button manifest="update-receiver.json">
+        <button slot="activate">Update</button>
+      </esp-web-install-button>
+      <p><small>Keeps its enrollment, settings and queued samples.</small></p>
+    </div>
+    <div class="choice">
+      <esp-web-install-button manifest="new-receiver.json">
+        <button slot="activate">Install on a new board</button>
+      </esp-web-install-button>
+      <p><small>Also erases stored data. Use it for a board that never ran Cajuí, or to start
+      over.</small></p>
+    </div>
+  </div>
 </section>
 <section>
   <h2>Transmitter</h2>
-  <esp-web-install-button manifest="manifest-transmitter.json"></esp-web-install-button>
+  <div class="choices">
+    <div class="choice">
+      <esp-web-install-button manifest="update-transmitter.json">
+        <button slot="activate">Update</button>
+      </esp-web-install-button>
+      <p><small>Keeps its enrollment and counters.</small></p>
+    </div>
+    <div class="choice">
+      <esp-web-install-button manifest="new-transmitter.json">
+        <button slot="activate">Install on a new board</button>
+      </esp-web-install-button>
+      <p><small>Also erases stored data. The board then pairs by radio: hold its PRG button
+      for three seconds.</small></p>
+    </div>
+  </div>
 </section>
 <section>
-  <h2>What installing does</h2>
-  <p>It writes the bootloader, the partition table and the application. It never erases the
-  <code>cajui</code> storage partition, so an updated device keeps its enrollment, counters and
-  queued samples. A new device starts in administration mode and joins a network by radio
-  pairing or USB enrollment.</p>
-  <p><small>A receiver can also be updated without a computer: download its <code>.cjfw</code>
-  file from the <a href="https://github.com/cajui/cajui-firmware/releases">releases</a> and install
-  it from the receiver's setup page. Downgrading a receiver that has already stored samples with
-  a newer version needs its storage reset; see the documentation.</small></p>
+  <h2>Good to know</h2>
+  <p>A receiver can also be updated without a computer: download its <code>.cjfw</code> file
+  from the <a href="https://github.com/cajui/cajui-firmware/releases">releases</a> and install
+  it from the receiver's setup page.</p>
+  <p><small>Erasing a board that was already enrolled discards its keys for good; pair it again
+  afterwards. Downgrading a receiver that stored samples with a newer version needs its storage
+  reset; see the <a href="https://github.com/cajui/cajui-firmware/blob/main/docs/updates.md">update
+  documentation</a>.</small></p>
 </section>
 <p><small><a href="https://github.com/cajui/cajui-firmware">Source and documentation</a> ·
 Apache-2.0</small></p>
