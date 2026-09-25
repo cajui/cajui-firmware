@@ -1,5 +1,9 @@
 # Name, Type, SubType, Offset, Size, Flags
-nvs,data,nvs,0x9000,0x6000,
-phy_init,data,phy,0xf000,0x1000,
-factory,app,factory,0x10000,0x300000,
+# Two application slots for signed updates with rollback (docs/updates.md). otadata sits at
+# 0xe000, where the Arduino upload writes its initial image. The cajui partition keeps its
+# offset, so moving from the single-slot layout preserves enrollment and queued samples.
+nvs,data,nvs,0x9000,0x5000,
+otadata,data,ota,0xe000,0x2000,
+ota_0,app,ota_0,0x10000,0x300000,
 cajui,data,nvs,0x310000,0x40000,
+ota_1,app,ota_1,0x350000,0x300000,

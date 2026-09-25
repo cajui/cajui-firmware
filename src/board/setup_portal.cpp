@@ -2,6 +2,7 @@
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "setup_portal.h"
 #include "display.h"
+#include "release_key.h"
 #include "sx1262_radio.h"
 #include <ESPmDNS.h>
 #include <WiFi.h>
@@ -9,6 +10,7 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 namespace board {
 namespace {
@@ -398,6 +400,8 @@ void SetupPortal::home() {
     }
     view.notice = cajui::noticeText(cajui::parseNotice(server_.arg("n").c_str()));
     view.token = session_.token();
+    view.updates = true;
+    view.firmwareVersion = FirmwareVersion;
     bool rendered = false;
     {
         Locked held(lock_);
@@ -435,6 +439,67 @@ void SetupPortal::transmitters() {
         return;
     }
     server_.send(200, "text/html; charset=utf-8", page_);
+}
+// Streams an uploaded update into the free application slot. Runs before the request's
+// handler, so authorization is checked here without responding; the handler responds.
+void SetupPortal::upload() {
+    HTTPUpload& part = server_.upload();
+    if (part.status == UPLOAD_FILE_START) {
+        delete update_;
+        uploadAllowed_ = server_.client().localIP() == WiFi.softAPIP() &&
+                         cajui::allowedHost(server_.hostHeader().c_str(), address_) &&
+                         cajui::allowedOrigin(server_.header("Origin").c_str(), address_) &&
+                         session_.validToken(server_.arg("token").c_str());
+        update_ = uploadAllowed_
+                      ? new (std::nothrow) cajui::UpdateReceiver(
+                            ota_, cajui::ReleaseKey, sizeof(cajui::ReleaseKey),
+                            cajui::UpdateRole::Receiver, FirmwareVersion, OtaSink::capacity())
+                      : nullptr;
+        if (update_) Serial.println("CJAPP UPDATE receiving");
+        return;
+    }
+    if (!update_) return;
+    if (part.status == UPLOAD_FILE_WRITE)
+        update_->feed(part.buf, part.currentSize);
+    else if (part.status == UPLOAD_FILE_END)
+        update_->finish();
+    else if (part.status == UPLOAD_FILE_ABORTED)
+        update_->cancel();
+    session_.touch(millis()); // A large upload is activity.
+}
+void SetupPortal::uploaded() {
+    if (!authorize(true)) {
+        delete update_;
+        update_ = nullptr;
+        return;
+    }
+    cajui::UpdateStatus status = cajui::UpdateStatus::Truncated;
+    uint32_t version = 0;
+    if (update_) {
+        update_->cancel(); // No effect once installed; aborts a transfer that never ended.
+        status = update_->status();
+        version = update_->version();
+    }
+    delete update_;
+    update_ = nullptr;
+    Serial.printf("CJAPP UPDATE %s version=%u\n", cajui::updateStatusName(status),
+                  unsigned(version));
+    switch (status) {
+    case cajui::UpdateStatus::Installed:
+        cajui::renderUpdated(version, page_, sizeof(page_));
+        server_.send(200, "text/html; charset=utf-8", page_);
+        control_.restartForUpdate();
+        return;
+    case cajui::UpdateStatus::BadHeader:
+    case cajui::UpdateStatus::WrongRole: return redirect(cajui::Notice::UpdateWrongFile);
+    case cajui::UpdateStatus::Downgrade: return redirect(cajui::Notice::UpdateOlder);
+    case cajui::UpdateStatus::TooLarge: return redirect(cajui::Notice::UpdateTooLarge);
+    case cajui::UpdateStatus::BadSignature: return redirect(cajui::Notice::UpdateBadSignature);
+    case cajui::UpdateStatus::WriteError: return redirect(cajui::Notice::UpdateFailed);
+    case cajui::UpdateStatus::Receiving:
+    case cajui::UpdateStatus::Truncated: break;
+    }
+    redirect(cajui::Notice::UpdateIncomplete);
 }
 void SetupPortal::route() {
     if (routed_) return;
@@ -535,6 +600,7 @@ void SetupPortal::route() {
                  : result == cajui::Result::Conflict ? cajui::Notice::AddConflict
                                                      : cajui::Notice::AddFailed);
     });
+    server_.on("/update", HTTP_POST, [this] { uploaded(); }, [this] { upload(); });
     server_.on("/close", HTTP_POST, [this] {
         if (!authorize(true)) return;
         cajui::renderClosed(page_, sizeof(page_));

@@ -16,11 +16,13 @@
 #include "board/admin_console.h"
 #include "board/common.h"
 #include "board/mqtt_uplink.h"
+#include "board/ota.h"
 #include "board/setup_portal.h"
 #include "board/sx1262_radio.h"
 
 namespace {
 using namespace board;
+constexpr uint32_t ConfirmAfterMs = 60000, UpdateRestartDelayMs = 1500;
 
 class ReceiverApp final : public ReceiverControl {
 public:
@@ -28,6 +30,7 @@ public:
     void setup();
     void loop();
     bool applyUplink(const cajui::UplinkConfig&) override;
+    void restartForUpdate() override { updateRestart_.store(true); }
 
 private:
     BoardClock clock_;
@@ -40,14 +43,15 @@ private:
     cajui::PersistentStore store_;
     MqttUplink uplink_;
     AppLock lock_;
-    std::atomic<bool> listening_{false};
+    std::atomic<bool> listening_{false}, updateRestart_{false};
     cajui::ReceiverController controller_{radio_, clock_, store_};
     cajui::PairingHost pairing_{store_, entropy_, clock_};
     SetupPortal portal_{store_, uplink_, uplinkBlob_, *this, lock_, entropy_};
     std::unique_ptr<cajui::Forwarder> forwarder_;
     std::unique_ptr<cajui::Provisioning> commands_;
     std::unique_ptr<Console> console_;
-    bool adminMode_ = false, running_ = false, restartPending_ = false, healthy_ = false;
+    bool adminMode_ = false, running_ = false, restartPending_ = false, healthy_ = false,
+         confirmed_ = false;
     uint32_t startedAt_ = 0, retryAt_ = 0, reportedForwards_ = 0, reportedRetries_ = 0;
     bool reportedOnline_ = false;
     void startForwarding();
@@ -119,6 +123,7 @@ void ReceiverApp::fault(const char* reason) {
 }
 void ReceiverApp::setup() {
     startBoard();
+    reportFirmware();
     const bool ready = lock_.begin() && uplink_.prepare();
     const cajui::BootRequest request = takeBootRequest();
     const bool opened = records_.begin();
@@ -200,6 +205,17 @@ void ReceiverApp::loop() {
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);
+    // Give the page a moment to deliver its response before restarting into the update.
+    if (updateRestart_.load() && listening) {
+        delay(UpdateRestartDelayMs);
+        restartInto(cajui::BootRequest::None);
+    }
+    // A minute of healthy operation confirms a freshly updated image; until then any
+    // restart returns to the previous one.
+    if (!confirmed_ && uint32_t(millis() - startedAt_) >= ConfirmAfterMs) {
+        confirmed_ = true;
+        confirmFirmware();
+    }
     if (!healthy_ && uint32_t(millis() - startedAt_) >= cajui::HealthyRunMs) {
         healthy_ = true;
         clearFaults();

@@ -20,6 +20,7 @@
 #include "board/admin_console.h"
 #include "board/common.h"
 #include "board/display.h"
+#include "board/ota.h"
 #include "board/sx1262_radio.h"
 
 namespace {
@@ -156,6 +157,7 @@ void TransmitterApp::sample(cajui::Binding& binding) {
 void TransmitterApp::setup() {
     bootAt_ = millis();
     startBoard();
+    reportFirmware();
     rtc_gpio_deinit(gpio_num_t(PairButton));
     const cajui::BootRequest request = takeBootRequest();
     const bool mounted = records_.begin() && store_.mount();
@@ -224,7 +226,8 @@ void TransmitterApp::loop() {
                       unsigned(report.completion), unsigned(report.attempts),
                       int(report.powerCommand));
         rememberPower(report);
-        clearFaults(); // A full cycle ran: storage and radio work.
+        clearFaults();     // A full cycle ran: storage and radio work.
+        confirmFirmware(); // So a freshly installed image is kept.
         if (restartPending_) restartFor(*commands_);
         const uint32_t elapsed = millis() - bootAt_;
         const uint32_t period = SampleSeconds * 1000;

@@ -23,6 +23,8 @@ released.
   maximum, with a fallback after missed ACKs); version 1 nodes keep working. No power
   policy is enabled yet. Transmit power is configurable per device over USB.
 - Radio RSSI/SNR of each accepted frame, logged and forwarded as `radio` readings.
+- Two application slots with rollback: a browser installer over USB for released images,
+  and signed updates installed from the receiver's setup page ([updates](docs/updates.md)).
 - Two-phase USB enrollment, resumable setup, key rotation, revocation and leaving a
   network (retired keys can never return).
 - A local Python tool with private recovery files and a software-restart check.
@@ -68,7 +70,8 @@ contracts and link here.
 - RF coexistence, regulatory configuration and an independent security review.
 
 [Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
-[Persistent storage](docs/persistence.md) · [Radio applications](docs/radio-applications.md)
+[Persistent storage](docs/persistence.md) · [Radio applications](docs/radio-applications.md) ·
+[Firmware updates](docs/updates.md)
 
 ## Run tests
 
@@ -122,9 +125,11 @@ lib/CajuiProvisioning/src/ Bounded USB command handler
 lib/CajuiPairing/src/     Radio pairing frames and state machines
 lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
 lib/CajuiSetup/src/       Setup page rendering, session checks and field validation
-lib/CajuiDevice/src/      Boot-mode and fault-retry decisions of the radio images
+lib/CajuiDevice/src/      Boot-mode, fault-retry and transmit-power decisions
+lib/CajuiFirmware/src/    Signed firmware update verification
 src/                     Transmitter and receiver applications and board adapters
-tools/                   Local USB enrollment client
+tools/                   USB enrollment client and firmware packaging
+site/                    Web installer page, published by the release workflow
 scripts/                 Native build configuration and test runner
 test/test_protocol/      Unity tests and fault-injection storage doubles
 tests_python/            USB client and recovery-file tests

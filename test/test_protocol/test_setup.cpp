@@ -141,6 +141,25 @@ void test_notices_are_fixed_messages_chosen_by_code() {
     TEST_ASSERT_EQUAL_STRING(describe(SetupError::MqttPassword),
                              noticeText(noticeFor(SetupError::MqttPassword)));
 }
+void test_firmware_section_and_update_pages() {
+    static char page[PageCapacity];
+    SetupView view{};
+    view.token = "00112233445566778899aabbccddeeff";
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_FALSE(contains(page, "Firmware"));
+    view.updates = true;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "Installed: local build"));
+    TEST_ASSERT_TRUE(contains(page, "action=\"/update?token=00112233445566778899aabbccddeeff\""));
+    TEST_ASSERT_TRUE(contains(page, "enctype=\"multipart/form-data\""));
+    view.firmwareVersion = 10203;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "Installed: 1.2.3"));
+    TEST_ASSERT_TRUE(renderUpdated(20001, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "Firmware 2.0.1 is installed"));
+    TEST_ASSERT_FALSE(renderUpdated(1, page, 40));
+    TEST_ASSERT_FALSE(renderUpdated(1, nullptr, 0));
+}
 void test_long_press_fires_once_per_hold() {
     LongPress button(3000);
     TEST_ASSERT_FALSE(button.update(false, 0));
@@ -379,6 +398,8 @@ void test_hostile_network_names_never_break_the_page() {
     view.pairing = &pairing;
     view.notice = noticeText(Notice::WifiTrying);
     view.token = "00112233445566778899aabbccddeeff";
+    view.updates = true;
+    view.firmwareVersion = 999999;
     static char page[PageCapacity];
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page))); // The worst case fits.
     TEST_ASSERT_TRUE(contains(page, "12 networks found.</small>"));
@@ -496,6 +517,7 @@ void test_store_lists_enrollments_with_last_received_counter() {
 void runSetupTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_long_press_fires_once_per_hold);
+    RUN_TEST(test_firmware_section_and_update_pages);
     RUN_TEST(test_every_form_posts_the_session_token);
     RUN_TEST(test_session_expires_on_idle_and_absolute_limits);
     RUN_TEST(test_requests_must_address_the_access_point);

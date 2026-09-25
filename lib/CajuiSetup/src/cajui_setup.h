@@ -88,6 +88,12 @@ enum class Notice : uint8_t {
     OfferSent,
     AddFailed,
     AddConflict,
+    UpdateWrongFile,
+    UpdateOlder,
+    UpdateTooLarge,
+    UpdateIncomplete,
+    UpdateBadSignature,
+    UpdateFailed,
     Count
 };
 const char* noticeText(Notice);
@@ -140,9 +146,11 @@ struct SetupView {
     const char* prefillHost = nullptr;    // Chosen from the discovered brokers.
     uint16_t prefillPort = 0;
     const char* notice = nullptr;
-    const char* token = ""; // SetupSession::token(), placed in every form.
+    const char* token = "";       // SetupSession::token(), placed in every form.
+    uint32_t firmwareVersion = 0; // Running firmware; 0 is a local build.
+    bool updates = false;         // Offer signed firmware upload.
 };
-constexpr size_t PageCapacity = 16384;
+constexpr size_t PageCapacity = 20480;
 // Nearby networks and announced brokers are outside our control (a beacon flood can fill
 // the list with long, escaped names): when the page does not fit, they are dropped from
 // the end of their lists before the page is refused.
@@ -152,4 +160,6 @@ bool renderTransmitters(const SetupView&, char* output, size_t capacity);
 bool renderRevoke(uint64_t node, uint64_t generation, const char* token, char* output,
                   size_t capacity);
 bool renderClosed(char* output, size_t capacity);
+// Shown after an update was installed, while the receiver restarts into it.
+bool renderUpdated(uint32_t version, char* output, size_t capacity);
 } // namespace cajui

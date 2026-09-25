@@ -49,7 +49,10 @@ vectors with a separate probe program on a board. Running this Unity suite on th
 is not part of validation. Setup tests cover button timing, the
 Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host and origin
 checks, notice codes and oversized pages; the access point, DNS, HTTP server, scanning
-and mDNS discovery run only on hardware. Device tests cover boot-mode selection and the
+and mDNS discovery run only on hardware. Firmware tests cover signed updates: installation in any chunking, every signed byte,
+header shape, role, downgrade, size, truncation and sink failures, against a fixture
+signed by `tools/package_firmware.py` with a throwaway key; the OTA adapter is only
+compiled. Device tests cover boot-mode selection and the
 fault retry delay; the Arduino entry points that use them are only compiled. Compiler/library allocation
 failures are not all induced. Neither a high coverage percentage nor a passing ESP32
 build proves security, radio performance, durable flash behavior or battery life.
