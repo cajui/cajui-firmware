@@ -189,6 +189,42 @@ void test_sample_values_statuses_and_unknown_registry_entries() {
         "\"unit\":\"degC\",\"status\":\"ok\"}]}",
         format(queued(data)).c_str());
 }
+void test_radio_link_travels_as_readings_of_a_radio_sensor() {
+    Data data{};
+    data.nextSeconds = 300;
+    data.count = 1;
+    data.readings[0] = reading(1, 1, 1, Status::Ok, 26700);
+    auto sample = queued(data);
+    const std::string plain = format(sample);
+    TEST_ASSERT_EQUAL(std::string::npos, plain.find("radio")); // Unknown link: absent.
+    sample.link.known = true;
+    sample.link.rssiDbm = -71;
+    sample.link.snrTenthsDb = 95;
+    TEST_ASSERT_EQUAL_STRING(
+        "{\"version\":1,\"source_id\":\"receiver-1\",\"device_id\":\"0000000000000002\","
+        "\"sample_id\":\"000000000000000a.7\",\"expected_interval_seconds\":300,\"readings\":["
+        "{\"sensor_id\":\"sensor-1\",\"metric\":\"temperature\",\"value\":26.700,"
+        "\"unit\":\"degC\",\"status\":\"ok\"},"
+        "{\"sensor_id\":\"radio\",\"metric\":\"rssi\",\"value\":-71,\"unit\":\"dBm\","
+        "\"status\":\"ok\"},{\"sensor_id\":\"radio\",\"metric\":\"snr\",\"value\":9.5,"
+        "\"unit\":\"dB\",\"status\":\"ok\"}]}",
+        format(sample).c_str());
+    const int16_t snrs[] = {-35, -5, 0, 7, -200};
+    const char* expected[] = {"\"value\":-3.5,", "\"value\":-0.5,", "\"value\":0.0,",
+                              "\"value\":0.7,", "\"value\":-20.0,"};
+    for (size_t i = 0; i < 5; ++i) {
+        SCENARIO(i);
+        sample.link.snrTenthsDb = snrs[i];
+        TEST_ASSERT_NOT_EQUAL(std::string::npos, format(sample).find(expected[i]));
+    }
+    // The largest sample plus the radio readings still fits the payload buffer.
+    data.count = MaxReadings;
+    for (uint8_t i = 0; i < MaxReadings; ++i)
+        data.readings[i] = reading(uint16_t(i + 1), 9, 7, Status::Ok, INT32_MIN);
+    auto big = queued(data);
+    big.link = sample.link;
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, format(big).find("\"metric\":\"snr\""));
+}
 void test_invalid_samples_or_small_buffers_are_rejected() {
     Data data{};
     data.nextSeconds = 300;
@@ -500,6 +536,7 @@ void runUplinkTests() {
     RUN_TEST(test_uplink_settings_are_validated_before_saving);
     RUN_TEST(test_sample_matches_the_central_mqtt_contract);
     RUN_TEST(test_sample_values_statuses_and_unknown_registry_entries);
+    RUN_TEST(test_radio_link_travels_as_readings_of_a_radio_sensor);
     RUN_TEST(test_invalid_samples_or_small_buffers_are_rejected);
     RUN_TEST(test_forwarder_removes_only_after_matching_puback);
     RUN_TEST(test_forwarder_republishes_the_same_sample_after_loss);

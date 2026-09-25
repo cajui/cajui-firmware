@@ -41,7 +41,8 @@ bool saveUplink(AtomicBlob&, const UplinkConfig&);
 constexpr size_t TopicCapacity = 128, PayloadCapacity = 1536;
 bool formatTopic(const char* source, uint64_t device, char* output, size_t capacity);
 // sample_id is "<generation>.<counter>": stable across retries and unique per acquisition
-// for a credential. measured_at is omitted because the receiver does not know it.
+// for a credential. measured_at is omitted because the receiver does not know it. When the
+// receiver measured the frame, readings "radio"/"rssi" (dBm) and "radio"/"snr" (dB) follow.
 bool formatSample(const char* source, const QueuedSample&, char* output, size_t capacity,
                   size_t& size);
 

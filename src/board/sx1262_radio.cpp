@@ -8,7 +8,6 @@ namespace {
 // Profile 1 is an experimental bench profile, not regional automatic configuration.
 constexpr float FrequencyMHz = 915.2, BandwidthKHz = 125, TcxoVoltage = 1.8;
 constexpr uint8_t SpreadingFactor = 7, CodingRate = 5, SyncWord = 0x12;
-constexpr int8_t PowerDbm = -9;
 constexpr uint16_t PreambleSymbols = 8;
 class Lock {
 public:
@@ -27,12 +26,12 @@ Sx1262Radio* Sx1262Radio::instance_ = nullptr;
 portMUX_TYPE Sx1262Radio::irqLock_ = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t Sx1262Radio::irqAt_ = 0;
 Sx1262Radio::Sx1262Radio() : module_(RadioCs, RadioDio, RadioReset, RadioBusy), radio_(&module_) {}
-bool Sx1262Radio::begin() {
+bool Sx1262Radio::begin(int8_t powerDbm) {
     if (instance_) return false;
     mutex_ = xSemaphoreCreateMutex();
     if (!mutex_) return false;
     SPI.begin(RadioClock, RadioMiso, RadioMosi, RadioCs);
-    if (radio_.begin(FrequencyMHz, BandwidthKHz, SpreadingFactor, CodingRate, SyncWord, PowerDbm,
+    if (radio_.begin(FrequencyMHz, BandwidthKHz, SpreadingFactor, CodingRate, SyncWord, powerDbm,
                      PreambleSymbols, TcxoVoltage) != RADIOLIB_ERR_NONE ||
         radio_.setCRC(true) != RADIOLIB_ERR_NONE)
         return false;
@@ -128,9 +127,9 @@ cajui::ReceiveStatus Sx1262Radio::receive(cajui::Frame& out) {
     received_ = cajui::Frame{};
     return cajui::ReceiveStatus::Received;
 }
-int16_t Sx1262Radio::lastRssi() const {
+cajui::Link Sx1262Radio::lastLink() const {
     Lock lock(mutex_);
-    return rssi_;
+    return link_;
 }
 bool Sx1262Radio::sleep() {
     if (!initialized_) return false;
@@ -186,7 +185,10 @@ void Sx1262Radio::handleInterrupt() {
             if (result == RADIOLIB_ERR_NONE) {
                 if (!received_.size) { // Bounded inbox; sender retries drops.
                     received_ = frame;
-                    rssi_ = int16_t(radio_.getRSSI());
+                    // Packet RSSI and SNR of this frame, read before RX is restarted.
+                    link_.known = true;
+                    link_.rssiDbm = int16_t(lroundf(radio_.getRSSI()));
+                    link_.snrTenthsDb = int16_t(lroundf(radio_.getSNR() * 10));
                 }
             } else if (result != RADIOLIB_ERR_CRC_MISMATCH) {
                 fail();

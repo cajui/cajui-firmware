@@ -98,7 +98,13 @@ public:
         return ReceiveStatus::Received;
     }
     bool sleep() override { return true; }
-    int16_t lastRssi() const override { return rssi; }
+    Link lastLink() const override {
+        Link link{};
+        link.known = true;
+        link.rssiDbm = rssi;
+        link.snrTenthsDb = 80;
+        return link;
+    }
 };
 
 void test_x25519_and_hkdf_match_rfc_vectors() {
