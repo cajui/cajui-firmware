@@ -106,7 +106,7 @@ broker disconnection abandons the attempt and retries after five seconds; a late
 PUBACK from an abandoned attempt is ignored. The ESP-IDF client enqueues the
 publication so the radio loop never blocks on network I/O, and forwarding runs only
 while the receiver is listening, never during an ACK transmission. A storage failure
-stops the application. Without stored settings the receiver logs `CJAPP UPLINK disabled`
+stops the radio and restarts the receiver after the fault delay described above. Without stored settings the receiver logs `CJAPP UPLINK disabled`
 and keeps queueing as before.
 
 PUBACK is the broker's boundary, not proof that Central stored the sample. The client

@@ -14,7 +14,8 @@ implement LoRaWAN, mesh routing, TDMA, actuator commands or radio firmware updat
 Network IDs and node IDs are nonzero unsigned 64-bit values. They are public
 routing identifiers, not credentials. A binding has a unique random 128-bit key
 shared only by one node and its authorized receiver. Moving a node to another
-network or replacing its receiver requires reprovisioning with fresh credentials.
+network or replacing its receiver requires leaving the network (which retires its keys)
+and enrolling again with fresh credentials.
 The receiver must resolve an existing authorized binding before decoding a frame.
 It must not create bindings from received identifiers.
 
@@ -165,7 +166,7 @@ link are separate states.
 
 Partial setup must be resumable or replaced with fresh credentials consistently on
 both devices. Never offer a reset operation that erases counters while retaining the
-key. See [USB enrollment](provisioning.md) and [storage](persistence.md). Radio
+key: the reference reset retires every key it drops, so none can be enrolled again. See [USB enrollment](provisioning.md) and [storage](persistence.md). Radio
 enrollment uses the separate [pairing](radio-pairing.md) frames (types 3–6).
 
 ## Validation and references

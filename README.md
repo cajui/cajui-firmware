@@ -113,11 +113,13 @@ ESP32-S3; the protocol core does not depend on a radio driver.
 lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
 lib/CajuiApplication/src/ Receiver loop and measurement normalization
 lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
-lib/CajuiStorage/src/     Persistent state machine and NVS adapter
+lib/CajuiStorage/src/     Persistent records, v1 migration and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
+lib/CajuiPairing/src/     Radio pairing frames and state machines
 lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
-lib/CajuiSetup/src/       Setup page rendering, field validation and button handling
-src/                     ESP32 administration and experimental radio applications
+lib/CajuiSetup/src/       Setup page rendering, session checks and field validation
+lib/CajuiDevice/src/      Boot-mode and fault-retry decisions of the radio images
+src/                     Transmitter and receiver applications and board adapters
 tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner
 test/test_protocol/      Unity tests and fault-injection storage doubles

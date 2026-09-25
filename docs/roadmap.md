@@ -18,6 +18,8 @@ Next milestones:
    Idempotent forwarding with PUBACK-gated queue removal is implemented.
 4. Authenticating radio pairing with a per-device label code, and a per-device password
    for the setup access point. Radio pairing itself and the setup page are implemented.
+5. Static analysis of `src/` with the Arduino headers; clang-tidy now covers `lib/` and
+   `test/` only.
 
 TDMA, mesh routing, radio firmware updates, actuator control and LoRaWAN mode are
 outside the first direct-LoRa version. No deadline or field-readiness claim is
