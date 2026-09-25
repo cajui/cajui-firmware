@@ -389,6 +389,29 @@ void test_forwarder_switches_source_and_republishes() {
     TEST_ASSERT_EQUAL_size_t(0, rig.store->queued());
     TEST_ASSERT_TRUE(rig.forwarder.setSource("receiver-3")); // Idle: nothing abandoned.
 }
+void test_paused_forwarder_publishes_nothing_until_resumed() {
+    ForwardRig rig;
+    rig.receive(1);
+    rig.forwarder.poll(true);
+    EXPECT_RESULT(ForwardState::Waiting, rig.forwarder.state());
+    // The broker connection is about to be replaced: stop, abandon the in-flight sample.
+    rig.forwarder.pause();
+    TEST_ASSERT_TRUE(rig.forwarder.paused());
+    EXPECT_RESULT(ForwardState::Idle, rig.forwarder.state());
+    rig.publisher.acks.push_back(1); // A late PUBACK from the old connection.
+    for (int i = 0; i < 3; ++i) rig.forwarder.poll(true);
+    TEST_ASSERT_EQUAL_size_t(1, rig.publisher.payloads.size());
+    TEST_ASSERT_EQUAL_size_t(1, rig.store->queued()); // Still queued: nothing was confirmed.
+    TEST_ASSERT_TRUE(rig.forwarder.setSource("receiver-2"));
+    TEST_ASSERT_FALSE(rig.forwarder.paused());
+    rig.forwarder.poll(true);
+    TEST_ASSERT_EQUAL_size_t(2, rig.publisher.payloads.size());
+    TEST_ASSERT_EQUAL_STRING("telemetry/v1/receiver-2/0000000000000002/samples",
+                             rig.publisher.topics.back().c_str());
+    rig.forwarder.pause(); // Idle: pausing abandons nothing.
+    TEST_ASSERT_FALSE(rig.forwarder.setSource("bad source"));
+    TEST_ASSERT_TRUE(rig.forwarder.paused());
+}
 
 // --- USB administration ----------------------------------------------------------------
 void command(Provisioning& admin, const char* input, const char* expected, UNITY_LINE_TYPE line) {
@@ -479,6 +502,7 @@ void runUplinkTests() {
     RUN_TEST(test_invalid_samples_or_small_buffers_are_rejected);
     RUN_TEST(test_forwarder_removes_only_after_matching_puback);
     RUN_TEST(test_forwarder_republishes_the_same_sample_after_loss);
+    RUN_TEST(test_paused_forwarder_publishes_nothing_until_resumed);
     RUN_TEST(test_forwarder_stops_on_storage_failure_and_handles_changed_front);
     RUN_TEST(test_forwarder_switches_source_and_republishes);
     RUN_TEST(test_usb_uplink_settings_are_staged_saved_and_never_echoed);

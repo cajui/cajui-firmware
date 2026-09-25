@@ -66,9 +66,13 @@ public:
     Forwarder& operator=(const Forwarder&) = delete;
     // quiet=false defers all work, including flash writes, while the radio needs the loop.
     void poll(bool quiet);
-    // Switches to a new broker identity. An in-flight publication is abandoned; the
-    // sample stays queued and is republished under the new source.
+    // Stops publishing before the broker connection is replaced: an in-flight publication
+    // is abandoned (the sample stays queued) and nothing is published until setSource.
+    void pause();
+    // Switches to a new broker identity and resumes. An in-flight publication is
+    // abandoned; the sample stays queued and is republished under the new source.
     bool setSource(const char* source);
+    bool paused() const { return paused_; }
     ForwardState state() const { return state_; }
     uint32_t forwarded() const { return forwarded_; }
     uint32_t retries() const { return retries_; }
@@ -84,7 +88,7 @@ private:
     uint64_t node_ = 0, generation_ = 0, counter_ = 0;
     int message_ = 0;
     uint32_t sentAt_ = 0, retryAt_ = 0, forwarded_ = 0, retries_ = 0;
-    bool delayed_ = false;
+    bool delayed_ = false, paused_ = false;
     void retryLater(uint32_t now);
 };
 } // namespace cajui

@@ -215,11 +215,15 @@ Forwarder::Forwarder(Publisher& publisher, Clock& clock, PersistentStore& store,
     else
         state_ = ForwardState::Failed;
 }
+void Forwarder::pause() {
+    if (state_ == ForwardState::Waiting) state_ = ForwardState::Idle;
+    paused_ = true;
+}
 bool Forwarder::setSource(const char* source) {
     if (!source || !validIdentity(source)) return false;
     std::memcpy(source_, source, std::strlen(source) + 1);
     if (state_ == ForwardState::Waiting) state_ = ForwardState::Idle;
-    delayed_ = false;
+    delayed_ = paused_ = false;
     return true;
 }
 void Forwarder::retryLater(uint32_t now) {
@@ -227,7 +231,7 @@ void Forwarder::retryLater(uint32_t now) {
     retryAt_ = now + RetryDelayMs;
 }
 void Forwarder::poll(bool quiet) {
-    if (state_ == ForwardState::Failed || !quiet) return;
+    if (state_ == ForwardState::Failed || !quiet || paused_) return;
     const uint32_t now = clock_.nowMs();
     if (state_ == ForwardState::Waiting) {
         int id = 0;
