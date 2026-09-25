@@ -57,6 +57,7 @@ bool allowedOrigin(const char* origin, const char* address);
 enum class SetupError { None, Ssid, WifiPassword, Host, Port, Username, MqttPassword };
 // Stages fields into a pending configuration. An empty password keeps the staged one
 // only for the same network (Wi-Fi) or the same host, port and username (broker).
+// Changing the network also drops the staged broker password.
 SetupError stageWifi(UplinkConfig&, const char* ssid, const char* password);
 SetupError stageBroker(UplinkConfig&, const char* host, const char* port, const char* username,
                        const char* password);

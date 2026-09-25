@@ -139,8 +139,9 @@ stored, and if it does not connect within 20 seconds the station returns to the 
 network and the page says so. Saving applies the settings without a reboot: forwarding
 pauses, MQTT restarts with the new identity, and an in-flight publication is republished.
 Saved passwords are never shown. An empty Wi-Fi password keeps the saved one for the same
-network; an empty broker password keeps the saved one only for the same host, port and
-username, so the page can never send a stored password to another broker.
+network; an empty broker password keeps the saved one only for the same Wi-Fi network,
+host, port and username, so the page can never send a stored password to another broker
+or through another network, where the same host name could resolve elsewhere.
 
 The page also adds transmitters by [radio pairing](radio-pairing.md): "Search for
 transmitters" opens a two-minute window, requesting nodes are listed with their ID and

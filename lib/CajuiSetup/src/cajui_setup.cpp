@@ -391,10 +391,15 @@ bool wifiQr(const char* ssid, char* output, size_t capacity) {
 SetupError stageWifi(UplinkConfig& pending, const char* ssid, const char* password) {
     UplinkConfig next = pending;
     if (!ssid || !copy(next.ssid, sizeof(next.ssid), ssid) || !*ssid) return SetupError::Ssid;
-    const bool keep = password && !*password && !std::strcmp(pending.ssid, ssid);
+    const bool sameNetwork = !std::strcmp(pending.ssid, ssid);
+    const bool keep = password && !*password && sameNetwork;
     if (!keep && (!password || !copy(next.wifiPassword, sizeof(next.wifiPassword), password) ||
                   std::strlen(password) < MinWifiPassword))
         return SetupError::WifiPassword;
+    // On another network the broker's host name may resolve anywhere: the saved broker
+    // password must be entered again rather than sent there.
+    if (!sameNetwork)
+        for (auto& c : next.password) c = 0;
     pending = next;
     wipe(next);
     return SetupError::None;

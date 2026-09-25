@@ -186,6 +186,20 @@ void test_wifi_staging_validates_and_keeps_saved_password() {
     EXPECT_RESULT(SetupError::None, stageWifi(c, "Rede é", "new-secret"));
     TEST_ASSERT_EQUAL_STRING("Rede é", c.ssid);
 }
+void test_another_network_needs_the_broker_password_again() {
+    auto c = complete();
+    TEST_ASSERT_TRUE(validUplink(c));
+    EXPECT_RESULT(SetupError::None, stageWifi(c, "Home", "")); // Same network: kept.
+    TEST_ASSERT_EQUAL_STRING("mqtt-secret", c.password);
+    EXPECT_RESULT(SetupError::None, stageWifi(c, "Attacker", "their-password"));
+    TEST_ASSERT_EQUAL_STRING("", c.password);
+    TEST_ASSERT_FALSE(validUplink(c)); // Nothing can be saved until it is entered again.
+    EXPECT_RESULT(SetupError::MqttPassword,
+                  stageBroker(c, "192.168.1.20", "1883", "receiver-1", ""));
+    EXPECT_RESULT(SetupError::None,
+                  stageBroker(c, "192.168.1.20", "1883", "receiver-1", "mqtt-secret"));
+    TEST_ASSERT_TRUE(validUplink(c));
+}
 void test_broker_staging_validates_and_keeps_saved_password() {
     UplinkConfig c{};
     EXPECT_RESULT(SetupError::Host, stageBroker(c, "", "1883", "rx", "p"));
@@ -489,6 +503,7 @@ void runSetupTests() {
     RUN_TEST(test_setup_network_name_and_join_code);
     RUN_TEST(test_wifi_staging_validates_and_keeps_saved_password);
     RUN_TEST(test_broker_staging_validates_and_keeps_saved_password);
+    RUN_TEST(test_another_network_needs_the_broker_password_again);
     RUN_TEST(test_setup_page_escapes_input_and_never_shows_passwords);
     RUN_TEST(test_setup_page_states_and_prefill);
     RUN_TEST(test_hostile_network_names_never_break_the_page);
