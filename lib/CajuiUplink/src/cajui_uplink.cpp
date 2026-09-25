@@ -203,6 +203,18 @@ bool formatSample(const char* source, const QueuedSample& sample, char* output, 
         if (i) text.format(",");
         addReading(text, data.readings[i]);
     }
+    // The receiving radio's measurement of this frame, as readings of a "radio" sensor, so
+    // the v1 contract carries it without new fields. Absent when it was not measured.
+    if (sample.link.known) {
+        constexpr unsigned TenthsPerDb = 10;
+        const int snr = sample.link.snrTenthsDb;
+        const unsigned magnitude = unsigned(snr < 0 ? -snr : snr);
+        text.format(",{\"sensor_id\":\"radio\",\"metric\":\"rssi\",\"value\":%d,"
+                    "\"unit\":\"dBm\",\"status\":\"ok\"},{\"sensor_id\":\"radio\","
+                    "\"metric\":\"snr\",\"value\":%s%u.%u,\"unit\":\"dB\",\"status\":\"ok\"}",
+                    int(sample.link.rssiDbm), snr < 0 ? "-" : "", magnitude / TenthsPerDb,
+                    magnitude % TenthsPerDb);
+    }
     text.format("]}");
     if (!text.ok()) return false;
     size = text.size();

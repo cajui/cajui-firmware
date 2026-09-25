@@ -79,6 +79,7 @@ struct SendReport {
     uint8_t attempts = 0;
     uint32_t rejectedAcks = 0;
     bool radioSleeping = false;
+    int8_t powerCommand = KeepPower; // From the accepted ACK; KeepPower otherwise.
 };
 
 // One sample per cycle. This schedules delivery, not measurement or MCU deep sleep.

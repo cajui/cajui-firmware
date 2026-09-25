@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include "cajui_device.h"
 #include "cajui_storage.h"
 #include "cajui_uplink.h"
 namespace cajui {
@@ -10,9 +11,10 @@ enum class ConsoleMode { Admin, Operation };
 class Provisioning {
 public:
     // uplink is the receiver's separate uplink blob; nullptr disables UPLINK* commands.
+    // radio holds the configured transmit power; nullptr disables POWER.
     explicit Provisioning(PersistentStore& store, uint32_t boot = 1, AtomicBlob* uplink = nullptr,
-                          ConsoleMode mode = ConsoleMode::Admin)
-        : store_(store), boot_(boot), uplink_(uplink), mode_(mode) {}
+                          ConsoleMode mode = ConsoleMode::Admin, AtomicBlob* radio = nullptr)
+        : store_(store), boot_(boot), uplink_(uplink), mode_(mode), radio_(radio) {}
     Provisioning(const Provisioning&) = delete;
     Provisioning& operator=(const Provisioning&) = delete;
     ~Provisioning() { wipe(pending_); }
@@ -30,8 +32,10 @@ private:
     uint32_t boot_;
     AtomicBlob* uplink_;
     ConsoleMode mode_;
+    AtomicBlob* radio_;
     UplinkConfig pending_{}; // Staged by UPLINKSET, written only by UPLINKSAVE.
     void uplink(const char* command, size_t count, char* const* words, char* reply,
                 size_t capacity);
+    void power(size_t count, char* const* words, char* reply, size_t capacity);
 };
 }

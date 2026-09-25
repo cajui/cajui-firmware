@@ -49,6 +49,7 @@ struct EnrollmentInfo {
 struct QueuedSample {
     uint64_t node = 0, generation = 0, counter = 0;
     Data data{};
+    Link link{}; // Measured by this receiver when it accepted the sample.
 };
 // Durable protocol state over records v2 (docs/persistence.md). A device with only the
 // v1 snapshot is migrated on its first mount.

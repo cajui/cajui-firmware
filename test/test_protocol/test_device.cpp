@@ -73,6 +73,78 @@ void test_fault_retry_delay_doubles_up_to_a_bound() {
         previous = delay;
     }
 }
+void test_power_record_round_trips_and_fails_closed() {
+    MemoryBlob blob;
+    int8_t dbm = 5;
+    EXPECT_RESULT(ReadResult::Missing, loadPower(blob, dbm));
+    TEST_ASSERT_EQUAL_INT8(DefaultPowerDbm, dbm);
+    TEST_ASSERT_FALSE(savePower(blob, 23));
+    TEST_ASSERT_FALSE(savePower(blob, -10));
+    TEST_ASSERT_TRUE(savePower(blob, -3));
+    EXPECT_RESULT(ReadResult::Ok, loadPower(blob, dbm));
+    TEST_ASSERT_EQUAL_INT8(-3, dbm);
+    for (size_t i = 0; i < RadioRecordSize; ++i) {
+        SCENARIO(i);
+        MemoryBlob damaged = blob;
+        damaged.bytes[i] ^= 0x40;
+        EXPECT_RESULT(ReadResult::Error, loadPower(damaged, dbm));
+        TEST_ASSERT_EQUAL_INT8(DefaultPowerDbm, dbm);
+    }
+    MemoryBlob outOfRange = blob;
+    outOfRange.bytes[2] = 30; // Valid CRC, unsupported value.
+    uint32_t crc = UINT32_MAX;
+    for (size_t i = 0; i < 3; ++i) {
+        crc ^= outOfRange.bytes[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
+    }
+    crc = ~crc;
+    for (int i = 0; i < 4; ++i) outOfRange.bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
+    EXPECT_RESULT(ReadResult::Error, loadPower(outOfRange, dbm));
+    blob.size = RadioRecordSize - 1;
+    EXPECT_RESULT(ReadResult::Error, loadPower(blob, dbm));
+}
+void test_power_follows_commands_within_the_ceiling_and_falls_back() {
+    // Without a remembered state the node uses the configured power.
+    TEST_ASSERT_EQUAL_INT8(10, currentPower(nullptr, 10));
+    TEST_ASSERT_EQUAL_INT8(DefaultPowerDbm, currentPower(nullptr, 99)); // Invalid ceiling.
+    PowerState state{};
+    state.ceiling = 10;
+    state.dbm = 20;
+    TEST_ASSERT_EQUAL_INT8(10, currentPower(&state, 10)); // Never above the ceiling.
+    state.dbm = 2;
+    TEST_ASSERT_EQUAL_INT8(2, currentPower(&state, 10));
+    // A state taken under another configured power is dropped: a new USB setting applies.
+    TEST_ASSERT_EQUAL_INT8(14, currentPower(&state, 14));
+    TEST_ASSERT_EQUAL_INT8(0, currentPower(&state, 0));
+    PowerState reset = nextPower(state, 14, true, KeepPower);
+    TEST_ASSERT_EQUAL_INT8(14, reset.dbm);
+    TEST_ASSERT_EQUAL_INT8(14, reset.ceiling);
+    // Commands move the power within [MinPowerDbm, ceiling]; KeepPower keeps it.
+    state = nextPower(state, 10, true, 5);
+    TEST_ASSERT_EQUAL_INT8(5, state.dbm);
+    state = nextPower(state, 10, true, KeepPower);
+    TEST_ASSERT_EQUAL_INT8(5, state.dbm);
+    state = nextPower(state, 10, true, 21);
+    TEST_ASSERT_EQUAL_INT8(10, state.dbm);
+    state = nextPower(state, 10, true, -128);
+    TEST_ASSERT_EQUAL_INT8(MinPowerDbm, state.dbm);
+    // Missed ACKs: after MissedAckLimit cycles the node returns to the ceiling.
+    for (uint8_t cycle = 1; cycle < MissedAckLimit; ++cycle) {
+        state = nextPower(state, 10, false, 3); // A command without an ACK is not taken.
+        TEST_ASSERT_EQUAL_INT8(MinPowerDbm, state.dbm);
+        TEST_ASSERT_EQUAL_UINT8(cycle, state.missed);
+    }
+    state = nextPower(state, 10, false, KeepPower);
+    TEST_ASSERT_EQUAL_INT8(10, state.dbm);
+    state = nextPower(state, 10, false, KeepPower);
+    TEST_ASSERT_EQUAL_UINT8(MissedAckLimit, state.missed); // Saturates.
+    state = nextPower(state, 10, true, KeepPower);
+    TEST_ASSERT_EQUAL_UINT8(0, state.missed);
+    state = nextPower(state, 99, true, 30); // Invalid ceiling falls back to the default.
+    TEST_ASSERT_EQUAL_INT8(DefaultPowerDbm, state.dbm);
+    TEST_ASSERT_TRUE(validPower(MinPowerDbm) && validPower(MaxPowerDbm));
+    TEST_ASSERT_FALSE(validPower(MinPowerDbm - 1) || validPower(MaxPowerDbm + 1));
+}
 } // namespace
 
 void runDeviceTests() {
@@ -80,4 +152,6 @@ void runDeviceTests() {
     RUN_TEST(test_transmitter_boot_modes);
     RUN_TEST(test_receiver_boot_modes);
     RUN_TEST(test_fault_retry_delay_doubles_up_to_a_bound);
+    RUN_TEST(test_power_record_round_trips_and_fails_closed);
+    RUN_TEST(test_power_follows_commands_within_the_ceiling_and_falls_back);
 }

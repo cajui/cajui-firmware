@@ -7,7 +7,9 @@
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_random.h>
+#include <esp_attr.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 #include <memory>
 #include "cajui_application.h"
 #include "cajui_device.h"
@@ -39,6 +41,7 @@ private:
     BoardEntropy entropy_{false}; // Wi-Fi never runs on the transmitter.
     Sx1262Radio radio_;
     cajui::NvsRecords records_;
+    cajui::RecordBlob radioBlob_{records_, "radio", cajui::RadioRecordSize, cajui::RadioRecordSize};
     cajui::PersistentStore store_;
     cajui::SendController sender_{radio_, clock_, jitter_};
     std::unique_ptr<cajui::PairingClient> pairing_;
@@ -48,12 +51,52 @@ private:
     Mode mode_ = Mode::Admin;
     bool restartPending_ = false;
     uint32_t bootAt_ = 0;
+    int8_t configuredPower_ = cajui::DefaultPowerDbm, power_ = cajui::DefaultPowerDbm;
+    int8_t startPower();
+    void rememberPower(const cajui::SendReport&);
     bool pairButtonHeld();
     void sample(cajui::Binding&);
     [[noreturn]] void sleepFor(uint32_t ms);
     [[noreturn]] void fault(const char* reason);
 };
 
+// Power across deep sleep, in plain RTC variables: a type with member initializers would
+// be constructed at boot and erase them. The magic guards against RTC memory contents
+// after power-on, when the node starts again from the configured power.
+constexpr uint32_t PowerMagic = 0x50575253; // "PWRS"
+RTC_NOINIT_ATTR uint32_t powerMagic;
+RTC_NOINIT_ATTR int8_t powerDbm;
+RTC_NOINIT_ATTR uint8_t powerMissed;
+RTC_NOINIT_ATTR int8_t powerCeiling;
+bool powerRemembered() {
+    return powerMagic == PowerMagic && esp_reset_reason() != ESP_RST_POWERON;
+}
+cajui::PowerState rememberedPower() {
+    cajui::PowerState state{};
+    state.dbm = powerDbm;
+    state.missed = powerMissed;
+    state.ceiling = powerCeiling;
+    return state;
+}
+int8_t TransmitterApp::startPower() {
+    if (cajui::loadPower(radioBlob_, configuredPower_) == cajui::ReadResult::Error)
+        Serial.println("CJAPP POWER config_error"); // The bench default applies.
+    if (!powerRemembered()) powerMagic = 0;
+    const cajui::PowerState state = rememberedPower();
+    return cajui::currentPower(powerMagic == PowerMagic ? &state : nullptr, configuredPower_);
+}
+void TransmitterApp::rememberPower(const cajui::SendReport& report) {
+    cajui::PowerState now{};
+    if (powerMagic == PowerMagic) now = rememberedPower();
+    now.dbm = cajui::currentPower(powerMagic == PowerMagic ? &now : nullptr, configuredPower_);
+    const cajui::PowerState next =
+        cajui::nextPower(now, configuredPower_,
+                         report.completion == cajui::Completion::Acknowledged, report.powerCommand);
+    powerDbm = next.dbm;
+    powerMissed = next.missed;
+    powerCeiling = next.ceiling;
+    powerMagic = PowerMagic;
+}
 // True when PRG is held continuously for PairHoldMs after boot or wake.
 bool TransmitterApp::pairButtonHeld() {
     pinMode(PairButton, INPUT_PULLUP);
@@ -105,8 +148,9 @@ void TransmitterApp::sample(cajui::Binding& binding) {
     const auto data = cajui::climateSample(temperature, humidity, SampleSeconds);
     pinMode(board::SensorData, INPUT);
     output(board::Vext, HIGH);
-    Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u\n",
-                  unsigned(data.readings[0].status), unsigned(data.readings[1].status));
+    Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u power=%d\n",
+                  unsigned(data.readings[0].status), unsigned(data.readings[1].status),
+                  int(power_));
     if (sender_.start(binding, data, store_) != cajui::StartResult::Started) fault("SEND_START");
 }
 void TransmitterApp::setup() {
@@ -121,7 +165,8 @@ void TransmitterApp::setup() {
     commands_.reset(new cajui::Provisioning(store_, esp_random(), nullptr,
                                             decision.mode == cajui::BootMode::Admin
                                                 ? cajui::ConsoleMode::Admin
-                                                : cajui::ConsoleMode::Operation));
+                                                : cajui::ConsoleMode::Operation,
+                                            &radioBlob_));
     console_.reset(new Console(*commands_));
     if (decision.mode == cajui::BootMode::Admin) {
         mode_ = Mode::Admin;
@@ -129,7 +174,8 @@ void TransmitterApp::setup() {
         Serial.printf("CJAPP ADMIN reason=%s\n", cajui::reasonName(decision.reason));
         return;
     }
-    if (!radio_.begin()) fault("RADIO_INIT");
+    power_ = startPower();
+    if (!radio_.begin(power_)) fault("RADIO_INIT");
     if (decision.mode == cajui::BootMode::Pair) {
         mode_ = Mode::Pairing;
         pairing_.reset(new cajui::PairingClient(radio_, clock_, jitter_, store_, entropy_));
@@ -174,8 +220,10 @@ void TransmitterApp::loop() {
     sender_.poll();
     if (!sender_.active()) {
         const auto& report = sender_.report();
-        Serial.printf("CJAPP DELIVERY completion=%u attempts=%u\n", unsigned(report.completion),
-                      unsigned(report.attempts));
+        Serial.printf("CJAPP DELIVERY completion=%u attempts=%u power_command=%d\n",
+                      unsigned(report.completion), unsigned(report.attempts),
+                      int(report.powerCommand));
+        rememberPower(report);
         clearFaults(); // A full cycle ran: storage and radio work.
         if (restartPending_) restartFor(*commands_);
         const uint32_t elapsed = millis() - bootAt_;

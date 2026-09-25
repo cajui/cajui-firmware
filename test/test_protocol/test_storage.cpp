@@ -148,6 +148,100 @@ void test_each_sample_writes_two_small_records_whatever_the_state() {
     TEST_ASSERT_EQUAL_size_t(records::RegistryHeaderSize + records::RegistryEntrySize + 4,
                              txRecords.bytes("registry").size());
 }
+void test_link_quality_is_queued_with_the_sample_and_old_records_still_read() {
+    MemoryRecords records;
+    auto store = mounted(records, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    Link link{};
+    link.known = true;
+    link.rssiDbm = -98;
+    link.snrTenthsDb = -42;
+    Frame ack{};
+    EXPECT_RESULT(Result::Ok, receive(binding(), data(1), *store, ack, link));
+    receiveOk(*store, 2); // Not measured.
+    store = remount(records, Role::Receiver);
+    QueuedSample q{};
+    TEST_ASSERT_TRUE(store->peek(q));
+    TEST_ASSERT_TRUE(q.link.known);
+    TEST_ASSERT_EQUAL_INT16(-98, q.link.rssiDbm);
+    TEST_ASSERT_EQUAL_INT16(-42, q.link.snrTenthsDb);
+    EXPECT_RESULT(Result::Ok, store->forwarded(2, 10, 1));
+    TEST_ASSERT_TRUE(store->peek(q));
+    TEST_ASSERT_FALSE(q.link.known);
+    // A version 1 queue record (written before link quality existed) still decodes.
+    auto& bytes = records.bytes("q01");
+    std::vector<uint8_t> v1(bytes.begin(), bytes.end() - 4 - records::LinkSize);
+    v1[1] = 1;
+    v1.resize(v1.size() + 4);
+    repairChecksum(v1);
+    bytes = v1;
+    store = remount(records, Role::Receiver);
+    TEST_ASSERT_TRUE(store->healthy());
+    TEST_ASSERT_TRUE(store->peek(q));
+    TEST_ASSERT_EQUAL_UINT64(2, q.counter);
+    TEST_ASSERT_FALSE(q.link.known);
+    // Unknown link values must be zero, and versions beyond 2 are refused.
+    records::QueueRecord record{};
+    record.slot = 0;
+    record.generation = 10;
+    record.frame = data(2);
+    record.sequence = 1;
+    std::vector<uint8_t> encoded(records::QueueRecordCapacity);
+    encoded.resize(records::encode(record, encoded.data()));
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        SCENARIO(scenario);
+        auto damaged = encoded;
+        const size_t link = damaged.size() - 4 - records::LinkSize;
+        if (scenario == 0) damaged[link + 2] = 1; // RSSI without a measurement.
+        if (scenario == 1) damaged[link] = 2;     // Not a flag.
+        if (scenario == 2) damaged[1] = 3;        // Future version.
+        repairChecksum(damaged);
+        TEST_ASSERT_FALSE(records::decode(damaged.data(), damaged.size(), record));
+    }
+}
+void test_repeated_ack_repeats_the_stored_power_command_after_restart() {
+    MemoryRecords records;
+    auto store = mounted(records, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    MemoryRecords nodeRecords;
+    auto node = mounted(nodeRecords);
+    TEST_ASSERT_TRUE(enroll(*node));
+    Sender sender;
+    EXPECT_RESULT(Result::Ok, sender.begin(binding(), sample(), *node)); // v2 DATA.
+    const Frame frame = *sender.nextAttempt();
+    Frame first{}, repeated{};
+    EXPECT_RESULT(Result::Ok, receive(binding(), frame, *store, first, Link{}, 11));
+    store = remount(records, Role::Receiver);
+    // The policy now wants another power; the duplicate must still carry 11: the ACK
+    // reuses the counter, so different bytes would repeat a GCM nonce.
+    EXPECT_RESULT(Result::Duplicate, receive(binding(), frame, *store, repeated, Link{}, 3));
+    TEST_ASSERT_TRUE(sameFrame(first, repeated));
+    EXPECT_RESULT(Result::Ok, sender.acknowledge(repeated));
+    TEST_ASSERT_EQUAL_INT8(11, sender.powerCommand());
+    // A receipt written before version 2 decodes with KeepPower.
+    auto& bytes = records.bytes("r00");
+    std::vector<uint8_t> v1(bytes.begin(), bytes.end() - 4 - 1);
+    v1[1] = 1;
+    v1.resize(v1.size() + 4);
+    repairChecksum(v1);
+    records::ReceiptRecord old{};
+    TEST_ASSERT_TRUE(records::decode(v1.data(), v1.size(), old));
+    TEST_ASSERT_EQUAL_INT8(KeepPower, old.receipt.ackPower);
+    auto future = bytes;
+    future[1] = 3;
+    repairChecksum(future);
+    TEST_ASSERT_FALSE(records::decode(future.data(), future.size(), old));
+    // A receipt of a v1 exchange carrying a power command is not a canonical record.
+    MemoryRecords v1Records;
+    auto v1Store = mounted(v1Records, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*v1Store));
+    receiveOk(*v1Store, 1); // data() seals v1 DATA.
+    auto& receipt = v1Records.bytes("r00");
+    receipt[receipt.size() - 5] = 7;
+    repairChecksum(receipt);
+    v1Store = remount(v1Records, Role::Receiver);
+    EXPECT_HEALTH(Health::Invalid, *v1Store);
+}
 void test_power_loss_at_each_commit_step() {
     // 0: queue record lost; 1: queue record written, receipt lost (the orphan case);
     // 2: both written but the receipt write reported failure (ambiguous, durable).
@@ -1043,6 +1137,8 @@ void runStorageTests() {
     RUN_TEST(test_failed_counter_write_and_corruption_fail_closed);
     RUN_TEST(test_receiver_commit_restart_duplicate_and_drain);
     RUN_TEST(test_each_sample_writes_two_small_records_whatever_the_state);
+    RUN_TEST(test_link_quality_is_queued_with_the_sample_and_old_records_still_read);
+    RUN_TEST(test_repeated_ack_repeats_the_stored_power_command_after_restart);
     RUN_TEST(test_power_loss_at_each_commit_step);
     RUN_TEST(test_ambiguous_head_write_repeats_at_most_one_sample);
     RUN_TEST(test_queue_capacity_wraps_and_survives_restart);

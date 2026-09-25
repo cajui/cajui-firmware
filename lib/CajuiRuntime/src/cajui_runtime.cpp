@@ -43,6 +43,8 @@ void SendController::finish(Completion completion) {
     report_.radioSleeping = radioAvailable_;
     report_.attempts = sender_.attempts();
     report_.completion = completion;
+    report_.powerCommand =
+        completion == Completion::Acknowledged ? sender_.powerCommand() : KeepPower;
     state_ = SendState::Finished;
     // If stop failed, retain the frame and prohibit reuse until driver recovery and
     // reconstruction of this controller. The application must keep it alive.

@@ -7,8 +7,12 @@ namespace cajui {
 class ReceiverRadio : public Radio {
 public:
     virtual bool listen() = 0;
-    // Signal strength of the last received frame in dBm; 0 when unknown.
-    virtual int16_t lastRssi() const { return 0; }
+    // Like receive(), also returning the signal quality of that same frame, taken together
+    // so it cannot belong to a frame that arrived later. Unknown when not measured.
+    virtual ReceiveStatus receiveMeasured(Frame& frame, Link& link) {
+        link = Link{};
+        return receive(frame);
+    }
 };
 // Receives radio pairing frames (types 3-6). A true result starts transmitting reply.
 class PairingPort {
@@ -48,6 +52,12 @@ public:
     void setPairing(PairingPort* pairing) { pairing_ = pairing; }
     ReceiverState state() const { return state_; }
     Result lastResult() const { return result_; }
+    // Signal quality of the last DATA frame the controller processed.
+    const Link& lastLink() const { return link_; }
+    // True when the current or last ACK answered DATA, false for a pairing reply.
+    bool acknowledgedData() const { return data_; }
+    // Power command sent in v2 ACKs; KeepPower until a policy sets one (docs/protocol-v1.md).
+    void setPowerCommand(int8_t powerDbm) { power_ = powerDbm; }
 
 private:
     ReceiverRadio& radio_;
@@ -57,6 +67,9 @@ private:
     Frame ack_{};
     ReceiverState state_ = ReceiverState::Stopped;
     Result result_ = Result::NotFound;
+    Link link_{};
+    int8_t power_ = KeepPower;
+    bool data_ = false;
     uint32_t startedAt_ = 0;
     DuplicateAckLimiter duplicates_{};
     void fail();

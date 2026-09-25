@@ -124,12 +124,14 @@ void completion(Completion expected, const Rig& rig, UNITY_LINE_TYPE line) {
     UNITY_TEST_ASSERT_NULL(rig.radio.retained, line, "Radio retains a frame");
 }
 #define COMPLETION(expected, rig) completion(expected, rig, __LINE__)
-Frame ackFor(const Frame& frame, const Binding& b = binding()) {
+Frame ackFor(const Frame& frame, const Binding& b = binding(), int8_t power = KeepPower) {
     Message data{};
     TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(open(b, frame, data)));
     Message ack{};
     ack.type = Type::Ack;
     ack.counter = data.counter;
+    ack.version = data.version; // A receiver answers in the version of the DATA.
+    ack.powerDbm = power;
     std::memcpy(ack.dataTag.data(), frame.bytes.data() + frame.size - TagSize, TagSize);
     Frame out{};
     TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(seal(b, ack, out)));
@@ -148,11 +150,12 @@ void test_runtime_idle_and_success_reuse() {
     r.enterChannelCheck();
     r.transmit();
     r.controller.poll(); // No incoming frame.
-    r.radio.incoming = ackFor(r.radio.sent[0]);
+    r.radio.incoming = ackFor(r.radio.sent[0], binding(), 7);
     r.radio.rx = ReceiveStatus::Received;
     r.controller.poll();
     COMPLETION(Completion::Acknowledged, r);
     TEST_ASSERT_EQUAL_UINT8(1, r.controller.report().attempts);
+    TEST_ASSERT_EQUAL_INT8(7, r.controller.report().powerCommand); // From the v2 ACK.
     auto sleeps = r.radio.sleepCalls;
     r.controller.poll();
     r.controller.cancel();
@@ -161,6 +164,7 @@ void test_runtime_idle_and_success_reuse() {
     TEST_ASSERT_EQUAL_UINT64(2, r.counter.last);
     r.controller.cancel();
     COMPLETION(Completion::Cancelled, r);
+    TEST_ASSERT_EQUAL_INT8(KeepPower, r.controller.report().powerCommand); // No ACK.
 }
 void test_runtime_jitter_and_busy_channel_are_bounded() {
     Rig r;

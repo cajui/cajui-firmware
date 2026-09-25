@@ -18,7 +18,8 @@ public:
     Sx1262Radio();
     Sx1262Radio(const Sx1262Radio&) = delete;
     Sx1262Radio& operator=(const Sx1262Radio&) = delete;
-    bool begin();
+    // Transmit power in dBm, within cajui::MinPowerDbm..MaxPowerDbm.
+    bool begin(int8_t powerDbm);
     bool listen() override;
     bool startChannelCheck() override;
     cajui::ChannelStatus channelStatus() override;
@@ -26,7 +27,7 @@ public:
     cajui::TransmitStatus transmitStatus(uint32_t&) override;
     cajui::ReceiveStatus receive(cajui::Frame&) override;
     bool sleep() override;
-    int16_t lastRssi() const override;
+    cajui::ReceiveStatus receiveMeasured(cajui::Frame&, cajui::Link&) override;
 
 private:
     enum class Mode { Idle, Cad, Tx, Rx, Failed };
@@ -38,7 +39,7 @@ private:
     cajui::ChannelStatus cad_ = cajui::ChannelStatus::Pending;
     cajui::TransmitStatus tx_ = cajui::TransmitStatus::Pending;
     cajui::Frame received_{};
-    int16_t rssi_ = 0;
+    cajui::Link receivedLink_{}; // Of received_; handed over together with it.
     uint32_t completedAt_ = 0;
     bool initialized_ = false;
     static Sx1262Radio* instance_;

@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <esp_random.h>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include "cajui_application.h"
 #include "cajui_device.h"
@@ -35,6 +36,7 @@ private:
     cajui::NvsRecords records_;
     cajui::RecordBlob uplinkBlob_{records_, "uplink", cajui::MinUplinkSize,
                                   cajui::UplinkBlobCapacity};
+    cajui::RecordBlob radioBlob_{records_, "radio", cajui::RadioRecordSize, cajui::RadioRecordSize};
     cajui::PersistentStore store_;
     MqttUplink uplink_;
     AppLock lock_;
@@ -126,18 +128,22 @@ void ReceiverApp::setup() {
     adminMode_ = decision.mode == cajui::BootMode::Admin;
     commands_.reset(new cajui::Provisioning(store_, esp_random(), opened ? &uplinkBlob_ : nullptr,
                                             adminMode_ ? cajui::ConsoleMode::Admin
-                                                       : cajui::ConsoleMode::Operation));
+                                                       : cajui::ConsoleMode::Operation,
+                                            &radioBlob_)); // Reports STORAGE if unopened.
     console_.reset(new Console(*commands_));
     if (adminMode_) {
         Serial.printf("CJAPP ADMIN reason=%s\n", cajui::reasonName(decision.reason));
         return;
     }
     if (!ready) return fault("STARTUP");
-    if (!radio_.begin()) return fault("RADIO_INIT");
+    int8_t power = cajui::DefaultPowerDbm;
+    if (cajui::loadPower(radioBlob_, power) == cajui::ReadResult::Error)
+        Serial.println("CJAPP POWER config_error"); // The bench default applies.
+    if (!radio_.begin(power)) return fault("RADIO_INIT");
     controller_.setPairing(&pairing_);
     if (!controller_.start()) return fault("RECEIVE_START");
     listening_.store(true);
-    Serial.printf("CJAPP RECEIVER queued=%u\n", unsigned(store_.queued()));
+    Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power));
     startForwarding();
     portal_.setPairing(&pairing_);
     if (!portal_.start(listening_)) Serial.println("CJAPP SETUP unavailable");
@@ -168,9 +174,18 @@ void ReceiverApp::loop() {
         const auto before = controller_.state();
         controller_.poll();
         if (before == cajui::ReceiverState::Listening &&
-            controller_.state() == cajui::ReceiverState::Acknowledging)
-            Serial.printf("CJAPP ACCEPT result=%u queued=%u\n", unsigned(controller_.lastResult()),
-                          unsigned(store_.queued()));
+            controller_.state() == cajui::ReceiverState::Acknowledging &&
+            controller_.acknowledgedData()) { // Pairing replies log their own lines.
+            const cajui::Link& link = controller_.lastLink();
+            if (link.known)
+                Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=%d snr=%s%d.%d\n",
+                              unsigned(controller_.lastResult()), unsigned(store_.queued()),
+                              int(link.rssiDbm), link.snrTenthsDb < 0 ? "-" : "",
+                              std::abs(link.snrTenthsDb) / 10, std::abs(link.snrTenthsDb) % 10);
+            else
+                Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=unknown snr=unknown\n",
+                              unsigned(controller_.lastResult()), unsigned(store_.queued()));
+        }
         listening = controller_.state() == cajui::ReceiverState::Listening;
         listening_.store(listening);
         if (controller_.state() == cajui::ReceiverState::Failed) {
