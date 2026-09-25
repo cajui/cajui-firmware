@@ -35,7 +35,10 @@ def version_code(text):
     if not match:
         raise PackageError("Version must look like 1.2.3 with parts up to 99")
     major, minor, patch = (int(part) for part in match.groups())
-    return major * 10000 + minor * 100 + patch
+    code = major * 10000 + minor * 100 + patch
+    if not code:
+        raise PackageError("0.0.0 is reserved for local builds")
+    return code
 
 
 def signed_header(role, version, size):
@@ -76,16 +79,55 @@ def public_der(key):
 def generate_key(private, public):
     """Create a P-256 signing key; refuses to overwrite an existing private key."""
     private = Path(private)
+    if private.exists():
+        raise FileExistsError(private)
+    key = openssl("genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256")
     fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as output:
-        output.write(openssl("genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"))
+        output.write(key)
     Path(public).write_bytes(public_der(private))
 
 
+def key_from_header(text):
+    """The key bytes of a header written by key_header (src/board/release_key.h)."""
+    body = text.split("{", 2)[-1].split("}", 1)[0]
+    return bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", body))
+
+
+def verify(data, public, role=None):
+    """Check an update file as the device does: canonical header, then the signature."""
+    if len(data) <= HEADER_SIZE or data[:4] != MAGIC:
+        raise PackageError("Not an update file")
+    fmt, role_code, reserved, version, size = struct.unpack(">BBHII", data[4:16])
+    length = data[16]
+    padding = data[17 + length : HEADER_SIZE]
+    if fmt != FORMAT or reserved or not 0 < length <= SIGNATURE_CAPACITY or any(padding):
+        raise PackageError("Not a canonical update file")
+    if size != len(data) - HEADER_SIZE or (role and role_code != ROLES[role]):
+        raise PackageError("Size or role does not match")
+    with tempfile.TemporaryDirectory() as folder:
+        key = Path(folder) / "key.der"
+        signature = Path(folder) / "signature"
+        key.write_bytes(public)
+        signature.write_bytes(data[17 : 17 + length])
+        pem = Path(folder) / "key.pem"
+        pem.write_bytes(openssl("pkey", "-pubin", "-inform", "DER", "-in", str(key)))
+        message = CONTEXT + data[:16] + data[HEADER_SIZE:]
+        try:
+            openssl(
+                "dgst", "-sha256", "-verify", str(pem), "-signature", str(signature), data=message
+            )
+        except PackageError:
+            raise PackageError("Signature does not match the key") from None
+    return version
+
+
 def c_array(name, data):
+    # Sixteen bytes per row: the layout clang-format keeps, so the file is regenerated
+    # byte for byte.
     rows = [
-        "    " + ", ".join(f"0x{byte:02x}" for byte in data[i : i + 12]) + ","
-        for i in range(0, len(data), 12)
+        "    " + ", ".join(f"0x{byte:02x}" for byte in data[i : i + 16]) + ","
+        for i in range(0, len(data), 16)
     ]
     return f"constexpr uint8_t {name}[] = {{\n" + "\n".join(rows) + "\n};\n"
 
@@ -98,13 +140,24 @@ def key_header(public, name="ReleaseKey"):
     )
 
 
-def manifest(name, version, image):
-    """ESP Web Tools manifest: one merged image at offset 0, never erasing the device."""
+STORAGE_OFFSET = 0x310000  # The cajui partition (partitions.csv).
+
+
+def manifest(name, version, image, erase_storage=None):
+    """ESP Web Tools manifest: the merged image at offset 0, never a full-chip erase.
+
+    An update keeps the cajui storage partition. A first install also writes an erased
+    image over it (`erase_storage`), so leftovers of earlier firmware never look like
+    corrupt storage.
+    """
+    parts = [{"path": image, "offset": 0}]
+    if erase_storage:
+        parts.append({"path": erase_storage, "offset": STORAGE_OFFSET})
     return {
         "name": name,
         "version": version,
         "new_install_prompt_erase": False,
-        "builds": [{"chipFamily": "ESP32-S3", "parts": [{"path": image, "offset": 0}]}],
+        "builds": [{"chipFamily": "ESP32-S3", "parts": parts}],
     }
 
 
@@ -127,9 +180,14 @@ def main():
     info.add_argument("--name", required=True)
     info.add_argument("--version", required=True)
     info.add_argument("--image", required=True, help="Path of the merged image on the site")
+    info.add_argument("--erase-storage", help="Path of an erased storage image (first install)")
     info.add_argument("--output", type=Path, required=True)
     code = sub.add_parser("version-code", help="Print the numeric version of 1.2.3")
     code.add_argument("version")
+    check = sub.add_parser("verify", help="Check update files against a public key header")
+    check.add_argument("--key-header", type=Path, required=True)
+    check.add_argument("--role", choices=sorted(ROLES))
+    check.add_argument("files", type=Path, nargs="+")
     args = parser.parse_args()
     try:
         if args.action == "package":
@@ -142,8 +200,15 @@ def main():
             generate_key(args.private, args.public)
         elif args.action == "key-header":
             args.output.write_text(key_header(args.public.read_bytes()))
+        elif args.action == "verify":
+            public = key_from_header(args.key_header.read_text())
+            for path in args.files:
+                version = verify(path.read_bytes(), public, args.role)
+                print(f"{path.name}: signed, version code {version}")
         elif args.action == "manifest":
-            text = json.dumps(manifest(args.name, args.version, args.image), indent=2)
+            text = json.dumps(
+                manifest(args.name, args.version, args.image, args.erase_storage), indent=2
+            )
             args.output.write_text(text + "\n")
         else:
             print(version_code(args.version))

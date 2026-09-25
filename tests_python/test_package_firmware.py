@@ -33,7 +33,7 @@ class PackageTests(unittest.TestCase):
     def test_version_codes(self):
         self.assertEqual(10203, tool.version_code("1.2.3"))
         self.assertEqual(990000, tool.version_code("v99.0.0"))
-        for bad in ("1.2", "100.0.0", "1.2.3-rc1", "a.b.c"):
+        for bad in ("1.2", "100.0.0", "1.2.3-rc1", "a.b.c", "0.0.0"):
             with self.subTest(bad=bad), self.assertRaises(tool.PackageError):
                 tool.version_code(bad)
 
@@ -91,9 +91,42 @@ class PackageTests(unittest.TestCase):
         text = tool.key_header(bytes(range(20)), "TestKey")
         self.assertIn("constexpr uint8_t TestKey[] = {", text)
         self.assertIn("0x13,", text)
+        self.assertEqual(bytes(range(20)), tool.key_from_header(text))
         manifest = tool.manifest("Cajuí receiver", "1.2.3", "receiver.bin")
         self.assertFalse(manifest["new_install_prompt_erase"])
         self.assertEqual([{"path": "receiver.bin", "offset": 0}], manifest["builds"][0]["parts"])
+        first = tool.manifest("Cajuí receiver", "1.2.3", "receiver.bin", "blank.bin")
+        self.assertFalse(first["new_install_prompt_erase"])
+        self.assertEqual({"path": "blank.bin", "offset": 0x310000}, first["builds"][0]["parts"][1])
+
+    def test_verify_matches_the_device_rules(self):
+        image = bytes(range(200))
+        data = tool.package(image, "rx", 10203, self.key)
+        public = self.public.read_bytes()
+        self.assertEqual(10203, tool.verify(data, public, "rx"))
+        self.assertEqual(10203, tool.verify(data, public))
+        other_key, other_public = self.dir / "other.pem", self.dir / "other.der"
+        tool.generate_key(other_key, other_public)
+        cases = {
+            "tampered image": data[:-1] + bytes([data[-1] ^ 1]),
+            "tampered version": data[:11] + bytes([data[11] ^ 1]) + data[12:],
+            "padding": data[: tool.HEADER_SIZE - 1] + b"\x01" + data[tool.HEADER_SIZE :],
+            "truncated": data[:-1],
+            "not an update": b"XXXX" + data[4:],
+            "other key": tool.package(image, "rx", 10203, other_key),
+        }
+        for name, bad in cases.items():
+            with self.subTest(name=name), self.assertRaises(tool.PackageError):
+                tool.verify(bad, public, "rx")
+        with self.assertRaisesRegex(tool.PackageError, "role"):
+            tool.verify(data, public, "tx")
+
+    def test_failed_key_generation_leaves_no_file(self):
+        private = self.dir / "failed.pem"
+        with patch.object(tool, "openssl", side_effect=tool.PackageError("boom")):
+            with self.assertRaises(tool.PackageError):
+                tool.generate_key(private, self.dir / "failed.der")
+        self.assertFalse(private.exists())
 
     def run_cli(self, *arguments):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -129,6 +162,16 @@ class PackageTests(unittest.TestCase):
             0, self.run_cli("key-header", "--public", str(self.public), "--output", str(header))[0]
         )
         self.assertIn("ReleaseKey", header.read_text())
+        code, text, _ = self.run_cli(
+            "verify", "--key-header", str(header), "--role", "tx", str(output)
+        )
+        self.assertEqual(0, code)
+        self.assertIn("signed, version code 100", text)
+        code, _, error = self.run_cli(
+            "verify", "--key-header", str(header), "--role", "rx", str(output)
+        )
+        self.assertEqual(1, code)
+        self.assertIn("role", error)
         manifest = self.dir / "manifest.json"
         self.assertEqual(
             0,
@@ -140,6 +183,8 @@ class PackageTests(unittest.TestCase):
                 "1.0.0",
                 "--image",
                 "a.bin",
+                "--erase-storage",
+                "b.bin",
                 "--output",
                 str(manifest),
             )[0],
