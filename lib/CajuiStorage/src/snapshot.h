@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "cajui_protocol.h"
 
 namespace cajui {
 constexpr size_t BindingCapacity = 16, QueueCapacity = 128;
+// Legacy layout, read only to migrate a device to records v2 (records.h); the storage
+// types below are shared by both layouts.
 // Snapshot v1: header, one record per occupied enrollment and queued frame, then CRC32.
 // Header: magic 4, version 1, role 1, device 8, revision 8, network 8, receiver 8,
 // profile 2, queue count 1, enrollment count 1.
@@ -30,7 +33,7 @@ enum class Health : uint8_t {
     Invalid,
     WriteError
 };
-// Persistent state and its snapshot v1 encoding. Pure: no storage adapter involved.
+// The v1 state and its snapshot encoding, kept for migration and its tests. Pure.
 namespace snapshot {
 struct Entry {
     Enrollment state = Enrollment::Empty;

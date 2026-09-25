@@ -16,7 +16,10 @@ secret. A passive listener cannot compute the key. The exchange is **not authent
 against an active attacker** in radio range during the window: the node has no display
 on which to compare a code, so an attacker who answers first could pair with either side.
 Mitigations are the physical action on both devices, the short window, the displayed node
-ID and signal strength, and radio proximity. A per-device secret printed on a label can
+ID and signal strength, radio proximity, and key pinning: the first key heard for a node ID
+is kept for the whole window, and a second key or attempt nonce for that ID blocks adding
+it (see step 2). An attacker can therefore make pairing fail, as jamming would, but cannot
+silently take the place of a listed node once the node itself has been heard. A per-device secret printed on a label can
 later authenticate the exchange; it is not part of this version.
 
 Cryptography uses established libraries: X25519 through mbedTLS on ESP32 and OpenSSL on
@@ -62,13 +65,18 @@ of a new credential generation, exactly as a USB enrollment would store it.
 
 1. The node sends JOIN_REQUEST, then listens 1.5 s for an offer; it repeats every 2 s with
    jitter for up to two minutes.
-2. While the window is open, the receiver lists requesting nodes (at most four, with the
-   latest signal strength). When the administrator adds one, it refuses if no enrollment
-   slot is free, chooses a random generation (and a random network if it has none),
-   derives the key and keeps the offer **in memory only**, answering the node's next
-   request with JOIN_OFFER. A repeated request with the same attempt nonce receives the
-   identical offer. A request with another nonce does not cancel it: requests are
-   unauthenticated, and a node that restarted is added again.
+2. While the window is open, the receiver lists requesting nodes: the first four of the
+   window, with the latest signal strength. Later requesters are ignored rather than
+   evicting a listed node. The first public key and attempt nonce heard for a node ID are
+   pinned; a request for that ID with another key or nonce marks it as a **conflict**,
+   and the page shows it without an Add button until the window is opened again. When
+   the administrator adds a node, the receiver refuses if the node is in conflict or no
+   enrollment slot is free, chooses a random generation (and a random network if it has
+   none), derives the key and keeps the offer **in memory only**, answering the node's
+   next request with JOIN_OFFER. A repeated request with the pinned nonce receives the
+   identical offer. A conflicting request for the offered node withdraws the offer before
+   either device can confirm it. A node that restarted its attempt has a new key and
+   nonce, so it conflicts with itself: the administrator stops and searches again.
 3. The node validates the offer (its own ID and attempt nonce, nonzero identifiers,
    profile 1, a receiver ID different from its own, a valid tag under the derived key) and
    checks that its storage can accept it (a free slot, and the same network and receiver
@@ -76,20 +84,31 @@ of a new credential generation, exactly as a USB enrollment would store it.
    to five times, still without storing anything.
 4. On a valid confirmation the receiver stores the binding already active and answers
    JOIN_DONE. It keeps that reply apart from any new offer, so a repeated confirmation
-   receives the identical reply even after the window closed or another node was added.
+   receives the identical reply even after the window closed or another node was added,
+   for 15 seconds and five replies in total: enough for a node's five confirmations, and
+   no more for someone replaying a recorded one.
    On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
-Enrollment slots are never freed, so nothing is stored for an attempt that has not been
-confirmed: abandoned, expired, stopped or spoofed attempts cost no slot. Each successful
-pairing uses one slot on each side, like a USB rotation. If JOIN_DONE is lost for all five
-confirmations, the receiver holds an active binding the node never stored; the node keeps
-its previous binding and the administrator pairs it again or revokes the stale one on the
-setup page.
+Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
+stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each
+side, like a USB rotation; revoked generations free theirs when a slot is needed, see
+[storage limits](persistence.md#limits-and-retained-history).
+
+Pairing a node that already has a binding does not revoke the old one on the receiver
+at once: the receiver keeps both generations active, and the node's **first sample**
+decides. A sample under the new key revokes the old generation; a sample under the old
+key, which means the node never received JOIN_DONE, revokes the new one. A lost JOIN_DONE
+therefore never cuts the node off, and the page shows the unused generation with no
+sample yet. A previous generation that never carried a sample is revoked immediately, so
+at most two stay active. Replayed samples do not count: only a new, authenticated sample
+commits. An attacker who recorded an old-key sample while keeping it from the receiver
+could deliver it after a re-pairing and revoke the new generation; like jamming, this
+denies service but grants no access, within the active-attacker limit above. The node itself replaces its binding as soon as it stores the new one.
 
 A node that already belongs to a network can only pair again within that network:
-storage holds a single network per device, and there is no reset that would keep keys.
-Pairing again within the network creates a new generation and revokes the previous one
-on both sides, as USB rotation does.
+storage holds a single network per device. To move it, `tools/provision.py reset` makes
+it leave its network first, retiring its keys. Pairing again within the network creates a new generation, which replaces the previous
+one as described above.
 
 ## Devices
 

@@ -1,12 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_pairing.h"
+#include "cajui_wire.h"
 #include <cstring>
 
 namespace cajui {
 namespace {
-// v1 header layout, see docs/protocol-v1.md.
-constexpr uint8_t Magic[4] = {'C', 'J', 'L', 'R'};
-constexpr uint8_t Version = 1;
-constexpr size_t TypeAt = 5, NetworkAt = 6, NodeAt = 14, CounterAt = 22, LengthAt = 30;
+using wire::CounterAt;
+using wire::get;
+using wire::LengthAt;
+using wire::Magic;
+using wire::NetworkAt;
+using wire::NodeAt;
+using wire::put;
+using wire::TypeAt;
+using wire::Version;
+using wire::VersionAt;
 constexpr size_t RequestPayload = X25519Size;
 constexpr size_t OfferPayload = X25519Size + 8 + 8 + 2;
 constexpr size_t RequestSize = HeaderSize + RequestPayload;
@@ -15,20 +23,12 @@ constexpr size_t TaggedSize = HeaderSize + TagSize;
 constexpr char Salt[] = "cajui-pair-v1";
 constexpr int RandomAttempts = 8;
 
-void put(uint8_t* out, uint64_t value, size_t size) {
-    for (size_t i = 0; i < size; ++i) out[size - 1 - i] = uint8_t(value >> (i * 8));
-}
-uint64_t get(const uint8_t* in, size_t size) {
-    uint64_t value = 0;
-    for (size_t i = 0; i < size; ++i) value = (value << 8) | in[i];
-    return value;
-}
 void header(PairingType type, uint64_t network, uint64_t node, uint64_t nonce, size_t length,
             Frame& frame) {
     frame = Frame{};
     auto* h = frame.bytes.data();
     std::memcpy(h, Magic, sizeof(Magic));
-    h[4] = Version;
+    h[VersionAt] = Version;
     h[TypeAt] = uint8_t(type);
     put(h + NetworkAt, network, 8);
     put(h + NodeAt, node, 8);
@@ -37,15 +37,11 @@ void header(PairingType type, uint64_t network, uint64_t node, uint64_t nonce, s
 }
 bool shaped(const Frame& frame, PairingType type, size_t size, size_t length) {
     const auto* h = frame.bytes.data();
-    return frame.size == size && std::memcmp(h, Magic, sizeof(Magic)) == 0 && h[4] == Version &&
-           h[TypeAt] == uint8_t(type) && get(h + LengthAt, 2) == length;
+    return frame.size == size && std::memcmp(h, Magic, sizeof(Magic)) == 0 &&
+           h[VersionAt] == Version && h[TypeAt] == uint8_t(type) && get(h + LengthAt, 2) == length;
 }
 void nonceFor(PairingType type, uint64_t nonce, uint8_t out[NonceSize]) {
-    out[0] = 'C';
-    out[1] = 'J';
-    out[2] = uint8_t(type);
-    out[3] = Version;
-    put(out + 4, nonce, 8);
+    wire::nonce(uint8_t(type), nonce, out);
 }
 bool nonzero(const X25519Key& key) {
     uint8_t any = 0;
@@ -226,10 +222,13 @@ PairingHost::~PairingHost() {
     wipe(key_.data(), key_.size());
     wipe(last_.key.data(), last_.key.size());
 }
-void PairingHost::open() {
-    close();
+void PairingHost::forgetCompleted() {
     wipe(last_.key.data(), last_.key.size());
     last_ = Completed{};
+}
+void PairingHost::open() {
+    close();
+    forgetCompleted();
     state_ = HostState::Open;
     openedAt_ = clock_.nowMs();
     paired_ = 0;
@@ -254,31 +253,40 @@ void PairingHost::dropOffer() {
     offerFrame_ = Frame{};
     if (state_ == HostState::Offered) state_ = paired_ ? HostState::Paired : HostState::Open;
 }
-void PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKey, int16_t rssi) {
-    Candidate* slot = nullptr;
-    for (size_t i = 0; i < count_; ++i)
-        if (candidates_[i].node == node) slot = &candidates_[i];
-    if (!slot && count_ < MaxCandidates) slot = &candidates_[count_++];
-    if (!slot) { // Full: replace the least recently seen requester.
-        slot = &candidates_[0];
-        for (size_t i = 1; i < count_; ++i)
-            if (int32_t(candidates_[i].seenAt - slot->seenAt) < 0) slot = &candidates_[i];
+bool PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKey, int16_t rssi) {
+    for (size_t i = 0; i < count_; ++i) {
+        Candidate& listed = candidates_[i];
+        if (listed.node != node) continue;
+        // Never replace a pinned key: one injected frame would otherwise redirect the
+        // operator's click to an attacker while the list still shows the victim's ID.
+        if (listed.nonce != nonce || listed.publicKey != publicKey) listed.conflict = true;
+        listed.rssi = rssi;
+        listed.seenAt = clock_.nowMs();
+        return !listed.conflict;
     }
-    slot->node = node;
-    slot->nonce = nonce;
-    slot->publicKey = publicKey;
-    slot->rssi = rssi;
-    slot->seenAt = clock_.nowMs();
+    if (count_ == MaxCandidates) return false;
+    Candidate& slot = candidates_[count_++];
+    slot.node = node;
+    slot.nonce = nonce;
+    slot.publicKey = publicKey;
+    slot.rssi = rssi;
+    slot.seenAt = clock_.nowMs();
+    return true;
 }
 bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     reply = Frame{};
     poll();
     const uint8_t type = untrustedType(frame);
     // A repeated confirmation of the last completed exchange, even after the window closed
-    // or while another node is being added: answer with the identical JOIN_DONE.
+    // or while another node is being added: answer with the identical JOIN_DONE, within
+    // the bounds a genuine node needs.
+    if (last_.node &&
+        (uint32_t(clock_.nowMs() - last_.at) >= DoneReplayMs || last_.replies >= MaxDoneReplies))
+        forgetCompleted();
     if (type == uint8_t(PairingType::Confirm) && last_.node &&
         verifyTagged(frame, PairingType::Confirm, last_.network, last_.node, last_.nonce,
                      last_.key)) {
+        ++last_.replies;
         reply = last_.done;
         return true;
     }
@@ -288,19 +296,23 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
         uint64_t nonce = 0;
         X25519Key publicKey{};
         if (!parseRequest(frame, node, nonce, publicKey) || node == store_.device()) return false;
-        track(node, nonce, publicKey, rssi);
-        // A different nonce is ignored rather than cancelling the offer: requests are
-        // unauthenticated. A node that restarted is added again by the operator.
-        if (state_ == HostState::Offered && node == offer_.node && nonce == offer_.nonce) {
-            reply = offerFrame_; // Identical retransmission for a repeated request.
-            return true;
+        const bool consistent = track(node, nonce, publicKey, rssi);
+        if (state_ != HostState::Offered || node != offer_.node) return false;
+        // Two devices claim the offered node: withdraw the offer before either confirms.
+        // Requests are unauthenticated, so this lets a radio attacker cancel an offer
+        // (like jamming would) but never redirect it.
+        if (!consistent) {
+            dropOffer();
+            return false;
         }
-        return false;
+        reply = offerFrame_; // Identical retransmission for a repeated request.
+        return true;
     }
     if (type != uint8_t(PairingType::Confirm) || state_ != HostState::Offered ||
         !verifyTagged(frame, PairingType::Confirm, offer_.network, offer_.node, offer_.nonce, key_))
         return false;
-    // The node proved it holds the key: store the binding, already active.
+    // The node proved it holds the key: store the binding, already active. A previous
+    // generation of the node stays valid until the node sends with the new one.
     Completed done{};
     done.network = offer_.network;
     done.node = offer_.node;
@@ -308,13 +320,15 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     done.key = key_;
     if (prepareFresh(store_, offer_.network, offer_.receiver, offer_.node, offer_.generation,
                      key_) != Result::Ok ||
-        store_.activate(offer_.node, offer_.generation) != Result::Ok ||
+        store_.activateAlongside(offer_.node, offer_.generation) != Result::Ok ||
         !buildTagged(PairingType::Done, done.network, done.node, done.nonce, done.key, done.done)) {
         store_.revoke(offer_.node, offer_.generation);
         wipe(done.key.data(), done.key.size());
         return false;
     }
-    wipe(last_.key.data(), last_.key.size());
+    forgetCompleted();
+    done.at = clock_.nowMs();
+    done.replies = 1; // This first JOIN_DONE.
     last_ = done;
     wipe(done.key.data(), done.key.size());
     paired_ = offer_.node;
@@ -330,6 +344,7 @@ Result PairingHost::accept(uint64_t node) {
     for (size_t i = 0; i < count_; ++i)
         if (candidates_[i].node == node) candidate = &candidates_[i];
     if (!candidate) return Result::NotFound;
+    if (candidate->conflict) return Result::Conflict;
     if (!store_.freeSlots()) return store_.healthy() ? Result::Full : Result::StorageError;
     KeyPair keys{};
     Offer offer{};

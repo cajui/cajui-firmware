@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["pyserial==3.5"]
@@ -34,7 +35,16 @@ STORAGE_FAILURES = {
 
 
 # Error codes the firmware may send; anything else is reported as UNKNOWN.
-DEVICE_ERRORS = {"INVALID", "STORAGE", "FULL", "CONFLICT", "NOT_FOUND", "UNAUTHORIZED", "ADMIN"}
+DEVICE_ERRORS = {
+    "INVALID",
+    "STORAGE",
+    "FULL",
+    "CONFLICT",
+    "NOT_FOUND",
+    "UNAUTHORIZED",
+    "ADMIN",
+    "QUEUED",
+}
 # Recovery file phases in order; progress is recorded and never moves backwards.
 PHASES = ("new", "receiver_prepared", "both_prepared", "receiver_active", "configured")
 NO_NETWORK = "0" * 16
@@ -402,6 +412,30 @@ def revoke(rx, transaction):
     return {"revoked": True, "node": transaction["node"]}
 
 
+def leave(link, discard_queue=False):
+    """Leave the network: the device retires every enrollment and forgets its network.
+
+    Retired keys can never be enrolled again, so recovery files for this device become
+    useless. A receiver keeps queued samples unless they are explicitly discarded.
+    """
+    status = ready(link)
+    if status["queued"] and not discard_queue:
+        raise ProvisioningError(
+            f"{status['queued']} samples are still queued; let the receiver forward them "
+            "or pass --discard-queue"
+        )
+    link.request("RESET " + status["device"] + (" discard" if discard_queue else ""))
+    if hello(link)["network"] != NO_NETWORK:
+        raise ProvisioningError("Device did not leave its network")
+    release(link, status["device"])
+    return {
+        "reset": True,
+        "device": status["device"],
+        "role": status["role"],
+        "discarded": status["queued"] if discard_queue else 0,
+    }
+
+
 def read_secret(path, prompt):
     """Read a secret from a file (first line) or an interactive prompt without echo."""
     if path is None:
@@ -500,6 +534,9 @@ def main():
     uplink_status.add_argument("--receiver", required=True)
     pair = sub.add_parser("pair", help="Start radio pairing on a transmitter")
     pair.add_argument("--transmitter", required=True)
+    reset = sub.add_parser("reset", help="Leave the network, retiring every key")
+    reset.add_argument("--port", required=True)
+    reset.add_argument("--discard-queue", action="store_true", help="Receiver: drop samples")
     args = parser.parse_args()
     links = []
     try:
@@ -526,6 +563,8 @@ def main():
             output = configure_uplink(connect(args.receiver), fields)
         elif args.action == "pair":
             output = start_pairing(connect(args.transmitter))
+        elif args.action == "reset":
+            output = leave(connect(args.port), args.discard_queue)
         elif args.action == "uplink-status":
             link = connect(args.receiver)
             output = uplink_info(link, wake(link)["device"])

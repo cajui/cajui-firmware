@@ -23,18 +23,22 @@ with the radio in reset, and a receiver without bindings starts listening. Holdi
 for three seconds on a transmitter (at boot, when waking it from sleep, or in admin mode)
 or sending `CJ1 PAIR` starts pairing: its LED blinks fast for up to two minutes, then it
 restarts. PRG is a deep-sleep wake source for this reason. Both images share
-`partitions.csv` and the same snapshot format. Preserve the `cajui` NVS partition; never erase or restore older
+`partitions.csv` and the same [storage records](persistence.md). Preserve the `cajui` NVS partition; never erase or restore older
 counter/receipt state under an existing key. Keep the local recovery file private.
 Radio operation requires healthy storage, enrollment and profile 1; the transmitter also
 requires its own active binding. Otherwise the device boots in admin mode
 (`CJAPP ADMIN reason=storage|not_enrolled|requested`).
+
+The entry points are `src/transmitter_main.cpp` and `src/receiver_main.cpp`, one small
+application class each; boot-mode selection and fault recovery are the unit-tested
+functions of `lib/CajuiDevice`.
 
 In operation the serial port carries diagnostic `CJAPP` text and a restricted CJ1
 console. `CJ1 ADMIN` restarts into admin mode once the radio is idle: after the
 transmitter's delivery cycle, or while the receiver is listening. There is no
 concurrent USB credential mutation while a frame is in flight. ESP-IDF component logs are disabled at startup because
 they are written from other tasks and can split a console reply. Only one `PersistentStore` owns
-its backing snapshot.
+its backing store.
 
 ## Transmitter
 
@@ -52,7 +56,14 @@ implemented in this application; use USB while validating it. The schedule is
 wake mounts existing counters, reserves a new one and runs one bounded send cycle.
 Unconfirmed samples are logged and not backlogged. Radio shutdown, Vext off and
 GPIO holds precede deep sleep; a failed radio shutdown uses reset as a fallback.
-Startup/storage failures halt for diagnosis rather than silently erasing enrollment.
+A radio or storage fault during operation never erases enrollment and never leaves the
+node awake: it
+logs `CJAPP STOP <reason> faults=<n> retry_s=<s>` and deep-sleeps for 10 seconds,
+doubling with each consecutive fault up to 15 minutes; the next wake retries. A
+completed delivery cycle clears the count. Storage that cannot be mounted at boot is
+different: the node stays awake in admin mode (`reason=storage`) for diagnosis over USB,
+and never retries on its own, since remounting cannot repair it. The loop task runs under the ESP-IDF task
+watchdog (5 seconds), so a hang restarts the node.
 
 `CJAPP DELIVERY completion=1` means an authenticated matching ACK; other completion
 values follow `Completion` in `cajui_runtime.h` and are unconfirmed. Power consumption,
@@ -65,10 +76,17 @@ a bounded routing hint to an already enrolled binding, never proof of identity.
 The existing authenticated receive path commits the sample and replay receipt before
 starting the ACK. Unknown, revoked, corrupted, replayed or full-queue input receives
 no acceptance ACK. A duplicate of the last committed sample gets the same ACK without
-another queue entry, even if the queue is full.
+another queue entry, even if the queue is full, at most three times per node per minute:
+a genuine node repeats a sample twice at most when its ACK is lost, and the bound keeps
+a replayed frame from making the receiver transmit on demand.
 
-ACK TX has a three-second watchdog. Driver or storage failures latch a terminal
-state and stop the radio. Keep the controller alive until radio shutdown is confirmed.
+ACK TX has a three-second watchdog; a completion that is polled late still counts.
+Driver or storage failures latch the controller and stop the radio. The receiver then
+logs `CJAPP STOP <reason> faults=<n> restart_s=<s>`, keeps the USB console available and
+restarts after 10 seconds, doubling with each consecutive fault up to 15 minutes; ten
+minutes of healthy operation clear the count. Restarting remounts storage, which fails
+closed. The loop task runs under the ESP-IDF task watchdog (5 seconds); a watchdog or
+panic restart happens at once but counts as a fault.
 Queue entries survive image changes and resets. At five-minute intervals, an initially
 empty queue holds 128 samples (about 10 hours 40 minutes from one transmitter). Never
 interpret receiver ACK as delivery to Cajuí Central.
@@ -90,17 +108,18 @@ One publication is in flight at a time. The queue front is removed durably only 
 the broker's PUBACK for that exact message. A missing PUBACK within 15 seconds or a
 broker disconnection abandons the attempt and retries after five seconds; a late
 PUBACK from an abandoned attempt is ignored. The ESP-IDF client enqueues the
-publication so the radio loop never blocks on network I/O, and forwarding runs only
+publication so the radio loop does not wait for network I/O; it can wait for the client's
+lock for at most the 2.5-second network timeout, below the loop watchdog, and forwarding runs only
 while the receiver is listening, never during an ACK transmission. A storage failure
-stops the application. Without stored settings the receiver logs `CJAPP UPLINK disabled`
+stops the radio and restarts the receiver after the fault delay described above. Without stored settings the receiver logs `CJAPP UPLINK disabled`
 and keeps queueing as before.
 
 PUBACK is the broker's boundary, not proof that Central stored the sample. The client
 uses MQTT 3.1.1, where an ACL-denied publication is still acknowledged: a username
 without write permission on its namespace would silently discard samples. Transport
 is plain TCP, so Wi-Fi and broker credentials and samples are readable on the local
-network; use a trusted network until broker TLS is provisioned. Each removal rewrites
-the snapshot, doubling flash writes per sample compared with queueing alone.
+network; use a trusted network until broker TLS is provisioned. Each removal writes
+only the 14-byte queue head record.
 Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
 queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 
@@ -110,17 +129,24 @@ Holding the PRG button (GPIO0) for three seconds opens an access point named
 `Cajui-XXXX`, from the last two bytes of the device ID, and a page at `192.168.4.1`.
 A captive-portal DNS makes phones open it automatically; the OLED shows a Wi-Fi QR code
 plus the network name and address, and the LED blinks while setup is open, for boards
-without a display. The address is always `192.168.4.1`, the ESP32 access point default. Holding the button again, the page's close button or
-ten minutes without requests closes it. Final hardware can wire an external button to any
+without a display. The address is always `192.168.4.1`, the ESP32 access point default.
+Holding the button again, the page's close button, ten minutes without requests, or 30
+minutes after opening, whatever happens first, closes it. Final hardware can wire an external button to any
 GPIO with a pull-up by changing `board::SetupButton`.
 
 The page configures Wi-Fi (scanned 2.4 GHz networks or typed name) and the MQTT broker
 (address discovered through mDNS `_mqtt._tcp`, or typed, plus username and password),
 shows Wi-Fi, broker and queue status, and lists enrolled transmitters with their last
 accepted counter and a confirmed revoke action. Settings are staged and saved to the same
-uplink blob as the USB commands once both sections are complete, then applied without
-a reboot: MQTT restarts with the new identity and an in-flight publication is republished.
-Saved passwords are never shown; an empty password field keeps the saved one.
+uplink record as the USB commands only once both sections are complete **and** the
+station has connected with the staged Wi-Fi credentials: a mistyped password is never
+stored, and if it does not connect within 20 seconds the station returns to the saved
+network and the page says so. Saving applies the settings without a reboot: forwarding
+pauses, MQTT restarts with the new identity, and an in-flight publication is republished.
+Saved passwords are never shown. An empty Wi-Fi password keeps the saved one for the same
+network; an empty broker password keeps the saved one only for the same Wi-Fi network,
+host, port and username, so the page can never send a stored password to another broker
+or through another network, where the same host name could resolve elsewhere.
 
 The page also adds transmitters by [radio pairing](radio-pairing.md): "Search for
 transmitters" opens a two-minute window, requesting nodes are listed with their ID and
@@ -129,16 +155,26 @@ JavaScript, the transmitters section refreshes itself every second while the win
 open (spinners while searching and while waiting for confirmation) and the pairing buttons
 act in place; without it, the forms reload the page.
 
-**TODO (security): the access point is open, without a password.** While it is open,
-anyone in range can use the page, and so can any client on the home network through the
-receiver's station address, because the server listens on both interfaces. It opens only
-by physical action and closes on its own; a per-device password on a label/QR is planned.
-HTTP is not encrypted. Revoking needs USB to re-enroll. New transmitters are still
-enrolled over USB.
+The page answers only on the access point interface and only for its own address: a
+request through the receiver's station address on the home network gets 404, for any
+path, and a
+request naming another host (a DNS-rebinding name, a phone's captive-portal probe) is
+redirected to `192.168.4.1`. Each opening creates a random 128-bit session token that
+every form carries; a POST without it, or with a browser `Origin` other than the page,
+is refused, so another web page cannot submit the forms (CSRF). Scans and broker
+discovery are POST actions too. Messages after an action are fixed texts chosen by a
+code in the redirect, never text from a request.
 
-The page runs in the radio loop and serves requests only while the receiver is listening.
-A slow HTTP client can still delay radio processing, so an acknowledgement may be late
-while the page is in use. Wi-Fi scans and mDNS discovery never overlap, because a scan
+**TODO (security): the access point is open, without a password.** While it is open,
+anyone in range who joins it can use the page. It opens only by physical action, closes
+after at most 30 minutes, and a per-device password on a label/QR is planned. HTTP is not
+encrypted.
+
+The page runs in its own FreeRTOS task, so a slow or idle HTTP client never delays radio
+processing. It uses the store, pairing host and uplink record only while holding the
+lock the radio loop holds around each poll; storage writes additionally wait until the
+receiver is listening, so they never delay an acknowledgement being transmitted, and the
+MQTT client is replaced outside the lock. Wi-Fi scans and mDNS discovery never overlap, because a scan
 hops channels and drops mDNS traffic; a scan that starts while the station connects
 aborts the connection, so scans wait for it. With the access point active, a scan takes
 longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.

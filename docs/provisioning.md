@@ -80,9 +80,21 @@ uv run tools/provision.py revoke --receiver <rx-port> \
   --state /path/to/private/enrollment.json
 ```
 
-This does not erase the node's local key or old queued readings. Old generations
-remain in storage to prevent reuse and to decode queued data. The registry currently
-holds at most 16 generations; see storage limits before repeated rotations.
+This does not erase the node's local key or old queued readings. Revoked generations
+remain in storage to decode queued data; when a slot is needed, one without queued
+samples is freed and its credential retired so it can never return. See
+[storage limits](persistence.md#limits-and-retained-history).
+
+To move a device to another network, or to discard its enrollment entirely:
+
+```sh
+uv run tools/provision.py reset --port <port>
+```
+
+The device retires every enrollment and forgets its network, then accepts a new USB
+enrollment or radio pairing. Its old keys can never be enrolled again, so any recovery
+file for it becomes useless. A receiver with queued samples refuses unless
+`--discard-queue` is given. Revoke the device's binding on the other side as well.
 
 ## Serial protocol CJ1
 
@@ -94,7 +106,7 @@ ID to prevent accidental writes to a swapped port. `HELLO` ends with the mode, `
 `run`; older admin-only images omitted it. `CJ1 ADMIN <device>` restarts into admin mode
 from either mode; in operation, other mutations answer `CJ1 ERR ADMIN`. `CJ1 PAIR
 <device>` restarts a transmitter into [radio pairing](radio-pairing.md) from either mode;
-`python3 tools/provision.py pair --transmitter <port>` sends it, waking the node first. Identifiers are lowercase fixed
+`uv run tools/provision.py pair --transmitter <port>` sends it, waking the node first. Identifiers are lowercase fixed
 width hex, not decimal JSON numbers.
 
 ```text
@@ -104,6 +116,7 @@ CJ1 ACTIVATE <device:16> <node:16> <generation:16>
 CJ1 INFO <device:16> <node:16> <generation:16>
 CJ1 REVOKE <device:16> <node:16> <generation:16>
 CJ1 RESERVE <device:16> <node:16> <generation:16>
+CJ1 RESET <device:16> [discard]
 CJ1 REBOOT <device:16>
 ```
 
@@ -112,7 +125,7 @@ key. HELLO fields: device, role (`tx`/`rx`), health, network, receiver, profile,
 queue count in decimal, ephemeral boot ID (8 hex digits). Health is `ready` or the
 reason storage is unusable: `unmounted` (NVS did not open), `identity` (invalid
 device ID or role), `read`, `corrupt` (size or CRC), `format` (unknown
-magic/version), `role` or `device` (the snapshot belongs to another role or device,
+magic/version), `role` or `device` (the stored state belongs to another role or device,
 for example after uploading the wrong image), `invalid` (semantic validation) or
 `write` (a failed or ambiguous write since boot). A boot ID is diagnostic, not an
 authentication token or GCM nonce. INFO returns enrollment state (prepared=1,
@@ -121,11 +134,12 @@ administrative persistence probe, not a radio-send operation. While storage is
 unhealthy, well-formed commands other than HELLO and REBOOT return `STORAGE`; REBOOT
 stays available because restarting remounts the store. INFO, ACTIVATE, REVOKE and
 RESERVE return `NOT_FOUND` for an unknown node/generation pair. RESERVE returns
-`INVALID` on a receiver and `CONFLICT` for a prepared or revoked generation.
+`INVALID` on a receiver and `CONFLICT` for a prepared or revoked generation. RESET
+returns `QUEUED` while a receiver holds samples, unless `discard` is given.
 
-Profile `0001` is the initial direct-LoRa profile identifier; radio integration and
-its field/regulatory validation remain pending. No over-the-air enrollment, remote
-administration authentication, network migration or reset command is provided.
+Profile `0001` is the initial direct-LoRa profile identifier; its field and regulatory
+validation remain pending. Radio pairing is the over-the-air alternative to USB
+enrollment. There is no remote administration: every CJ1 command needs USB access.
 
 ## Receiver uplink settings
 
@@ -134,10 +148,10 @@ are stored. The [setup page](radio-applications.md#receiver-setup-page) configur
 without a computer. Over USB, the tool switches the receiver to admin mode and back:
 
 ```sh
-python3 tools/provision.py uplink --receiver /dev/cu.RECEIVER \
+uv run tools/provision.py uplink --receiver <rx-port> \
   --ssid "network name" --host 192.168.1.20 --port 1883 \
   --username receiver-1 --mqtt-password-file path/to/broker-password
-python3 tools/provision.py uplink-status --receiver /dev/cu.RECEIVER
+uv run tools/provision.py uplink-status --receiver <rx-port>
 ```
 
 Omitting `--wifi-password-file` or `--mqtt-password-file` prompts without echo. Files
@@ -152,7 +166,7 @@ CJ1 commands, receiver only: `UPLINKSET <device> <field> <hex>` stages one field
 (`ssid`, `wifipass`, `host`, `port`, `user`, `pass`) as lower-case hex of its bytes, so
 spaces and non-ASCII characters survive the space-delimited protocol. `UPLINKSAVE
 <device>` validates the complete set and writes it atomically to the `uplink` key of
-the `cajui` NVS partition, separate from the protocol snapshot; staging is wiped on
+the `cajui` NVS partition, separate from the protocol records; staging is wiped on
 success. `UPLINKINFO <device>` returns `0` when nothing is stored or `1 <host> <port>
 <user>`. Stored secrets, including Wi-Fi and broker passwords, are not encrypted at
 rest, like enrollment keys. Anyone with USB access can replace them.

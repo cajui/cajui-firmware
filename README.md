@@ -16,9 +16,11 @@ released.
 
 - Bounded DATA/ACK frames with up to eight sensor metrics and AES-128-GCM.
 - Per-device credentials, replay/duplicate handling and bounded sender attempts.
-- Versioned snapshot storage with an ESP32 NVS adapter, durable counter reservation,
-  a 128-frame receiver queue and atomic queue/receipt updates before ACK.
-- Two-phase USB enrollment, resumable setup, key rotation and revocation.
+- Versioned per-record storage with an ESP32 NVS adapter, durable counter reservation,
+  a 128-frame receiver queue committed before ACK in two small writes per sample,
+  reusable enrollment slots and migration from the earlier single-snapshot layout.
+- Two-phase USB enrollment, resumable setup, key rotation, revocation and leaving a
+  network (retired keys can never return).
 - A local Python tool with private recovery files and a software-restart check.
 - A nonblocking send controller with injected radio, clock and jitter, bounded
   channel waits, ACK deadlines and cancellation.
@@ -41,9 +43,11 @@ contracts and link here.
 - Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
   use USB for development. Without uplink settings, or while the broker is unreachable,
   the receiver stops accepting new samples once its 128-frame durable queue is full.
-- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range while
-  it is open can change the uplink settings or revoke transmitters. A per-device password
-  on a label/QR is planned.
+- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who
+  joins it while it is open (at most 30 minutes, after a button press) can change the
+  uplink settings, pair or revoke transmitters. The page itself refuses other origins,
+  other hosts and the home-network interface, and never reveals or re-sends a stored
+  password. A per-device password on a label/QR is planned.
 - **Radio pairing is not authenticated against an active attacker** in radio range during
   the two-minute window; a per-device label code is planned. Signal strength is shown,
   not enforced.
@@ -88,9 +92,9 @@ For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
-Coverage gates apply to the host implementation files listed in
-`scripts/check_protocol.py` (codec, crypto, delivery, runtime, storage, snapshot, application,
-command handler, uplink and setup): at least 95% line and 85% branch coverage. The Python client needs 95%
+The coverage gate applies to each host implementation file listed in
+`scripts/check_protocol.py` on its own: at least 95% line and 85% branch coverage, with one
+documented exception for OpenSSL failure branches in `crypto.cpp`. The Python client needs 95%
 line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
 
@@ -109,11 +113,13 @@ ESP32-S3; the protocol core does not depend on a radio driver.
 lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
 lib/CajuiApplication/src/ Receiver loop and measurement normalization
 lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
-lib/CajuiStorage/src/     Persistent state machine and NVS adapter
+lib/CajuiStorage/src/     Persistent records, v1 migration and NVS adapter
 lib/CajuiProvisioning/src/ Bounded USB command handler
+lib/CajuiPairing/src/     Radio pairing frames and state machines
 lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
-lib/CajuiSetup/src/       Setup page rendering, field validation and button handling
-src/                     ESP32 administration and experimental radio applications
+lib/CajuiSetup/src/       Setup page rendering, session checks and field validation
+lib/CajuiDevice/src/      Boot-mode and fault-retry decisions of the radio images
+src/                     Transmitter and receiver applications and board adapters
 tools/                   Local USB enrollment client
 scripts/                 Native build configuration and test runner
 test/test_protocol/      Unity tests and fault-injection storage doubles

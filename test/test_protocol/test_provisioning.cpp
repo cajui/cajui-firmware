@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <unity.h>
 #include <string>
 #include "storage_support.h"
@@ -16,7 +17,7 @@ void command(Provisioning& admin, const char* input, const char* expected, UNITY
 const char* prepare = "CJ1 PREPARE 0000000000000002 000000000000002a 0000000000000001 "
                       "0000000000000002 000000000000000a 01010101010101010101010101010101 0001";
 void test_usb_enrollment_resumes_without_resetting_counter() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     Provisioning admin(*store);
     COMMAND(
@@ -42,7 +43,7 @@ void test_usb_enrollment_resumes_without_resetting_counter() {
     TEST_ASSERT_TRUE(rebooted.restartRequested());
 }
 void test_usb_parser_rejects_untrusted_input_without_echo() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     Provisioning admin(*store);
     const char* invalid[] = {"",
@@ -78,7 +79,7 @@ void test_usb_parser_rejects_untrusted_input_without_echo() {
     TEST_ASSERT_EQUAL_UINT32(0, blob.writes);
 }
 void test_usb_revocation_storage_errors_and_no_secret_readback() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     Provisioning admin(*store);
     COMMAND(admin, "CJ1 INFO 0000000000000002 0000000000000002 000000000000000a",
@@ -98,7 +99,7 @@ void test_usb_revocation_storage_errors_and_no_secret_readback() {
     TEST_ASSERT_NULL(std::strstr(out, "0101010101"));
 }
 void test_usb_reboot_remains_available_after_storage_failure() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     TEST_ASSERT_TRUE(enroll(*store));
     Provisioning admin(*store);
@@ -116,7 +117,7 @@ void test_usb_reboot_remains_available_after_storage_failure() {
     TEST_ASSERT_TRUE(store->healthy());
 }
 void test_usb_unknown_enrollment_is_not_found() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     Provisioning admin(*store);
     COMMAND(admin, "CJ1 ACTIVATE 0000000000000002 0000000000000002 000000000000000a",
@@ -130,7 +131,7 @@ void test_usb_unknown_enrollment_is_not_found() {
 }
 void test_usb_reserve_reports_why_it_was_refused() {
     const char* reserve = "CJ1 RESERVE 0000000000000002 0000000000000002 000000000000000a";
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     Provisioning admin(*store);
     COMMAND(admin, reserve, "CJ1 ERR NOT_FOUND");
@@ -140,7 +141,7 @@ void test_usb_reserve_reports_why_it_was_refused() {
             "CJ1 OK ACTIVATE");
     blob.failBefore = true;
     COMMAND(admin, reserve, "CJ1 ERR STORAGE");
-    MemoryBlob rxBlob;
+    MemoryRecords rxBlob;
     auto rx = mounted(rxBlob, Role::Receiver);
     TEST_ASSERT_TRUE(enroll(*rx));
     Provisioning receiver(*rx);
@@ -157,11 +158,11 @@ std::string health(PersistentStore& store) {
     return reply.substr(start, reply.find(' ', start) - start);
 }
 void test_usb_hello_reports_why_storage_is_unavailable() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = mounted(blob);
     TEST_ASSERT_TRUE(enroll(*store));
     TEST_ASSERT_EQUAL_STRING("ready", health(*store).c_str());
-    const auto good = blob.bytes;
+    const auto good = blob.bytes("registry");
     std::unique_ptr<PersistentStore> other(new PersistentStore(blob, Role::Transmitter, 2));
     TEST_ASSERT_EQUAL_STRING("unmounted", health(*other).c_str());
     other.reset(new PersistentStore(blob, Role::Transmitter, 0));
@@ -172,20 +173,20 @@ void test_usb_hello_reports_why_storage_is_unavailable() {
     TEST_ASSERT_EQUAL_STRING("device", health(*other).c_str());
     other = mounted(blob, Role::Receiver);
     TEST_ASSERT_EQUAL_STRING("role", health(*other).c_str());
-    blob.bytes[4] = 2;
-    repairChecksum(blob);
+    blob.bytes("registry")[1] = 2; // Record version.
+    repairChecksum(blob.bytes("registry"));
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("format", health(*other).c_str());
-    blob.bytes = good;
-    blob.bytes[41] = 0;
-    repairChecksum(blob);
+    blob.bytes("registry") = good;
+    blob.bytes("registry")[39] = 0; // Entry state.
+    repairChecksum(blob.bytes("registry"));
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("invalid", health(*other).c_str());
-    blob.bytes = good;
-    blob.bytes[20] ^= 1;
+    blob.bytes("registry") = good;
+    blob.bytes("registry")[20] ^= 1;
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("corrupt", health(*other).c_str());
-    blob.bytes = good;
+    blob.bytes("registry") = good;
     blob.failRead = true;
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("read", health(*other).c_str());
@@ -198,7 +199,8 @@ void test_usb_hello_reports_why_storage_is_unavailable() {
 }
 }
 void test_operation_console_allows_only_queries_and_admin_restart() {
-    MemoryBlob blob, settings;
+    MemoryRecords blob;
+    MemoryBlob settings;
     auto store = mounted(blob, Role::Receiver);
     TEST_ASSERT_TRUE(enroll(*store));
     Provisioning run(*store, 7, &settings, ConsoleMode::Operation);
@@ -240,13 +242,33 @@ void test_operation_console_allows_only_queries_and_admin_restart() {
     Provisioning receiverPair(*store, 1, nullptr, ConsoleMode::Operation);
     COMMAND(receiverPair, "CJ1 PAIR 0000000000000001", "CJ1 ERR INVALID"); // Receivers host.
     TEST_ASSERT_FALSE(receiverPair.restartRequested());
-    MemoryBlob txBlob;
+    MemoryRecords txBlob;
     auto transmitter = mounted(txBlob);
     Provisioning pair(*transmitter, 1, nullptr, ConsoleMode::Operation);
     COMMAND(pair, "CJ1 PAIR 0000000000000002", "CJ1 OK PAIR");
     TEST_ASSERT_TRUE(pair.restartRequested());
     TEST_ASSERT_TRUE(pair.pairRequested());
     TEST_ASSERT_FALSE(pair.adminRequested());
+}
+void test_usb_reset_leaves_the_network_only_in_admin_mode() {
+    MemoryRecords blob;
+    auto store = mounted(blob, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    Frame ack{};
+    EXPECT_RESULT(Result::Ok, receive(binding(), data(1), *store, ack));
+    Provisioning run(*store, 1, nullptr, ConsoleMode::Operation);
+    COMMAND(run, "CJ1 RESET 0000000000000001", "CJ1 ERR ADMIN");
+    Provisioning admin(*store);
+    COMMAND(admin, "CJ1 RESET 0000000000000001", "CJ1 ERR QUEUED");
+    COMMAND(admin, "CJ1 RESET 0000000000000001 all", "CJ1 ERR INVALID");
+    COMMAND(admin, "CJ1 RESET 0000000000000002 discard", "CJ1 ERR INVALID");
+    COMMAND(admin, "CJ1 RESET 0000000000000001 discard", "CJ1 OK RESET");
+    COMMAND(admin, "CJ1 HELLO",
+            "CJ1 OK HELLO 0000000000000001 rx ready 0000000000000000 0000000000000000 0000 0 "
+            "00000001 admin");
+    COMMAND(admin, "CJ1 RESET 0000000000000001", "CJ1 OK RESET"); // Idempotent.
+    blob.failBefore = true;
+    COMMAND(admin, "CJ1 RESET 0000000000000001", "CJ1 ERR STORAGE");
 }
 void runProvisioningTests() {
     UnitySetTestFile(__FILE__); // UNITY_BEGIN runs in test_main.cpp.
@@ -258,4 +280,5 @@ void runProvisioningTests() {
     RUN_TEST(test_usb_reserve_reports_why_it_was_refused);
     RUN_TEST(test_usb_hello_reports_why_storage_is_unavailable);
     RUN_TEST(test_operation_console_allows_only_queries_and_admin_restart);
+    RUN_TEST(test_usb_reset_leaves_the_network_only_in_admin_mode);
 }

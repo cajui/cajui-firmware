@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <unity.h>
 #include "cajui_runtime.h"
 #include "storage_support.h"
@@ -206,7 +207,7 @@ void test_runtime_retries_identical_frames_then_exhausts() {
 }
 void test_runtime_lost_ack_replays_without_duplicate_commit() {
     Rig r;
-    fixtures::MemoryBlob blob;
+    fixtures::MemoryRecords blob;
     auto store = fixtures::mounted(blob, Role::Receiver);
     TEST_ASSERT_TRUE(fixtures::enroll(*store));
     r.start();
@@ -226,7 +227,7 @@ void test_runtime_lost_ack_replays_without_duplicate_commit() {
 }
 void test_runtime_storage_failures_never_produce_transmission_or_ack() {
     Rig r;
-    fixtures::MemoryBlob blob;
+    fixtures::MemoryRecords blob;
     auto tx = fixtures::mounted(blob);
     TEST_ASSERT_TRUE(fixtures::enroll(*tx));
     blob.failAfter = true;
@@ -245,7 +246,7 @@ void test_runtime_storage_failures_never_produce_transmission_or_ack() {
     Message decoded{};
     TEST_ASSERT_EQUAL_INT(int(Result::Ok), int(open(binding(), r.radio.sent[0], decoded)));
     TEST_ASSERT_EQUAL_UINT64(2, decoded.counter); // Ambiguous reservation was consumed.
-    fixtures::MemoryBlob rxBlob;
+    fixtures::MemoryRecords rxBlob;
     auto rx = fixtures::mounted(rxBlob, Role::Receiver);
     TEST_ASSERT_TRUE(fixtures::enroll(*rx));
     rxBlob.failBefore = true;

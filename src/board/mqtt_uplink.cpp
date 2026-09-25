@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "mqtt_uplink.h"
 #include <WiFi.h>
@@ -7,8 +8,15 @@
 namespace board {
 namespace {
 constexpr UBaseType_t AckDepth = 8; // Overflow only delays removal until the retry timeout.
-constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 10000;
+// The client's own lock can be held for a network operation up to this timeout, and the
+// radio loop enqueues under that lock: keep it well below the 5-second task watchdog.
+constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 2500;
 constexpr int QoS = 1, Retain = 0;
+}
+bool MqttUplink::prepare() {
+    if (!mutex_) mutex_ = xSemaphoreCreateMutex();
+    if (!acks_) acks_ = xQueueCreate(AckDepth, sizeof(int));
+    return mutex_ && acks_;
 }
 bool MqttUplink::begin(const cajui::UplinkConfig& config, uint64_t device) {
     if (!cajui::validUplink(config)) return false;
@@ -33,9 +41,14 @@ void MqttUplink::stopMqtt() {
     if (acks_) xQueueReset(acks_);
 }
 bool MqttUplink::startMqtt(const cajui::UplinkConfig& config, uint64_t device) {
-    if (!cajui::validUplink(config)) return false;
-    if (!acks_) acks_ = xQueueCreate(AckDepth, sizeof(int));
-    if (!acks_) return false;
+    if (!cajui::validUplink(config) || !prepare()) return false;
+    // Stopping a client can wait for its network task; only this task waits here.
+    xSemaphoreTake(mutex_, portMAX_DELAY);
+    const bool started = restart(config, device);
+    xSemaphoreGive(mutex_);
+    return started;
+}
+bool MqttUplink::restart(const cajui::UplinkConfig& config, uint64_t device) {
     stopMqtt();
     char clientId[sizeof("cajui-rx-") + 16]{};
     std::snprintf(clientId, sizeof(clientId), "cajui-rx-%016" PRIx64, device);
@@ -72,13 +85,21 @@ void MqttUplink::onEvent(void* self, esp_event_base_t, int32_t event, void* data
     }
 }
 int MqttUplink::publish(const char* topic, const char* payload, size_t size) {
-    // Enqueue instead of publish: the MQTT task performs network I/O, so the radio loop
-    // never blocks on a slow broker. The outbox copies the payload.
-    return client_ ? esp_mqtt_client_enqueue(client_, topic, payload, int(size), QoS, Retain, true)
-                   : -1;
+    // Enqueue instead of publish: the MQTT task performs network I/O. The loop can still
+    // wait for the client's lock, at most the network timeout. The outbox copies the payload. While
+    // the client is being replaced the publication is refused and retried later.
+    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return -1;
+    const int id =
+        client_ ? esp_mqtt_client_enqueue(client_, topic, payload, int(size), QoS, Retain, true)
+                : -1;
+    xSemaphoreGive(mutex_);
+    return id;
 }
 bool MqttUplink::acknowledged(int& id) {
-    return acks_ && xQueueReceive(acks_, &id, 0) == pdTRUE;
+    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return false;
+    const bool popped = acks_ && xQueueReceive(acks_, &id, 0) == pdTRUE;
+    xSemaphoreGive(mutex_);
+    return popped;
 }
 bool MqttUplink::wifiConnected() {
     return WiFi.status() == WL_CONNECTED;

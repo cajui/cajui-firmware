@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifdef CAJUI_RUNTIME_ROLE
 #include "admin_console.h"
 #include <Arduino.h>
@@ -36,6 +37,7 @@ bool Console::poll() {
     }
     return false;
 }
+using cajui::BootRequest;
 BootRequest takeBootRequest() {
     const BootRequest request = bootRequest == AdminMagic  ? BootRequest::Admin
                                 : bootRequest == PairMagic ? BootRequest::Pair

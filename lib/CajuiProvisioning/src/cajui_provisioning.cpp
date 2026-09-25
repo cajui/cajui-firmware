@@ -1,34 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_provisioning.h"
 #include <cstdio>
 #include <cstring>
 namespace cajui {
 namespace {
 // Word counts include "CJ1", the command and the device ID.
-constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWords = 9,
-                 UplinkSetWords = 5;
+constexpr size_t MaxWords = 10, RebootWords = 3, ResetWords = 4, EnrollmentWords = 5,
+                 PrepareWords = 9, UplinkSetWords = 5;
 constexpr size_t IdDigits = 16, ProfileDigits = 4;
 constexpr char FirstPrintable = ' ', LastPrintable = '~';
+int nibble(char c) {
+    constexpr int Ten = 10;
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + Ten : -1;
+}
 bool hex(const char* text, size_t length, uint64_t& result) {
     if (std::strlen(text) != length) return false;
     result = 0;
     for (size_t i = 0; i < length; ++i) {
-        const char c = text[i];
-        const int n = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+        const int n = nibble(text[i]);
         if (n < 0) return false;
         result = (result << 4) | unsigned(n);
     }
     return true;
 }
-bool parseKey(const char* text, Key& key) {
-    if (std::strlen(text) != key.size() * 2) return false;
-    for (size_t i = 0; i < key.size(); ++i) {
-        char byte[3] = {text[i * 2], text[i * 2 + 1], 0};
-        uint64_t value = 0;
-        if (!hex(byte, 2, value)) return false;
-        key[i] = uint8_t(value);
-    }
+// Decodes two hex digits straight into the destination: no temporary copy of a secret.
+bool hexByte(const char* text, uint8_t& output) {
+    const int high = nibble(text[0]);
+    const int low = high < 0 ? -1 : nibble(text[1]);
+    if (low < 0) return false;
+    output = uint8_t((high << 4) | low);
     return true;
 }
+bool parseKey(const char* text, Key& key) {
+    if (std::strlen(text) != key.size() * 2) return false;
+    for (size_t i = 0; i < key.size(); ++i)
+        if (!hexByte(text + i * 2, key[i])) return false;
+    return true;
+}
+// Clears a stack buffer when it goes out of scope; volatile so the stores are not elided.
+// PREPARE and UPLINKSET lines carry keys and passwords.
+class Scrub {
+public:
+    Scrub(void* data, size_t size) : data_(static_cast<volatile uint8_t*>(data)), size_(size) {}
+    Scrub(const Scrub&) = delete;
+    Scrub& operator=(const Scrub&) = delete;
+    ~Scrub() {
+        for (size_t i = 0; i < size_; ++i) data_[i] = 0;
+    }
+
+private:
+    volatile uint8_t* data_;
+    size_t size_;
+};
 // Reads command arguments in their documented order.
 class Fields {
 public:
@@ -108,6 +131,7 @@ Result prepare(PersistentStore& store, Fields& fields) {
     uint64_t generation = 0;
     uint16_t profile = 0;
     Key key{};
+    const Scrub scrub(key.data(), key.size());
     if (!fields.id(network) || !fields.id(receiver) || !fields.id(node) || !fields.id(generation) ||
         !fields.key(key) || !fields.profile(profile))
         return Result::Invalid;
@@ -147,9 +171,8 @@ bool hexText(const char* text, char* output, size_t capacity) {
     const size_t length = std::strlen(text);
     if (!length || length % 2 || length / 2 > capacity) return false;
     for (size_t i = 0; i < length / 2; ++i) {
-        const char byte[3] = {text[i * 2], text[i * 2 + 1], 0};
-        uint64_t value = 0;
-        if (!hex(byte, 2, value) || !value) return false;
+        uint8_t value = 0;
+        if (!hexByte(text + i * 2, value) || !value) return false;
         output[i] = char(value);
     }
     output[length / 2] = 0;
@@ -170,17 +193,10 @@ bool setField(UplinkConfig& pending, const char* field, const char* value) {
         if (!std::strcmp(field, target.name)) return hexText(value, target.output, target.capacity);
     if (std::strcmp(field, "port") != 0) return false;
     constexpr size_t PortDigits = 5;
-    constexpr unsigned long MaxPort = 65535;
-    constexpr unsigned long Decimal = 10;
     char digits[PortDigits + 1]{};
-    if (!hexText(value, digits, PortDigits)) return false;
-    unsigned long port = 0;
-    for (const char* c = digits; *c; ++c) {
-        if (*c < '0' || *c > '9') return false;
-        port = port * Decimal + unsigned(*c - '0');
-    }
-    if (!port || port > MaxPort) return false;
-    pending.port = uint16_t(port);
+    uint16_t port = 0;
+    if (!hexText(value, digits, PortDigits) || !parsePort(digits, port)) return false;
+    pending.port = port;
     return true;
 }
 }
@@ -223,6 +239,7 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     for (size_t i = 0; i < length; ++i)
         if (input[i] < FirstPrintable || input[i] > LastPrintable) return true;
     char buffer[CommandCapacity]{};
+    const Scrub scrub(buffer, sizeof(buffer));
     std::memcpy(buffer, input, length);
     char* words[MaxWords]{};
     const size_t count = tokenize(buffer, words);
@@ -267,6 +284,16 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     }
     if (!std::strcmp(command, "PREPARE") && count == PrepareWords) {
         respond(prepare(store_, fields), command, reply, capacity);
+        return true;
+    }
+    // Leaves the network. Queued samples are discarded only when asked explicitly.
+    if (!std::strcmp(command, "RESET") &&
+        (count == RebootWords || (count == ResetWords && !std::strcmp(words[3], "discard")))) {
+        const Result result = store_.reset(count == ResetWords);
+        if (result == Result::Conflict)
+            std::snprintf(reply, capacity, "CJ1 ERR QUEUED");
+        else
+            respond(result, command, reply, capacity);
         return true;
     }
     uint64_t node = 0;

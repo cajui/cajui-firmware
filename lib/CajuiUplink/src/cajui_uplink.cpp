@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_uplink.h"
+#include "cajui_crc32.h"
+#include "cajui_text.h"
 #include <cinttypes>
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
@@ -8,17 +10,8 @@ namespace cajui {
 namespace {
 constexpr uint8_t UplinkMagic[4] = {'C', 'J', 'U', 'P'};
 constexpr uint8_t UplinkVersion = 1;
-constexpr uint32_t Crc32Polynomial = 0xedb88320u; // Reflected IEEE 802.3, as in snapshots.
-constexpr uint32_t MaxExpectedInterval = 604800;  // Central accepts 1 second to 7 days.
+constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 7 days.
 constexpr int32_t MilliPerUnit = 1000;
-uint32_t checksum(const uint8_t* data, size_t length) {
-    uint32_t crc = UINT32_MAX;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (Crc32Polynomial & (0u - (crc & 1u)));
-    }
-    return ~crc;
-}
 bool alnum(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
@@ -26,13 +19,6 @@ size_t bounded(const char* text, size_t capacity) {
     size_t length = 0;
     while (length <= capacity && text[length]) ++length;
     return length;
-}
-bool validHost(const char* host) {
-    const size_t length = bounded(host, HostCapacity);
-    if (!length || length > HostCapacity) return false;
-    for (size_t i = 0; i < length; ++i)
-        if (!alnum(host[i]) && host[i] != '.' && host[i] != '-') return false;
-    return true;
 }
 bool validSecret(const char* text, size_t minimum, size_t capacity) {
     const size_t length = bounded(text, capacity);
@@ -60,49 +46,26 @@ const char* statusName(Status status) {
     }
     return nullptr;
 }
-// Appends formatted text; any truncation makes the whole document invalid.
-class Text {
-public:
-    Text(char* output, size_t capacity) : output_(output), capacity_(capacity) {}
-    // NOLINTNEXTLINE(cert-dcl50-cpp): bounded printf-style helper over vsnprintf.
-    void add(const char* format, ...) __attribute__((format(printf, 2, 3))) {
-        if (!ok_) return;
-        va_list arguments;
-        va_start(arguments, format);
-        const int written = std::vsnprintf(output_ + used_, capacity_ - used_, format, arguments);
-        va_end(arguments);
-        if (written < 0 || size_t(written) >= capacity_ - used_)
-            ok_ = false;
-        else
-            used_ += size_t(written);
-    }
-    bool ok() const { return ok_; }
-    size_t size() const { return used_; }
-
-private:
-    char* output_;
-    size_t capacity_, used_ = 0;
-    bool ok_ = true;
-};
+using Text = TextBuffer;
 void addReading(Text& text, const Reading& reading) {
-    text.add("{\"sensor_id\":\"sensor-%u\",", unsigned(reading.sensor));
+    text.format("{\"sensor_id\":\"sensor-%u\",", unsigned(reading.sensor));
     const char* metric = metricName(reading.metric);
     if (metric)
-        text.add("\"metric\":\"%s\",", metric);
+        text.format("\"metric\":\"%s\",", metric);
     else
-        text.add("\"metric\":\"metric-%u\",", unsigned(reading.metric));
+        text.format("\"metric\":\"metric-%u\",", unsigned(reading.metric));
     if (reading.status == Status::Ok) {
         const int64_t value = reading.milliValue;
         const uint64_t magnitude = value < 0 ? uint64_t(-value) : uint64_t(value);
-        text.add("\"value\":%s%" PRIu64 ".%03" PRIu64 ",", value < 0 ? "-" : "",
-                 magnitude / MilliPerUnit, magnitude % MilliPerUnit);
+        text.format("\"value\":%s%" PRIu64 ".%03" PRIu64 ",", value < 0 ? "-" : "",
+                    magnitude / MilliPerUnit, magnitude % MilliPerUnit);
     }
     const char* unit = unitName(reading.unit);
     if (unit)
-        text.add("\"unit\":\"%s\",", unit);
+        text.format("\"unit\":\"%s\",", unit);
     else
-        text.add("\"unit\":\"unit-%u\",", unsigned(reading.unit));
-    text.add("\"status\":\"%s\"}", statusName(reading.status));
+        text.format("\"unit\":\"unit-%u\",", unsigned(reading.unit));
+    text.format("\"status\":\"%s\"}", statusName(reading.status));
 }
 struct Writer {
     uint8_t* p;
@@ -128,6 +91,28 @@ struct Reader {
 };
 } // namespace
 
+bool validHost(const char* host) {
+    const size_t length = host ? bounded(host, HostCapacity) : 0;
+    if (!length || length > HostCapacity) return false;
+    for (size_t i = 0; i < length; ++i)
+        if (!alnum(host[i]) && host[i] != '.' && host[i] != '-') return false;
+    return true;
+}
+bool parsePort(const char* text, uint16_t& port) {
+    constexpr size_t Digits = 5;
+    constexpr unsigned long Maximum = 65535;
+    constexpr unsigned long Decimal = 10;
+    port = 0;
+    if (!text || !*text || bounded(text, Digits) > Digits) return false;
+    unsigned long value = 0;
+    for (const char* c = text; *c; ++c) {
+        if (*c < '0' || *c > '9') return false;
+        value = value * Decimal + unsigned(*c - '0');
+    }
+    if (!value || value > Maximum) return false;
+    port = uint16_t(value);
+    return true;
+}
 bool validIdentity(const char* text) {
     const size_t length = bounded(text, UsernameCapacity);
     if (!length || length > UsernameCapacity || !alnum(text[0])) return false;
@@ -159,7 +144,7 @@ bool saveUplink(AtomicBlob& blob, const UplinkConfig& c) {
     *w.p++ = uint8_t(c.port >> 8);
     *w.p++ = uint8_t(c.port);
     const size_t payload = size_t(w.p - bytes);
-    const uint32_t crc = checksum(bytes, payload);
+    const uint32_t crc = crc32(bytes, payload);
     for (int i = 3; i >= 0; --i) *w.p++ = uint8_t(crc >> (i * 8));
     const bool saved = blob.replace(bytes, payload + 4);
     volatile uint8_t* clear = bytes;
@@ -178,7 +163,7 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
         for (size_t i = 0; i < 4; ++i) stored = (stored << 8) | bytes[size - 4 + i];
         Reader r{bytes + sizeof(UplinkMagic) + 1, bytes + size - 4};
         if (std::memcmp(bytes, UplinkMagic, sizeof(UplinkMagic)) == 0 &&
-            bytes[sizeof(UplinkMagic)] == UplinkVersion && stored == checksum(bytes, size - 4) &&
+            bytes[sizeof(UplinkMagic)] == UplinkVersion && stored == crc32(bytes, size - 4) &&
             r.text(c.ssid, SsidCapacity) && r.text(c.wifiPassword, WifiPasswordCapacity) &&
             r.text(c.host, HostCapacity) && r.text(c.username, UsernameCapacity) &&
             r.text(c.password, MqttPasswordCapacity) && r.end - r.p == 2) {
@@ -195,7 +180,7 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
 bool formatTopic(const char* source, uint64_t device, char* output, size_t capacity) {
     if (!source || !validIdentity(source) || !output || !capacity) return false;
     Text text(output, capacity);
-    text.add("telemetry/v1/%s/%016" PRIx64 "/samples", source, device);
+    text.format("telemetry/v1/%s/%016" PRIx64 "/samples", source, device);
     return text.ok();
 }
 bool formatSample(const char* source, const QueuedSample& sample, char* output, size_t capacity,
@@ -210,15 +195,15 @@ bool formatSample(const char* source, const QueuedSample& sample, char* output, 
     const uint32_t interval =
         data.nextSeconds > MaxExpectedInterval ? MaxExpectedInterval : data.nextSeconds;
     Text text(output, capacity);
-    text.add("{\"version\":1,\"source_id\":\"%s\",\"device_id\":\"%016" PRIx64
-             "\",\"sample_id\":\"%016" PRIx64 ".%" PRIu64
-             "\",\"expected_interval_seconds\":%" PRIu32 ",\"readings\":[",
-             source, sample.node, sample.generation, sample.counter, interval);
+    text.format("{\"version\":1,\"source_id\":\"%s\",\"device_id\":\"%016" PRIx64
+                "\",\"sample_id\":\"%016" PRIx64 ".%" PRIu64
+                "\",\"expected_interval_seconds\":%" PRIu32 ",\"readings\":[",
+                source, sample.node, sample.generation, sample.counter, interval);
     for (size_t i = 0; i < data.count; ++i) {
-        if (i) text.add(",");
+        if (i) text.format(",");
         addReading(text, data.readings[i]);
     }
-    text.add("]}");
+    text.format("]}");
     if (!text.ok()) return false;
     size = text.size();
     return true;
@@ -231,11 +216,15 @@ Forwarder::Forwarder(Publisher& publisher, Clock& clock, PersistentStore& store,
     else
         state_ = ForwardState::Failed;
 }
+void Forwarder::pause() {
+    if (state_ == ForwardState::Waiting) state_ = ForwardState::Idle;
+    paused_ = true;
+}
 bool Forwarder::setSource(const char* source) {
     if (!source || !validIdentity(source)) return false;
     std::memcpy(source_, source, std::strlen(source) + 1);
     if (state_ == ForwardState::Waiting) state_ = ForwardState::Idle;
-    delayed_ = false;
+    delayed_ = paused_ = false;
     return true;
 }
 void Forwarder::retryLater(uint32_t now) {
@@ -243,7 +232,7 @@ void Forwarder::retryLater(uint32_t now) {
     retryAt_ = now + RetryDelayMs;
 }
 void Forwarder::poll(bool quiet) {
-    if (state_ == ForwardState::Failed || !quiet) return;
+    if (state_ == ForwardState::Failed || !quiet || paused_) return;
     const uint32_t now = clock_.nowMs();
     if (state_ == ForwardState::Waiting) {
         int id = 0;

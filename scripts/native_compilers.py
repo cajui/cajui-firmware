@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Apply compiler overrides after the native platform loads its GCC tool defaults."""
 
 import os

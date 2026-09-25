@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_application.h"
 #include <cmath>
 
 namespace cajui {
 namespace {
 constexpr uint32_t AckTransmitTimeoutMs = 3000;
-constexpr uint8_t PairingFirstType = 3, PairingLastType = 6; // docs/radio-pairing.md
 constexpr float MinTemperature = -40, MaxTemperature = 80, MaxHumidity = 100;
 constexpr float MilliScale = 1000;
 Reading measurement(uint16_t metric, float value, float minimum, float maximum) {
@@ -28,6 +28,26 @@ Data climateSample(float temperature, float humidity, uint32_t nextSeconds) {
     data.readings[1] = measurement(2, humidity, 0, MaxHumidity);
     return data;
 }
+bool DuplicateAckLimiter::allow(uint64_t node, uint32_t now) {
+    Slot* slot = nullptr;
+    for (auto& candidate : slots_)
+        if (candidate.node == node) slot = &candidate;
+    if (!slot) { // Reuse a free or expired slot; with none, the node is not acknowledged.
+        for (auto& candidate : slots_)
+            if (!candidate.node || uint32_t(now - candidate.since) >= WindowMs) slot = &candidate;
+        if (!slot) return false;
+        *slot = Slot{};
+        slot->node = node;
+        slot->since = now;
+    }
+    if (uint32_t(now - slot->since) >= WindowMs) {
+        slot->since = now;
+        slot->count = 0;
+    }
+    if (slot->count >= PerWindow) return false;
+    ++slot->count;
+    return true;
+}
 bool ReceiverController::start() {
     if (state_ != ReceiverState::Stopped) return false;
     // A receiver without any binding may start: radio pairing creates the first one.
@@ -46,12 +66,14 @@ void ReceiverController::poll() {
     if (state_ == ReceiverState::Acknowledging) {
         uint32_t completed = 0;
         const auto status = radio_.transmitStatus(completed);
-        if (uint32_t(clock_.nowMs() - startedAt_) >= AckTransmitTimeoutMs ||
-            status == TransmitStatus::Error) {
-            fail();
-        } else if (status == TransmitStatus::Complete) {
+        // Completion wins over the watchdog: a poll that arrives late (the loop was busy)
+        // after a successful transmission is not a radio fault.
+        if (status == TransmitStatus::Complete) {
             // Adapter already rearmed RX at TX-done; do not clear a queued next packet.
             state_ = ReceiverState::Listening;
+        } else if (status == TransmitStatus::Error ||
+                   uint32_t(clock_.nowMs() - startedAt_) >= AckTransmitTimeoutMs) {
+            fail();
         }
         return;
     }
@@ -64,7 +86,7 @@ void ReceiverController::poll() {
     }
     if (status == ReceiveStatus::Empty) return;
     const uint8_t type = untrustedType(frame);
-    if (type >= PairingFirstType && type <= PairingLastType) {
+    if (type >= FirstPairingType && type <= LastPairingType) {
         if (!pairing_ || !pairing_->handle(frame, radio_.lastRssi(), ack_)) return;
         startedAt_ = clock_.nowMs();
         if (!radio_.startTransmit(ack_)) {
@@ -74,18 +96,22 @@ void ReceiverController::poll() {
         state_ = ReceiverState::Acknowledging;
         return;
     }
-    Binding binding{};
+    // A re-paired node has two active bindings until it uses the new one; the frame
+    // authenticates under at most one of them.
+    Binding bindings[2]{};
     const uint64_t node = untrustedDataNode(frame);
-    if (!node || !store_.binding(node, binding)) {
-        result_ = Result::Unauthorized;
-        return;
+    const size_t count = node ? store_.bindings(node, bindings, 2) : 0;
+    result_ = Result::Unauthorized;
+    for (size_t i = 0; i < count; ++i) {
+        result_ = cajui::receive(bindings[i], frame, store_, ack_);
+        if (result_ != Result::CryptoError) break;
     }
-    result_ = cajui::receive(binding, frame, store_, ack_);
     if (result_ == Result::StorageError) {
         fail();
         return;
     }
     if (result_ != Result::Ok && result_ != Result::Duplicate) return;
+    if (result_ == Result::Duplicate && !duplicates_.allow(node, clock_.nowMs())) return;
     startedAt_ = clock_.nowMs();
     if (!radio_.startTransmit(ack_)) {
         fail();

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import contextlib
 import importlib.util
 import io
@@ -31,6 +32,7 @@ class Device:
         self.staged, self.uplink, self.info = {}, {}, None
         # A fresh device boots in admin mode; asleep simulates a transmitter between samples.
         self.mode, self.asleep, self.resets = "admin", False, 0
+        self.queued, self.ignore_reset = 0, False
 
     def reset(self):
         self.resets += 1
@@ -60,7 +62,7 @@ class Device:
                 self.network,
                 self.receiver,
                 self.profile,
-                "0",
+                str(self.queued),
                 f"{self.boot:08x}",
                 self.mode,
             ]
@@ -101,6 +103,12 @@ class Device:
         elif verb == "ADMIN":
             self.boot += int(self.reboots)
             self.mode = "admin"
+        elif verb == "RESET":
+            if self.queued and words[2:] != ["discard"]:
+                raise provision.ProvisioningError("Device rejected request: QUEUED")
+            if not self.ignore_reset:
+                self.network, self.receiver, self.profile = "0" * 16, "0" * 16, "0000"
+                self.enrollment, self.state, self.queued = None, 0, 0
         elif verb == "UPLINKSET":
             self.staged[words[2]] = bytes.fromhex(words[3]).decode("utf-8")
         elif verb == "UPLINKSAVE":
@@ -723,6 +731,27 @@ class UplinkCommandLineTests(unittest.TestCase):
         ):
             code = provision.main()
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_reset_leaves_the_network_and_protects_queued_samples(self):
+        receiver = self.devices["rx-port"]
+        receiver.network, receiver.receiver, receiver.profile = "2a" * 8, receiver.identity, "0001"
+        receiver.mode, receiver.queued = "run", 3
+        code, _, error = self.run_cli("reset", "--port", "rx-port")
+        self.assertEqual(1, code)
+        self.assertIn("3 samples are still queued", error)
+        self.assertEqual("2a" * 8, receiver.network)
+        code, output, _ = self.run_cli("reset", "--port", "rx-port", "--discard-queue")
+        self.assertEqual(0, code)
+        self.assertEqual(
+            {"reset": True, "device": receiver.identity, "role": "rx", "discarded": 3},
+            json.loads(output),
+        )
+        self.assertEqual("0" * 16, receiver.network)
+        self.assertEqual("admin", receiver.mode)  # Released: nothing enrolled to run.
+        receiver.network, receiver.ignore_reset = "2a" * 8, True
+        code, _, error = self.run_cli("reset", "--port", "rx-port")
+        self.assertEqual(1, code)
+        self.assertIn("did not leave", error)
 
     def test_pair_starts_on_a_transmitter_only(self):
         self.devices["tx-port"] = Device("tx", "0000000000000002", [])

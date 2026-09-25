@@ -1,30 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "protocol_validation.h"
+#include "cajui_wire.h"
 #include <cstring>
 
 namespace cajui {
 namespace {
-// Header layout; see docs/protocol-v1.md.
-constexpr uint8_t Magic[4] = {'C', 'J', 'L', 'R'};
-constexpr uint8_t ProtocolVersion = 1;
-constexpr size_t VersionAt = 4, TypeAt = 5, NetworkAt = 6, NodeAt = 14, CounterAt = 22,
-                 LengthAt = 30;
+using wire::CounterAt;
+using wire::get;
+using wire::LengthAt;
+using wire::Magic;
+using wire::NetworkAt;
+using wire::NodeAt;
+using wire::put;
+using wire::TypeAt;
+using wire::VersionAt;
+constexpr uint8_t ProtocolVersion = wire::Version;
 // DATA payload offsets, then offsets within each reading.
 constexpr size_t BatteryAt = 0, NextSecondsAt = 2, CountAt = 6;
 constexpr size_t SensorAt = 0, MetricAt = 2, UnitAt = 4, StatusAt = 5, ValueAt = 6;
-void put(uint8_t* out, uint64_t value, size_t size) {
-    for (size_t i = 0; i < size; ++i) out[size - 1 - i] = uint8_t(value >> (i * 8));
-}
-uint64_t get(const uint8_t* in, size_t size) {
-    uint64_t value = 0;
-    for (size_t i = 0; i < size; ++i) value = (value << 8) | in[i];
-    return value;
-}
 void nonceFor(Type type, uint64_t counter, uint8_t nonce[NonceSize]) {
-    nonce[0] = 'C';
-    nonce[1] = 'J';
-    nonce[2] = uint8_t(type);
-    nonce[3] = ProtocolVersion;
-    put(nonce + 4, counter, 8);
+    wire::nonce(uint8_t(type), counter, nonce);
 }
 }
 

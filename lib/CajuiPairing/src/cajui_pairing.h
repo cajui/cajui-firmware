@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "cajui_application.h"
 #include "cajui_storage.h"
@@ -8,6 +9,9 @@ namespace cajui {
 // Radio pairing, docs/radio-pairing.md. Frames reuse the v1 header; `counter` carries
 // the node's random attempt nonce.
 enum class PairingType : uint8_t { Request = 3, Offer = 4, Confirm = 5, Done = 6 };
+static_assert(uint8_t(PairingType::Request) == FirstPairingType &&
+                  uint8_t(PairingType::Done) == LastPairingType,
+              "Pairing types must match the range the receiver routes to pairing");
 constexpr uint16_t PairingProfile = 1;
 
 // Cryptographically secure random bytes (keys, nonces, generations). Unlike Jitter,
@@ -45,16 +49,26 @@ bool verifyTagged(const Frame&, PairingType, uint64_t network, uint64_t node, ui
 
 constexpr size_t MaxCandidates = 4;
 constexpr uint32_t PairingWindowMs = 120000;
+// A node repeats JOIN_CONFIRM at most five times, 1.5 s apart, after a lost JOIN_DONE. The
+// receiver repeats the reply only within this bound, so a recorded confirmation cannot
+// make it transmit later or indefinitely.
+constexpr uint32_t DoneReplayMs = 15000;
+constexpr uint8_t MaxDoneReplies = 5;
+// A node that asked to join during the window. Requests are unauthenticated, so the first
+// key seen for a node ID is pinned: another key or nonce for that ID marks a conflict and
+// the node cannot be added until the operator searches again.
 struct Candidate {
     uint64_t node = 0, nonce = 0;
     X25519Key publicKey{};
     int16_t rssi = 0;
     uint32_t seenAt = 0;
+    bool conflict = false;
 };
 enum class HostState { Closed, Open, Offered, Paired };
 // Receiver side. Owned by the receiver loop; the setup page opens the window and accepts.
-// Nothing is stored until a valid JOIN_CONFIRM: enrollment slots are never freed, so
-// abandoned, expired or spoofed attempts must not consume one.
+// Nothing is stored until a valid JOIN_CONFIRM, so abandoned, expired or spoofed attempts
+// never consume an enrollment slot. The list holds the first MaxCandidates requesters of
+// the window; later ones are ignored rather than evicting a listed node.
 class PairingHost final : public PairingPort {
 public:
     PairingHost(PersistentStore&, Entropy&, Clock&);
@@ -67,7 +81,8 @@ public:
     // Closes the window when it expires.
     void poll();
     bool handle(const Frame& frame, int16_t rssi, Frame& reply) override;
-    // Offers a binding to a listed node on its next request. Full when no slot is left.
+    // Offers a binding to a listed node on its next request. Full when no slot is left,
+    // Conflict when two devices claimed the node ID during this window.
     Result accept(uint64_t node);
     HostState state() const { return state_; }
     const Candidate* candidates() const { return candidates_; }
@@ -94,8 +109,12 @@ private:
         uint64_t network = 0, node = 0, nonce = 0;
         Key key{};
         Frame done{};
+        uint32_t at = 0;
+        uint8_t replies = 0;
     } last_{};
-    void track(uint64_t node, uint64_t nonce, const X25519Key&, int16_t rssi);
+    void forgetCompleted();
+    // False when the request conflicts with the key already pinned for its node.
+    bool track(uint64_t node, uint64_t nonce, const X25519Key&, int16_t rssi);
     void dropOffer();
 };
 

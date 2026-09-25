@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "display.h"
 #include "sx1262_radio.h"
