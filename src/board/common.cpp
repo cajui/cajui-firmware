@@ -65,10 +65,16 @@ void startBoard() {
     // interleaved an MQTT error into the middle of a HELLO reply on hardware; CJAPP lines
     // remain the diagnostic output.
     esp_log_level_set("*", ESP_LOG_NONE);
-    if (faultMagic != FaultMagic || esp_reset_reason() == ESP_RST_POWERON) {
+    const esp_reset_reason_t reason = esp_reset_reason();
+    if (faultMagic != FaultMagic || reason == ESP_RST_POWERON) {
         faultMagic = FaultMagic;
         faults = 0;
     }
+    // A watchdog or panic restart already happened immediately; it still counts, so a
+    // repeating hang lengthens the delay after the next latched fault.
+    if (reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT ||
+        reason == ESP_RST_PANIC)
+        recordFault();
 }
 uint32_t faultCount() {
     return faults;

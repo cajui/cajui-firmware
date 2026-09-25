@@ -8,7 +8,9 @@
 namespace board {
 namespace {
 constexpr UBaseType_t AckDepth = 8; // Overflow only delays removal until the retry timeout.
-constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 10000;
+// The client's own lock can be held for a network operation up to this timeout, and the
+// radio loop enqueues under that lock: keep it well below the 5-second task watchdog.
+constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 2500;
 constexpr int QoS = 1, Retain = 0;
 }
 bool MqttUplink::prepare() {
@@ -83,9 +85,9 @@ void MqttUplink::onEvent(void* self, esp_event_base_t, int32_t event, void* data
     }
 }
 int MqttUplink::publish(const char* topic, const char* payload, size_t size) {
-    // Enqueue instead of publish: the MQTT task performs network I/O, so the radio loop
-    // never blocks on a slow broker. The outbox copies the payload. While the client is
-    // being replaced the publication is refused and retried later.
+    // Enqueue instead of publish: the MQTT task performs network I/O. The loop can still
+    // wait for the client's lock, at most the network timeout. The outbox copies the payload. While
+    // the client is being replaced the publication is refused and retried later.
     if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return -1;
     const int id =
         client_ ? esp_mqtt_client_enqueue(client_, topic, payload, int(size), QoS, Retain, true)

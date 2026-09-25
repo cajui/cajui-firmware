@@ -11,7 +11,7 @@ namespace board {
 // Wi-Fi station plus the ESP-IDF MQTT client. Plain TCP only: use a trusted network
 // until broker TLS is provisioned. MQTT 3.1.1 cannot report an ACL-denied publication.
 // The setup page replaces the client from its own task while the radio loop publishes:
-// an internal mutex guards the client, and the loop's calls never wait for it.
+// an internal mutex guards the client, and the loop's calls never wait for that mutex.
 class MqttUplink final : public cajui::Publisher {
 public:
     MqttUplink() = default;
