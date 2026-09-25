@@ -224,21 +224,21 @@ PairingHost::PairingHost(PersistentStore& store, Entropy& entropy, Clock& clock)
     : store_(store), entropy_(entropy), clock_(clock) {}
 PairingHost::~PairingHost() {
     wipe(key_.data(), key_.size());
+    wipe(last_.key.data(), last_.key.size());
 }
 void PairingHost::open() {
     close();
+    wipe(last_.key.data(), last_.key.size());
+    last_ = Completed{};
     state_ = HostState::Open;
     openedAt_ = clock_.nowMs();
     paired_ = 0;
 }
 void PairingHost::close() {
-    abandonOffer();
+    dropOffer();
     state_ = HostState::Closed;
     count_ = 0;
     for (auto& c : candidates_) c = Candidate{};
-    wipe(key_.data(), key_.size());
-    offer_ = Offer{};
-    doneFrame_ = Frame{};
 }
 uint32_t PairingHost::remainingMs() const {
     if (state_ == HostState::Closed) return 0;
@@ -248,13 +248,11 @@ uint32_t PairingHost::remainingMs() const {
 void PairingHost::poll() {
     if (state_ != HostState::Closed && !remainingMs()) close();
 }
-void PairingHost::abandonOffer() {
-    if (state_ != HostState::Offered) return;
-    store_.revoke(offer_.node, offer_.generation); // Prepared -> revoked; never reusable.
+void PairingHost::dropOffer() {
     wipe(key_.data(), key_.size());
     offer_ = Offer{};
     offerFrame_ = Frame{};
-    state_ = HostState::Open;
+    if (state_ == HostState::Offered) state_ = paired_ ? HostState::Paired : HostState::Open;
 }
 void PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKey, int16_t rssi) {
     Candidate* slot = nullptr;
@@ -275,51 +273,64 @@ void PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKe
 bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     reply = Frame{};
     poll();
-    if (state_ == HostState::Closed) return false;
     const uint8_t type = untrustedType(frame);
+    // A repeated confirmation of the last completed exchange, even after the window closed
+    // or while another node is being added: answer with the identical JOIN_DONE.
+    if (type == uint8_t(PairingType::Confirm) && last_.node &&
+        verifyTagged(frame, PairingType::Confirm, last_.network, last_.node, last_.nonce,
+                     last_.key)) {
+        reply = last_.done;
+        return true;
+    }
+    if (state_ == HostState::Closed) return false;
     if (type == uint8_t(PairingType::Request)) {
         uint64_t node = 0;
         uint64_t nonce = 0;
         X25519Key publicKey{};
         if (!parseRequest(frame, node, nonce, publicKey) || node == store_.device()) return false;
         track(node, nonce, publicKey, rssi);
-        if (state_ == HostState::Offered && node == offer_.node) {
-            if (nonce == offer_.nonce) {
-                reply = offerFrame_; // Identical retransmission for a repeated request.
-                return true;
-            }
-            abandonOffer(); // The node restarted its attempt; the administrator adds it again.
+        // A different nonce is ignored rather than cancelling the offer: requests are
+        // unauthenticated. A node that restarted is added again by the operator.
+        if (state_ == HostState::Offered && node == offer_.node && nonce == offer_.nonce) {
+            reply = offerFrame_; // Identical retransmission for a repeated request.
+            return true;
         }
         return false;
     }
-    if (type != uint8_t(PairingType::Confirm)) return false;
-    if (state_ == HostState::Paired) {
-        if (!verifyTagged(frame, PairingType::Confirm, offer_.network, offer_.node, offer_.nonce,
-                          key_))
-            return false;
-        reply = doneFrame_; // The node missed our JOIN_DONE.
-        return true;
-    }
-    if (state_ != HostState::Offered ||
+    if (type != uint8_t(PairingType::Confirm) || state_ != HostState::Offered ||
         !verifyTagged(frame, PairingType::Confirm, offer_.network, offer_.node, offer_.nonce, key_))
         return false;
-    if (store_.activate(offer_.node, offer_.generation) != Result::Ok ||
-        !buildTagged(PairingType::Done, offer_.network, offer_.node, offer_.nonce, key_,
-                     doneFrame_))
+    // The node proved it holds the key: store the binding, already active.
+    Completed done{};
+    done.network = offer_.network;
+    done.node = offer_.node;
+    done.nonce = offer_.nonce;
+    done.key = key_;
+    if (prepareFresh(store_, offer_.network, offer_.receiver, offer_.node, offer_.generation,
+                     key_) != Result::Ok ||
+        store_.activate(offer_.node, offer_.generation) != Result::Ok ||
+        !buildTagged(PairingType::Done, done.network, done.node, done.nonce, done.key, done.done)) {
+        store_.revoke(offer_.node, offer_.generation);
+        wipe(done.key.data(), done.key.size());
         return false;
+    }
+    wipe(last_.key.data(), last_.key.size());
+    last_ = done;
+    wipe(done.key.data(), done.key.size());
     paired_ = offer_.node;
-    offerFrame_ = Frame{};
+    dropOffer();
     state_ = HostState::Paired;
-    reply = doneFrame_;
+    reply = last_.done;
     return true;
 }
 Result PairingHost::accept(uint64_t node) {
     poll();
-    if (state_ != HostState::Open && state_ != HostState::Paired) return Result::Invalid;
+    if (state_ == HostState::Closed) return Result::Invalid;
     const Candidate* candidate = nullptr;
     for (size_t i = 0; i < count_; ++i)
         if (candidates_[i].node == node) candidate = &candidates_[i];
     if (!candidate) return Result::NotFound;
+    if (!store_.freeSlots()) return store_.healthy() ? Result::Full : Result::StorageError;
     KeyPair keys{};
     Offer offer{};
     offer.node = node;
@@ -328,30 +339,26 @@ Result PairingHost::accept(uint64_t node) {
     offer.profile = PairingProfile;
     offer.network = store_.network();
     Key key{};
-    Result result = Result::CryptoError;
-    if (newKeyPair(entropy_, keys) && (offer.network || nonzeroRandom(entropy_, offer.network)) &&
-        nonzeroRandom(entropy_, offer.generation) &&
-        deriveBindingKey(keys.privateKey, candidate->publicKey, offer.network, offer.receiver, node,
-                         offer.generation, candidate->publicKey, keys.publicKey, key)) {
+    Frame frame{};
+    bool ok = newKeyPair(entropy_, keys) &&
+              (offer.network || nonzeroRandom(entropy_, offer.network)) &&
+              nonzeroRandom(entropy_, offer.generation);
+    if (ok) {
         offer.receiverPublic = keys.publicKey;
-        result = prepareFresh(store_, offer.network, offer.receiver, node, offer.generation, key);
+        ok = deriveBindingKey(keys.privateKey, candidate->publicKey, offer.network, offer.receiver,
+                              node, offer.generation, candidate->publicKey, keys.publicKey, key) &&
+             buildOffer(offer, key, frame);
     }
     wipe(&keys, sizeof(keys));
-    if (result != Result::Ok) {
-        wipe(key.data(), key.size());
-        return result;
-    }
-    Frame frame{};
-    if (!buildOffer(offer, key, frame)) {
-        store_.revoke(node, offer.generation);
+    if (!ok) {
         wipe(key.data(), key.size());
         return Result::CryptoError;
     }
+    dropOffer(); // Replaces any earlier offer; nothing was stored for it.
     offer_ = offer;
     key_ = key;
     wipe(key.data(), key.size());
     offerFrame_ = frame;
-    paired_ = 0;
     state_ = HostState::Offered;
     return Result::Ok;
 }
@@ -366,7 +373,7 @@ PairingClient::~PairingClient() {
 }
 bool PairingClient::start() {
     if (state_ != ClientState::Idle || !store_.healthy() || store_.role() != Role::Transmitter ||
-        !newKeyPair(entropy_, keys_) || !nonzeroRandom(entropy_, nonce_) ||
+        !store_.freeSlots() || !newKeyPair(entropy_, keys_) || !nonzeroRandom(entropy_, nonce_) ||
         !buildRequest(store_.device(), nonce_, keys_.publicKey, outgoing_)) {
         fail();
         return false;
@@ -385,9 +392,6 @@ void PairingClient::transmit(ClientState next) {
     afterSend_ = next;
 }
 void PairingClient::fail() {
-    if (prepared_ && state_ != ClientState::Paired)
-        store_.revoke(store_.device(), paired_.generation);
-    prepared_ = false;
     wipe(&keys_, sizeof(keys_));
     wipe(key_.data(), key_.size());
     state_ = ClientState::Failed;
@@ -404,16 +408,16 @@ void PairingClient::handleOffer(const Frame& frame) {
         wipe(key.data(), key.size());
         return; // Not ours or forged: keep listening.
     }
-    const Result result =
-        prepareFresh(store_, offer.network, offer.receiver, self, offer.generation, key);
-    if (result != Result::Ok ||
+    // Refuse before confirming what storage could not accept, so the receiver never stores
+    // a binding this node would then drop: one network (and receiver) per device.
+    const bool compatible = !store_.network() || (store_.network() == offer.network &&
+                                                  store_.receiver() == offer.receiver);
+    if (!compatible ||
         !buildTagged(PairingType::Confirm, offer.network, self, nonce_, key, outgoing_)) {
         wipe(key.data(), key.size());
-        if (result == Result::Ok) store_.revoke(self, offer.generation);
-        fail(); // A different network or a storage failure cannot be fixed by retrying.
+        fail();
         return;
     }
-    prepared_ = true;
     paired_ = offer;
     key_ = key;
     wipe(key.data(), key.size());
@@ -461,11 +465,14 @@ void PairingClient::poll() {
         if (state_ == ClientState::AwaitingDone && type == uint8_t(PairingType::Done) &&
             verifyTagged(frame, PairingType::Done, paired_.network, store_.device(), nonce_,
                          key_)) {
-            if (store_.activate(store_.device(), paired_.generation) != Result::Ok) {
+            const uint64_t self = store_.device();
+            const Result stored = prepareFresh(store_, paired_.network, paired_.receiver, self,
+                                               paired_.generation, key_);
+            if (stored != Result::Ok || store_.activate(self, paired_.generation) != Result::Ok) {
+                if (stored == Result::Ok) store_.revoke(self, paired_.generation);
                 fail();
                 return;
             }
-            prepared_ = false;
             wipe(&keys_, sizeof(keys_));
             wipe(key_.data(), key_.size());
             state_ = ClientState::Paired;

@@ -53,6 +53,8 @@ struct Candidate {
 };
 enum class HostState { Closed, Open, Offered, Paired };
 // Receiver side. Owned by the receiver loop; the setup page opens the window and accepts.
+// Nothing is stored until a valid JOIN_CONFIRM: enrollment slots are never freed, so
+// abandoned, expired or spoofed attempts must not consume one.
 class PairingHost final : public PairingPort {
 public:
     PairingHost(PersistentStore&, Entropy&, Clock&);
@@ -60,12 +62,12 @@ public:
     PairingHost& operator=(const PairingHost&) = delete;
     ~PairingHost() override;
     void open();
-    // Revokes an unconfirmed prepared binding.
+    // Drops an unconfirmed offer; it was never stored.
     void close();
     // Closes the window when it expires.
     void poll();
     bool handle(const Frame& frame, int16_t rssi, Frame& reply) override;
-    // Prepares a binding for a listed node and answers its next request with an offer.
+    // Offers a binding to a listed node on its next request. Full when no slot is left.
     Result accept(uint64_t node);
     HostState state() const { return state_; }
     const Candidate* candidates() const { return candidates_; }
@@ -84,10 +86,17 @@ private:
     size_t count_ = 0;
     Offer offer_{};
     Key key_{};
-    Frame offerFrame_{}, doneFrame_{};
+    Frame offerFrame_{};
     uint64_t paired_ = 0;
+    // The last completed exchange, kept apart from the current offer: its node may still
+    // repeat JOIN_CONFIRM after a lost JOIN_DONE while the operator adds the next node.
+    struct Completed {
+        uint64_t network = 0, node = 0, nonce = 0;
+        Key key{};
+        Frame done{};
+    } last_{};
     void track(uint64_t node, uint64_t nonce, const X25519Key&, int16_t rssi);
-    void abandonOffer();
+    void dropOffer();
 };
 
 enum class ClientState {
@@ -100,7 +109,8 @@ enum class ClientState {
     Paired,
     Failed
 };
-// Node side: drives the radio through request, offer, confirm and done.
+// Node side: drives the radio through request, offer, confirm and done. Stores the
+// binding only after a valid JOIN_DONE.
 class PairingClient final {
 public:
     static constexpr uint32_t DeadlineMs = PairingWindowMs, ListenMs = 1500,
@@ -127,7 +137,6 @@ private:
     uint64_t nonce_ = 0;
     uint32_t startedAt_ = 0, phaseAt_ = 0, waitMs_ = 0;
     uint8_t confirms_ = 0;
-    bool prepared_ = false;
     Offer paired_{};
     Key key_{};
     Frame outgoing_{};

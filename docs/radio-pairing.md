@@ -63,22 +63,28 @@ of a new credential generation, exactly as a USB enrollment would store it.
 1. The node sends JOIN_REQUEST, then listens 1.5 s for an offer; it repeats every 2 s with
    jitter for up to two minutes.
 2. While the window is open, the receiver lists requesting nodes (at most four, with the
-   latest signal strength). When the administrator adds one, it chooses a random
-   generation (and a random network if it has none), derives the key, stores a
-   **prepared** binding and answers with JOIN_OFFER. A repeated request with the same
-   attempt nonce receives the identical offer.
+   latest signal strength). When the administrator adds one, it refuses if no enrollment
+   slot is free, chooses a random generation (and a random network if it has none),
+   derives the key and keeps the offer **in memory only**, answering the node's next
+   request with JOIN_OFFER. A repeated request with the same attempt nonce receives the
+   identical offer. A request with another nonce does not cancel it: requests are
+   unauthenticated, and a node that restarted is added again.
 3. The node validates the offer (its own ID and attempt nonce, nonzero identifiers,
-   profile 1, a receiver ID different from its own, a valid tag under the derived key),
-   stores a prepared binding and sends JOIN_CONFIRM, then listens 1.5 s for JOIN_DONE, up
-   to five times.
-4. On a valid confirmation the receiver activates the binding and answers JOIN_DONE; a
-   repeated confirmation receives the identical reply. On JOIN_DONE the node activates
-   its binding and restarts into operation.
+   profile 1, a receiver ID different from its own, a valid tag under the derived key) and
+   checks that its storage can accept it (a free slot, and the same network and receiver
+   if it already has one). It then sends JOIN_CONFIRM and listens 1.5 s for JOIN_DONE, up
+   to five times, still without storing anything.
+4. On a valid confirmation the receiver stores the binding already active and answers
+   JOIN_DONE. It keeps that reply apart from any new offer, so a repeated confirmation
+   receives the identical reply even after the window closed or another node was added.
+   On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
-Prepared bindings that do not complete are revoked: by the receiver when the window
-closes, and by the node when it gives up. If JOIN_DONE is lost after the receiver
-activated, the node revokes its copy and the administrator pairs it again; the receiver's
-unused binding stays active until revoked on the setup page.
+Enrollment slots are never freed, so nothing is stored for an attempt that has not been
+confirmed: abandoned, expired, stopped or spoofed attempts cost no slot. Each successful
+pairing uses one slot on each side, like a USB rotation. If JOIN_DONE is lost for all five
+confirmations, the receiver holds an active binding the node never stored; the node keeps
+its previous binding and the administrator pairs it again or revokes the stale one on the
+setup page.
 
 A node that already belongs to a network can only pair again within that network:
 storage holds a single network per device, and there is no reset that would keep keys.

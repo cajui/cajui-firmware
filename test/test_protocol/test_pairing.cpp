@@ -338,7 +338,7 @@ void test_host_ignores_input_outside_the_window_and_limits_candidates() {
     EXPECT_RESULT(HostState::Closed, rig.host.state());
     TEST_ASSERT_EQUAL_size_t(0, rig.host.candidateCount());
 }
-void test_unconfirmed_offer_is_revoked_and_repeated_requests_get_the_same_offer() {
+void test_offers_store_nothing_and_resist_spoofed_requests() {
     PairRig rig;
     CountingEntropy entropy;
     KeyPair keys{};
@@ -348,28 +348,92 @@ void test_unconfirmed_offer_is_revoked_and_repeated_requests_get_the_same_offer(
     TEST_ASSERT_TRUE(buildRequest(2, 5, keys.publicKey, request));
     TEST_ASSERT_FALSE(rig.host.handle(request, -50, first));
     EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    TEST_ASSERT_EQUAL_size_t(BindingCapacity, rig.rx->freeSlots()); // Nothing stored yet.
     TEST_ASSERT_TRUE(rig.host.handle(request, -50, first));
     TEST_ASSERT_TRUE(rig.host.handle(request, -50, second));
     TEST_ASSERT_TRUE(sameFrame(first, second));
-    Offer offer{};
-    TEST_ASSERT_TRUE(parseOffer(first, offer));
-    EnrollmentInfo info{};
-    TEST_ASSERT_TRUE(rig.rx->info(2, offer.generation, info));
-    EXPECT_RESULT(Enrollment::Prepared, info.state);
-    // A new attempt nonce abandons the offer; the administrator must add the node again.
-    TEST_ASSERT_TRUE(buildRequest(2, 6, keys.publicKey, request));
-    TEST_ASSERT_FALSE(rig.host.handle(request, -50, first));
-    TEST_ASSERT_TRUE(rig.rx->info(2, offer.generation, info));
-    EXPECT_RESULT(Enrollment::Revoked, info.state);
-    EXPECT_RESULT(HostState::Open, rig.host.state());
-    // Window expiry revokes an unconfirmed offer too.
+    // An unauthenticated request with the offered node's ID and another nonce is ignored.
+    Frame spoofed{};
+    TEST_ASSERT_TRUE(buildRequest(2, 6, keys.publicKey, spoofed));
+    TEST_ASSERT_FALSE(rig.host.handle(spoofed, -50, second));
+    EXPECT_RESULT(HostState::Offered, rig.host.state());
+    TEST_ASSERT_TRUE(rig.host.handle(request, -50, second));
+    TEST_ASSERT_TRUE(sameFrame(first, second));
+    // Repeated adds, stopping and window expiry never consume an enrollment slot.
     EXPECT_RESULT(Result::Ok, rig.host.accept(2));
-    TEST_ASSERT_TRUE(rig.host.handle(request, -50, first));
-    TEST_ASSERT_TRUE(parseOffer(first, offer));
+    rig.host.close();
+    rig.host.open();
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, first));
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
     rig.clock.time += PairingWindowMs;
     rig.host.poll();
-    TEST_ASSERT_TRUE(rig.rx->info(2, offer.generation, info));
-    EXPECT_RESULT(Enrollment::Revoked, info.state);
+    EXPECT_RESULT(HostState::Closed, rig.host.state());
+    TEST_ASSERT_EQUAL_size_t(BindingCapacity, rig.rx->freeSlots());
+}
+void test_previous_node_still_gets_done_after_another_add() {
+    PairRig rig;
+    TEST_ASSERT_TRUE(rig.client.start());
+    rig.host.open();
+    rig.run(1);
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    for (int i = 0; i < 30 && rig.rxRadio.sent.empty(); ++i) {
+        rig.client.poll();
+        rig.toReceiver();
+        rig.clock.time += 100;
+    }
+    rig.toNode();
+    rig.client.poll();
+    rig.client.poll(); // Confirm transmitted.
+    rig.toReceiver();  // Receiver stores and answers JOIN_DONE...
+    Frame done = rig.rxRadio.sent.front();
+    rig.rxRadio.sent.clear(); // ...which is lost.
+    EXPECT_RESULT(HostState::Paired, rig.host.state());
+    // The operator adds another node before the first one confirms again.
+    CountingEntropy entropy;
+    KeyPair other{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, other));
+    Frame request{}, reply{};
+    TEST_ASSERT_TRUE(buildRequest(9, 3, other.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    EXPECT_RESULT(Result::Ok, rig.host.accept(9));
+    for (int i = 0; i < 4 && rig.txRadio.sent.empty(); ++i) { // Wait for the resend.
+        rig.clock.time += PairingClient::ListenMs;
+        rig.client.poll();
+        rig.client.poll();
+    }
+    rig.toReceiver();
+    TEST_ASSERT_EQUAL_size_t(1, rig.rxRadio.sent.size());
+    TEST_ASSERT_TRUE(sameFrame(done, rig.rxRadio.sent.front()));
+    rig.toNode();
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Paired, rig.client.state());
+    EXPECT_RESULT(HostState::Offered, rig.host.state()); // Node 9's offer is intact.
+    Binding binding{};
+    TEST_ASSERT_TRUE(rig.tx->binding(2, binding));
+}
+void test_full_storage_is_refused_before_any_exchange() {
+    PairRig rig;
+    for (uint64_t node = 10; node < 10 + BindingCapacity; ++node)
+        TEST_ASSERT_TRUE(rig.rx->prepare(42, 1, node, node, fixtures::key(uint8_t(node)), 1) ==
+                         Result::Ok);
+    TEST_ASSERT_EQUAL_size_t(0, rig.rx->freeSlots());
+    CountingEntropy entropy;
+    KeyPair keys{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, keys));
+    Frame request{}, reply{};
+    rig.host.open();
+    TEST_ASSERT_TRUE(buildRequest(2, 5, keys.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    EXPECT_RESULT(Result::Full, rig.host.accept(2));
+    MemoryBlob full;
+    auto node = fixtures::mounted(full, Role::Transmitter);
+    for (uint64_t generation = 1; generation <= BindingCapacity; ++generation) {
+        TEST_ASSERT_TRUE(node->prepare(42, 1, 2, generation, fixtures::key(uint8_t(generation)),
+                                       1) == Result::Ok);
+        TEST_ASSERT_TRUE(node->activate(2, generation) == Result::Ok);
+    }
+    PairingClient client(rig.txRadio, rig.clock, rig.jitter, *node, entropy);
+    TEST_ASSERT_FALSE(client.start());
 }
 void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     PairRig lossy;
@@ -413,7 +477,7 @@ void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     lossy.client.poll();
     EXPECT_RESULT(ClientState::Paired, lossy.client.state());
 }
-void test_node_gives_up_and_revokes_its_prepared_binding() {
+void test_node_gives_up_without_storing_anything() {
     PairRig rig;
     TEST_ASSERT_TRUE(rig.client.start());
     rig.host.open();
@@ -424,8 +488,6 @@ void test_node_gives_up_and_revokes_its_prepared_binding() {
         rig.toReceiver();
         rig.clock.time += 100;
     }
-    Offer offer{};
-    TEST_ASSERT_TRUE(parseOffer(rig.rxRadio.sent.front(), offer));
     rig.toNode();
     rig.client.poll(); // Offer accepted, confirm sent; the receiver never answers now.
     rig.txRadio.sent.clear();
@@ -436,11 +498,8 @@ void test_node_gives_up_and_revokes_its_prepared_binding() {
         rig.txRadio.sent.clear();
     }
     EXPECT_RESULT(ClientState::Failed, rig.client.state());
-    EnrollmentInfo info{};
-    TEST_ASSERT_TRUE(rig.tx->info(2, offer.generation, info));
-    EXPECT_RESULT(Enrollment::Revoked, info.state);
-    Binding binding{};
-    TEST_ASSERT_FALSE(rig.tx->binding(2, binding));
+    TEST_ASSERT_EQUAL_size_t(BindingCapacity, rig.tx->freeSlots());
+    TEST_ASSERT_EQUAL_size_t(BindingCapacity, rig.rx->freeSlots()); // Confirm never arrived.
 }
 void test_node_failures_deadline_radio_and_foreign_network() {
     {
@@ -503,6 +562,8 @@ void test_node_failures_deadline_radio_and_foreign_network() {
         EXPECT_RESULT(Result::Ok, rig.host.accept(2));
         rig.run(40);
         EXPECT_RESULT(ClientState::Failed, rig.client.state());
+        Binding binding{};
+        TEST_ASSERT_FALSE(rig.rx->binding(2, binding)); // Refused before confirming.
     }
     {
         MemoryBlob blob;
@@ -552,9 +613,11 @@ void runPairingTests() {
     RUN_TEST(test_radio_pairing_creates_matching_active_bindings);
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
     RUN_TEST(test_host_ignores_input_outside_the_window_and_limits_candidates);
-    RUN_TEST(test_unconfirmed_offer_is_revoked_and_repeated_requests_get_the_same_offer);
+    RUN_TEST(test_offers_store_nothing_and_resist_spoofed_requests);
+    RUN_TEST(test_previous_node_still_gets_done_after_another_add);
+    RUN_TEST(test_full_storage_is_refused_before_any_exchange);
     RUN_TEST(test_node_ignores_forged_offers_and_resends_confirm_until_done);
-    RUN_TEST(test_node_gives_up_and_revokes_its_prepared_binding);
+    RUN_TEST(test_node_gives_up_without_storing_anything);
     RUN_TEST(test_node_failures_deadline_radio_and_foreign_network);
     RUN_TEST(test_receiver_without_pairing_handler_drops_pairing_frames);
 }
