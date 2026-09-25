@@ -209,6 +209,50 @@ void test_setup_page_states_and_prefill() {
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "empty"));
 }
+void test_hostile_network_names_never_break_the_page() {
+    // Worst case: every list full, every name made of characters that expand when escaped.
+    NetworkView networks[MaxNetworks]{};
+    for (auto& network : networks) std::memset(network.ssid, '"', SsidCapacity);
+    BrokerView brokers[MaxBrokers]{};
+    for (auto& broker : brokers) std::memset(broker.host, '9', HostCapacity);
+    EnrollmentInfo transmitters[BindingCapacity]{};
+    for (size_t i = 0; i < BindingCapacity; ++i)
+        transmitters[i] = enrollment(Enrollment::Active, UINT64_MAX - i, UINT64_MAX, UINT64_MAX);
+    PairingView pairing{};
+    pairing.open = true;
+    pairing.count = MaxPairingCandidates;
+    for (size_t i = 0; i < MaxPairingCandidates; ++i) {
+        pairing.nodes[i] = UINT64_MAX - i;
+        pairing.rssi[i] = -120;
+        pairing.conflict[i] = i % 2;
+    }
+    pairing.offered = pairing.paired = UINT64_MAX;
+    auto staged = complete();
+    std::memset(staged.ssid, '<', SsidCapacity);
+    std::memset(staged.host, 'h', HostCapacity);
+    std::memset(staged.username, 'u', UsernameCapacity);
+    SetupView view{};
+    view.wifi = WifiState::Connected;
+    view.wifiSsid = staged.ssid;
+    view.address = "255.255.255.255";
+    view.staged = &staged;
+    view.networks = networks;
+    view.networkCount = MaxNetworks;
+    view.brokers = brokers;
+    view.brokerCount = MaxBrokers;
+    view.transmitters = transmitters;
+    view.transmitterCount = BindingCapacity;
+    view.pairing = &pairing;
+    view.notice = "Connecting with the new Wi-Fi settings. Refresh in a few seconds.";
+    static char page[PageCapacity];
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "12 networks found, not all listed"));
+    TEST_ASSERT_TRUE(contains(page, "Close setup"));
+    view.networkCount = 2; // Typical content is shown in full.
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "2 networks found. "));
+    TEST_ASSERT_FALSE(renderSetup(view, page, 2048)); // The fixed content alone does not fit.
+}
 void test_pairing_section_states() {
     static char page[PageCapacity];
     SetupView view{};
@@ -317,6 +361,7 @@ void runSetupTests() {
     RUN_TEST(test_broker_staging_validates_and_keeps_saved_password);
     RUN_TEST(test_setup_page_escapes_input_and_never_shows_passwords);
     RUN_TEST(test_setup_page_states_and_prefill);
+    RUN_TEST(test_hostile_network_names_never_break_the_page);
     RUN_TEST(test_pairing_section_states);
     RUN_TEST(test_transmitters_section_refreshes_live_only_while_pairing);
     RUN_TEST(test_confirmation_and_closed_pages);

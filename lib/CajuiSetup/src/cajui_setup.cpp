@@ -139,8 +139,9 @@ void wifiForm(Html& page, const SetupView& v) {
     if (v.scanning)
         page.raw("<p><small>Scanning for networks&hellip;</small></p>");
     else
-        page.raw("<p><small>%u networks found. <a href=\"/scan\">Scan again</a></small></p>",
-                 unsigned(v.networkCount));
+        page.raw("<p><small>%u networks found%s. <a href=\"/scan\">Scan again</a></small></p>",
+                 unsigned(v.networkCount + v.networksOmitted),
+                 v.networksOmitted ? ", not all listed" : "");
     page.raw("</section>");
 }
 void brokerForm(Html& page, const SetupView& v) {
@@ -340,8 +341,8 @@ const char* describe(SetupError error) {
     }
     return "Invalid input.";
 }
-bool renderSetup(const SetupView& v, char* output, size_t capacity) {
-    if (!output || !capacity) return false;
+namespace {
+bool renderPage(const SetupView& v, char* output, size_t capacity) {
     Html page(output, capacity);
     head(page, "Cajuí receiver setup");
     page.raw("<h1>Cajuí receiver</h1><p><small>Device %016" PRIx64
@@ -359,6 +360,22 @@ bool renderSetup(const SetupView& v, char* output, size_t capacity) {
     page.raw("<form method=\"post\" action=\"/close\"><button>Close setup</button></form>"
              "</html>");
     return page.ok();
+}
+} // namespace
+bool renderSetup(const SetupView& v, char* output, size_t capacity) {
+    if (!output || !capacity) return false;
+    SetupView fitted = v;
+    while (!renderPage(fitted, output, capacity)) {
+        if (fitted.networkCount) {
+            --fitted.networkCount;
+            ++fitted.networksOmitted;
+        } else if (fitted.brokerCount) {
+            --fitted.brokerCount;
+        } else {
+            return false;
+        }
+    }
+    return true;
 }
 bool renderTransmitters(const SetupView& v, char* output, size_t capacity) {
     if (!output || !capacity) return false;

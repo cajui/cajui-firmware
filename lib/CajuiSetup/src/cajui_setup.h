@@ -64,6 +64,7 @@ struct SetupView {
     size_t queued = 0;
     const NetworkView* networks = nullptr;
     size_t networkCount = 0;
+    size_t networksOmitted = 0; // Set by renderSetup when the list did not fit.
     bool scanning = false;
     const BrokerView* brokers = nullptr;
     size_t brokerCount = 0;
@@ -76,6 +77,9 @@ struct SetupView {
     const char* notice = nullptr;
 };
 constexpr size_t PageCapacity = 12288;
+// Nearby networks and announced brokers are outside our control (a beacon flood can fill
+// the list with long, escaped names): when the page does not fit, they are dropped from
+// the end of their lists before the page is refused.
 bool renderSetup(const SetupView&, char* output, size_t capacity);
 // The transmitters section alone (list and pairing), refreshed live by the setup page.
 bool renderTransmitters(const SetupView&, char* output, size_t capacity);
