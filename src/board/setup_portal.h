@@ -75,6 +75,11 @@ private:
     cajui::BrokerView brokers_[cajui::MaxBrokers]{};
     std::atomic<size_t> brokerCount_{0};
     std::atomic<bool> searching_{false};
+    // Station GOT_IP events. A trial counts as connected only after one that follows its
+    // WiFi.begin(): until the old association is torn down, status() still reads connected.
+    static std::atomic<uint32_t> addresses_;
+    uint32_t trialAddresses_ = 0;
+    bool trialConnected() const;
     cajui::EnrollmentInfo transmitters_[cajui::BindingCapacity]{};
     char page_[cajui::PageCapacity]{};
     static void task(void* self);

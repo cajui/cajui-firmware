@@ -60,8 +60,11 @@ template <typename Action> auto SetupPortal::whileRadioIdle(Action action) -> de
     lock_.give();
     return result;
 }
+std::atomic<uint32_t> SetupPortal::addresses_{0};
 bool SetupPortal::start(const std::atomic<bool>& radioIdle) {
     radioIdle_ = &radioIdle;
+    WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { addresses_.fetch_add(1); },
+                 ARDUINO_EVENT_WIFI_STA_GOT_IP);
     return xTaskCreate(task, "cajui-setup", TaskStack, this, 1, nullptr) == pdPASS;
 }
 void SetupPortal::task(void* self) {
@@ -165,6 +168,7 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
+        trialAddresses_ = addresses_.load();
         MqttUplink::startWifi(pending_.ssid, pending_.wifiPassword);
         copyWifi(running_, pending_);
         wifi_ = cajui::WifiState::Connecting;
@@ -191,8 +195,11 @@ void SetupPortal::poll() {
 bool SetupPortal::verified() const {
     return wifi_ == cajui::WifiState::Connected && !trial_ && sameWifi(pending_, running_);
 }
+bool SetupPortal::trialConnected() const {
+    return addresses_.load() != trialAddresses_ && WiFi.SSID() == pending_.ssid;
+}
 void SetupPortal::trackWifi() {
-    const bool connected = MqttUplink::wifiConnected();
+    const bool connected = MqttUplink::wifiConnected() && (!trial_ || trialConnected());
     if (connected && wifi_ != cajui::WifiState::Connected) {
         wifi_ = cajui::WifiState::Connected;
         Serial.printf("CJAPP SETUP wifi=connected address=%s\n", WiFi.localIP().toString().c_str());
