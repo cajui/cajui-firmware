@@ -156,6 +156,17 @@ void test_receiver_radio_failures_and_timeout_are_terminal() {
         TEST_ASSERT_EQUAL_UINT(1, r.radio.sleeps);
     }
 }
+void test_late_poll_after_completed_ack_keeps_listening() {
+    Rig r;
+    r.start();
+    r.pollData();
+    TEST_ASSERT_EQUAL_INT(int(ReceiverState::Acknowledging), int(r.controller.state()));
+    r.clock.time = 10000; // The loop was busy well past the watchdog.
+    r.radio.tx = TransmitStatus::Complete;
+    r.controller.poll();
+    TEST_ASSERT_EQUAL_INT(int(ReceiverState::Listening), int(r.controller.state()));
+    TEST_ASSERT_EQUAL_UINT(0, r.radio.sleeps);
+}
 void test_receiver_start_requires_healthy_receiver_storage_and_radio() {
     // A receiver without bindings starts (scenario 2): radio pairing creates the first one.
     for (int scenario = 0; scenario < 4; ++scenario) {
@@ -234,6 +245,7 @@ void runApplicationTests() {
     RUN_TEST(test_receiver_storage_failure_never_acknowledges);
     RUN_TEST(test_receiver_full_queue_preserves_receipt_and_reacks_duplicate);
     RUN_TEST(test_receiver_radio_failures_and_timeout_are_terminal);
+    RUN_TEST(test_late_poll_after_completed_ack_keeps_listening);
     RUN_TEST(test_receiver_start_requires_healthy_receiver_storage_and_radio);
     RUN_TEST(test_routing_hint_is_bounded_and_never_authentication);
     RUN_TEST(test_climate_values_preserve_zero_and_flag_invalid_measurements);

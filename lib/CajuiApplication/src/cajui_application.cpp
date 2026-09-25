@@ -46,12 +46,14 @@ void ReceiverController::poll() {
     if (state_ == ReceiverState::Acknowledging) {
         uint32_t completed = 0;
         const auto status = radio_.transmitStatus(completed);
-        if (uint32_t(clock_.nowMs() - startedAt_) >= AckTransmitTimeoutMs ||
-            status == TransmitStatus::Error) {
-            fail();
-        } else if (status == TransmitStatus::Complete) {
+        // Completion wins over the watchdog: a poll that arrives late (the loop was busy)
+        // after a successful transmission is not a radio fault.
+        if (status == TransmitStatus::Complete) {
             // Adapter already rearmed RX at TX-done; do not clear a queued next packet.
             state_ = ReceiverState::Listening;
+        } else if (status == TransmitStatus::Error ||
+                   uint32_t(clock_.nowMs() - startedAt_) >= AckTransmitTimeoutMs) {
+            fail();
         }
         return;
     }
