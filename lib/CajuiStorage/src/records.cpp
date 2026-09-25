@@ -8,7 +8,7 @@ namespace records {
 namespace {
 enum Kind : uint8_t { RegistryKind = 'G', RetiredKind = 'X', ReceiptKind = 'R', QueueKind = 'Q' };
 constexpr uint8_t HeadKind = 'H';
-constexpr uint8_t Version = 1;
+constexpr uint8_t Version = 1, QueueVersion = 2, ReceiptVersion = 2;
 constexpr char Salt[] = "cajui-retired-v1";
 constexpr size_t FingerprintSize = 8;
 constexpr char Hex[] = "0123456789abcdef";
@@ -58,13 +58,17 @@ struct Reader {
     bool done() const { return ok && p == end; }
 };
 // Checks size bounds, the trailing CRC, kind and version; returns a reader over the body.
+// Accepts versions 1 through `newest`; the version read is returned in `version`.
 bool open(const uint8_t* input, size_t size, size_t minimum, size_t maximum, uint8_t kind,
-          Reader& reader) {
+          Reader& reader, uint8_t newest = Version, uint8_t* version = nullptr) {
     if (!input || size < minimum || size > maximum) return false;
     Reader trailer{input + size - CrcSize, input + size};
     if (trailer.number(CrcSize) != crc32(input, size - CrcSize)) return false;
     reader = Reader(input, input + size - CrcSize);
-    return reader.number(1) == kind && reader.number(1) == Version;
+    if (reader.number(1) != kind) return false;
+    const uint64_t found = reader.number(1);
+    if (version) *version = uint8_t(found);
+    return found >= Version && found <= newest;
 }
 void frame(Writer& w, const Frame& f) {
     w.number(f.size, 2);
@@ -229,43 +233,62 @@ bool decode(const uint8_t* input, size_t size, RetiredList& list) {
 size_t encode(const ReceiptRecord& record, uint8_t* output) {
     Writer w(output);
     w.number(ReceiptKind, 1);
-    w.number(Version, 1);
+    w.number(ReceiptVersion, 1);
     w.number(record.generation, 8);
     w.number(record.receipt.counter, 8);
     w.number(record.through, 8);
     frame(w, record.receipt.last);
+    w.number(uint8_t(record.receipt.ackPower), 1);
     return w.finish();
 }
 bool decode(const uint8_t* input, size_t size, ReceiptRecord& record) {
     record = ReceiptRecord{};
     Reader r{nullptr, nullptr};
-    if (!open(input, size, MinReceipt, ReceiptCapacity, ReceiptKind, r)) return false;
+    uint8_t version = 0;
+    if (!open(input, size, MinReceipt, ReceiptCapacity, ReceiptKind, r, ReceiptVersion, &version))
+        return false;
     record.generation = r.number(8);
     record.receipt.counter = r.number(8);
     record.through = r.number(8);
-    if (frame(r, record.receipt.last) && r.done() && record.generation) return true;
+    bool ok = frame(r, record.receipt.last);
+    if (ok && version >= ReceiptVersion) record.receipt.ackPower = int8_t(uint8_t(r.number(1)));
+    if (ok && r.done() && record.generation) return true;
     record = ReceiptRecord{};
     return false;
 }
 size_t encode(const QueueRecord& record, uint8_t* output) {
     Writer w(output);
     w.number(QueueKind, 1);
-    w.number(Version, 1);
+    w.number(QueueVersion, 1);
     w.number(record.sequence, 8);
     w.number(record.slot, 1);
     w.number(record.generation, 8);
     frame(w, record.frame);
+    w.number(record.link.known ? 1 : 0, 1);
+    w.number(uint16_t(record.link.known ? record.link.rssiDbm : 0), 2);
+    w.number(uint16_t(record.link.known ? record.link.snrTenthsDb : 0), 2);
     return w.finish();
 }
 bool decode(const uint8_t* input, size_t size, QueueRecord& record) {
     record = QueueRecord{};
     Reader r{nullptr, nullptr};
-    if (!open(input, size, MinQueueRecord, QueueRecordCapacity, QueueKind, r)) return false;
+    uint8_t version = 0;
+    if (!open(input, size, MinQueueRecord, QueueRecordCapacity, QueueKind, r, QueueVersion,
+              &version))
+        return false;
     record.sequence = r.number(8);
     record.slot = uint8_t(r.number(1));
     record.generation = r.number(8);
-    if (frame(r, record.frame) && r.done() && record.generation && record.slot < BindingCapacity)
-        return true;
+    bool ok = frame(r, record.frame);
+    if (ok && version >= QueueVersion) {
+        const uint64_t known = r.number(1);
+        record.link.rssiDbm = int16_t(uint16_t(r.number(2)));
+        record.link.snrTenthsDb = int16_t(uint16_t(r.number(2)));
+        record.link.known = known == 1;
+        // An unknown link carries no values, so a record has a single encoding.
+        ok = known <= 1 && (known || (!record.link.rssiDbm && !record.link.snrTenthsDb));
+    }
+    if (ok && r.done() && record.generation && record.slot < BindingCapacity) return true;
     record = QueueRecord{};
     return false;
 }

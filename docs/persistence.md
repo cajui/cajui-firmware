@@ -15,9 +15,10 @@ development version.
 | --- | --- | --- |
 | `registry` | role, device, network, receiver, profile and up to 16 enrollments (state, node, generation, key, reserved counter) | administration; a transmitter's counter reservation |
 | `retired` | generation and key fingerprint of up to 64 credentials removed from the registry | freeing a slot, reset |
-| `r00`–`r0f` | receiver receipt of one slot: generation, last counter, last frame and the queue position it filled | each accepted sample |
-| `q00`–`q7f` | one queued frame: sequence, slot, generation, frame | each accepted sample |
+| `r00`–`r0f` | receiver receipt of one slot: generation, last counter, last frame, the queue position it filled and the power command of its ACK | each accepted sample |
+| `q00`–`q7f` | one queued frame: sequence, slot, generation, frame and the radio's RSSI/SNR of it | each accepted sample |
 | `head` | sequence of the queue front | each forwarded sample |
+| `radio` | configured transmit power | `CJ1 POWER` |
 
 The receiver queue is a ring of 128 records addressed by a monotonic sequence. Accepting
 a sample writes **two small records**: the queue record at the tail, not yet referenced,
@@ -27,7 +28,9 @@ record whose receipt write was lost is not a sample and is overwritten by the ne
 Every sequence between head and tail must hold a valid record; anything else is
 corruption, never a shorter queue. Forwarding a sample writes only `head`.
 
-Each sample therefore costs two writes of at most 166 bytes, and each forward one write
+Receipt and queue records have version 2, which added the ACK power command and the link
+quality; version 1 records still decode, without them. Each sample therefore costs two
+writes of at most 168 bytes, and each forward one write
 of 14 bytes, whatever the number of enrollments or queued samples. The v1 layout rewrote
 the whole state, up to 20 KB, twice per sample. The registry is rewritten only by
 administration and, on a transmitter, once per sample to reserve its counter; with one

@@ -426,6 +426,7 @@ Result PersistentStore::commit(const Binding& b, uint64_t expected, const Receip
     record.slot = uint8_t(slot);
     record.generation = registry_.entries[slot].generation;
     record.frame = receipt.last;
+    record.link = receipt.link;
     char name[records::NameCapacity];
     records::queueKey(tail_, name);
     if (!records_.write(name, buffer_.data(), records::encode(record, buffer_.data()))) {
@@ -486,6 +487,7 @@ bool PersistentStore::peek(QueuedSample& out) {
     out.generation = e.generation;
     out.counter = m.counter;
     out.data = m.data;
+    out.link = record.link;
     return true;
 }
 Result PersistentStore::forwarded(uint64_t node, uint64_t generation, uint64_t counter) {

@@ -14,10 +14,13 @@ constexpr size_t RegistryHeaderSize = 1 + 1 + 1 + 8 + 8 + 8 + 8 + 2 + 1;
 constexpr size_t RegistryEntrySize = 1 + 1 + 8 + 8 + KeySize + 8;
 constexpr size_t RegistryCapacity =
     RegistryHeaderSize + BindingCapacity * RegistryEntrySize + CrcSize;
-// kind 1, version 1, generation 8, counter 8, through 8, frame size 2, frame.
-constexpr size_t ReceiptCapacity = 1 + 1 + 8 + 8 + 8 + 2 + MaxFrame + CrcSize;
-// kind 1, version 1, sequence 8, slot 1, generation 8, frame size 2, frame.
-constexpr size_t QueueRecordCapacity = 1 + 1 + 8 + 1 + 8 + 2 + MaxFrame + CrcSize;
+// kind 1, version 1, generation 8, counter 8, through 8, frame size 2, frame; version 2
+// then adds the ACK power command (1). Version 1 receipts decode with KeepPower.
+constexpr size_t ReceiptCapacity = 1 + 1 + 8 + 8 + 8 + 2 + MaxFrame + 1 + CrcSize;
+// kind 1, version 1, sequence 8, slot 1, generation 8, frame size 2, frame; version 2 then
+// adds the frame's link quality: known 1, RSSI 2, SNR 2. Version 1 records still decode.
+constexpr size_t LinkSize = 1 + 2 + 2;
+constexpr size_t QueueRecordCapacity = 1 + 1 + 8 + 1 + 8 + 2 + MaxFrame + LinkSize + CrcSize;
 // kind 1, version 1, sequence 8.
 constexpr size_t HeadSize = 1 + 1 + 8 + CrcSize;
 // kind 1, version 1, count 1, then generation 8 and fingerprint 8 per retired credential.
@@ -66,6 +69,7 @@ struct QueueRecord {
     uint64_t sequence = 0, generation = 0;
     uint8_t slot = 0;
     Frame frame{};
+    Link link{}; // Unknown for records written before version 2.
 };
 
 size_t encode(const Registry&, Role, uint64_t device, uint8_t* output);
