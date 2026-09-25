@@ -79,7 +79,8 @@ void ReceiverController::poll() {
     }
     if (state_ != ReceiverState::Listening) return;
     Frame frame{};
-    const auto status = radio_.receive(frame);
+    Link link{};
+    const auto status = radio_.receiveMeasured(frame, link);
     if (status == ReceiveStatus::Error) {
         fail();
         return;
@@ -87,9 +88,9 @@ void ReceiverController::poll() {
     if (status == ReceiveStatus::Empty) return;
     const uint8_t type = untrustedType(frame);
     if (type >= FirstPairingType && type <= LastPairingType) {
-        const Link link = radio_.lastLink();
         const int16_t rssi = link.known ? link.rssiDbm : int16_t(0);
         if (!pairing_ || !pairing_->handle(frame, rssi, ack_)) return;
+        data_ = false;
         startedAt_ = clock_.nowMs();
         if (!radio_.startTransmit(ack_)) {
             fail();
@@ -104,7 +105,8 @@ void ReceiverController::poll() {
     const uint64_t node = untrustedDataNode(frame);
     const size_t count = node ? store_.bindings(node, bindings, 2) : 0;
     result_ = Result::Unauthorized;
-    link_ = radio_.lastLink();
+    link_ = link;
+    data_ = true;
     for (size_t i = 0; i < count; ++i) {
         result_ = cajui::receive(bindings[i], frame, store_, ack_, link_, power_);
         if (result_ != Result::CryptoError) break;

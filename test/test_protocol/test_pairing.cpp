@@ -98,12 +98,13 @@ public:
         return ReceiveStatus::Received;
     }
     bool sleep() override { return true; }
-    Link lastLink() const override {
-        Link link{};
-        link.known = true;
-        link.rssiDbm = rssi;
-        link.snrTenthsDb = 80;
-        return link;
+    ReceiveStatus receiveMeasured(Frame& frame, Link& link) override {
+        const auto status = receive(frame);
+        link = Link{};
+        link.known = status == ReceiveStatus::Received;
+        link.rssiDbm = link.known ? rssi : int16_t(0);
+        link.snrTenthsDb = link.known ? int16_t(80) : int16_t(0);
+        return status;
     }
 };
 
@@ -341,6 +342,36 @@ Result sendSample(PairRig& rig, uint64_t counter) {
     rig.controller.poll();
     rig.rxRadio.sent.clear();
     return rig.controller.lastResult();
+}
+void test_each_sample_keeps_the_link_measured_with_its_own_frame() {
+    PairRig rig;
+    TEST_ASSERT_TRUE(fixtures::enroll(*rig.rx));
+    TEST_ASSERT_TRUE(fixtures::enroll(*rig.tx));
+    rig.rxRadio.rssi = -97;
+    EXPECT_RESULT(Result::Ok, sendSample(rig, 1));
+    TEST_ASSERT_TRUE(rig.controller.acknowledgedData());
+    TEST_ASSERT_EQUAL_INT16(-97, rig.controller.lastLink().rssiDbm);
+    QueuedSample queued{};
+    TEST_ASSERT_TRUE(rig.rx->peek(queued));
+    TEST_ASSERT_TRUE(queued.link.known);
+    TEST_ASSERT_EQUAL_INT16(-97, queued.link.rssiDbm);
+    TEST_ASSERT_EQUAL_INT16(80, queued.link.snrTenthsDb);
+    // A pairing reply is not a data acknowledgement.
+    TEST_ASSERT_TRUE(rig.client.start());
+    rig.host.open();
+    rig.run(1);
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    for (int i = 0; i < 30 && rig.rxRadio.sent.empty(); ++i) {
+        rig.client.poll();
+        if (!rig.txRadio.sent.empty()) {
+            rig.rxRadio.inbox.push_back(rig.txRadio.sent.front());
+            rig.txRadio.sent.pop_front();
+        }
+        rig.controller.poll(); // Leaves the reply transmitting.
+        rig.clock.time += 100;
+    }
+    TEST_ASSERT_FALSE(rig.rxRadio.sent.empty()); // The offer is being transmitted.
+    TEST_ASSERT_FALSE(rig.controller.acknowledgedData());
 }
 void test_lost_done_on_repairing_never_cuts_the_node_off() {
     for (int doneArrives = 0; doneArrives < 2; ++doneArrives) {
@@ -1045,6 +1076,7 @@ void runPairingTests() {
     RUN_TEST(test_pairing_frames_round_trip_and_reject_tampering);
     RUN_TEST(test_radio_pairing_creates_matching_active_bindings);
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
+    RUN_TEST(test_each_sample_keeps_the_link_measured_with_its_own_frame);
     RUN_TEST(test_lost_done_on_repairing_never_cuts_the_node_off);
     RUN_TEST(test_frame_builders_and_parsers_refuse_zero_identities);
     RUN_TEST(test_host_edge_cases_never_store_or_reply);

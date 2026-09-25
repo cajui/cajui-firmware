@@ -129,7 +129,7 @@ void ReceiverApp::setup() {
     commands_.reset(new cajui::Provisioning(store_, esp_random(), opened ? &uplinkBlob_ : nullptr,
                                             adminMode_ ? cajui::ConsoleMode::Admin
                                                        : cajui::ConsoleMode::Operation,
-                                            opened ? &radioBlob_ : nullptr));
+                                            &radioBlob_)); // Reports STORAGE if unopened.
     console_.reset(new Console(*commands_));
     if (adminMode_) {
         Serial.printf("CJAPP ADMIN reason=%s\n", cajui::reasonName(decision.reason));
@@ -174,13 +174,18 @@ void ReceiverApp::loop() {
         const auto before = controller_.state();
         controller_.poll();
         if (before == cajui::ReceiverState::Listening &&
-            controller_.state() == cajui::ReceiverState::Acknowledging)
-            Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=%d snr=%s%d.%d\n",
-                          unsigned(controller_.lastResult()), unsigned(store_.queued()),
-                          int(controller_.lastLink().rssiDbm),
-                          controller_.lastLink().snrTenthsDb < 0 ? "-" : "",
-                          std::abs(controller_.lastLink().snrTenthsDb) / 10,
-                          std::abs(controller_.lastLink().snrTenthsDb) % 10);
+            controller_.state() == cajui::ReceiverState::Acknowledging &&
+            controller_.acknowledgedData()) { // Pairing replies log their own lines.
+            const cajui::Link& link = controller_.lastLink();
+            if (link.known)
+                Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=%d snr=%s%d.%d\n",
+                              unsigned(controller_.lastResult()), unsigned(store_.queued()),
+                              int(link.rssiDbm), link.snrTenthsDb < 0 ? "-" : "",
+                              std::abs(link.snrTenthsDb) / 10, std::abs(link.snrTenthsDb) % 10);
+            else
+                Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=unknown snr=unknown\n",
+                              unsigned(controller_.lastResult()), unsigned(store_.queued()));
+        }
         listening = controller_.state() == cajui::ReceiverState::Listening;
         listening_.store(listening);
         if (controller_.state() == cajui::ReceiverState::Failed) {
