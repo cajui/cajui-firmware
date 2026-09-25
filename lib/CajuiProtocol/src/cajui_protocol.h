@@ -86,6 +86,26 @@ bool x25519Public(const X25519Key& privateKey, X25519Key& publicKey);
 bool x25519Shared(const X25519Key& privateKey, const X25519Key& peerPublic, X25519Key& shared);
 bool hkdfSha256(const uint8_t* ikm, size_t ikmSize, const uint8_t* salt, size_t saltSize,
                 const uint8_t* info, size_t infoSize, uint8_t* output, size_t outputSize);
+// SHA-256 over a stream, and ECDSA P-256 verification of a SHA-256 digest, for signed
+// firmware updates. Same libraries as above; nothing is implemented locally.
+constexpr size_t Sha256Size = 32;
+class Sha256 {
+public:
+    Sha256();
+    ~Sha256();
+    Sha256(const Sha256&) = delete;
+    Sha256& operator=(const Sha256&) = delete;
+    bool update(const uint8_t* data, size_t size);
+    // Ends the stream; further updates fail.
+    bool finish(uint8_t digest[Sha256Size]);
+
+private:
+    void* context_ = nullptr;
+    bool ok_ = false;
+};
+// `publicKey` is a DER SubjectPublicKeyInfo of a P-256 key; `signature` is DER (r, s).
+bool verifyP256(const uint8_t* publicKey, size_t keySize, const uint8_t digest[Sha256Size],
+                const uint8_t* signature, size_t signatureSize);
 // Header type of a well-formed v1 envelope, or zero. Unauthenticated: routing only.
 uint8_t untrustedType(const Frame&);
 // Unauthenticated routing hint only; callers MUST authenticate with open/receive.
