@@ -238,6 +238,10 @@ void test_pairing_section_states() {
     TEST_ASSERT_TRUE(contains(page, "Transmitter 0000000000000020 paired."));
     TEST_ASSERT_TRUE(contains(page, "Stop searching"));
     TEST_ASSERT_FALSE(contains(page, "No transmitter asking"));
+    pairing.conflict[1] = true; // A claimed-twice ID is shown without an Add button.
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "0000000000000010 <small>Two devices answered"));
+    TEST_ASSERT_FALSE(contains(page, "name=\"node\" value=\"0000000000000010\""));
 }
 void test_transmitters_section_refreshes_live_only_while_pairing() {
     static char page[PageCapacity];

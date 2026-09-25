@@ -324,10 +324,11 @@ void test_host_ignores_input_outside_the_window_and_limits_candidates() {
         TEST_ASSERT_FALSE(rig.host.handle(request, int16_t(-40 - node), reply));
     }
     TEST_ASSERT_EQUAL_size_t(MaxCandidates, rig.host.candidateCount());
-    bool oldestKept = false;
+    // A full list ignores later requesters instead of evicting a listed node, which would
+    // let an attacker flush the victim and re-list its ID with another key.
     for (size_t i = 0; i < rig.host.candidateCount(); ++i)
-        oldestKept = oldestKept || rig.host.candidates()[i].node == 10;
-    TEST_ASSERT_FALSE(oldestKept); // The least recently seen requester was replaced.
+        TEST_ASSERT_EQUAL_UINT64(10 + i, rig.host.candidates()[i].node);
+    EXPECT_RESULT(Result::NotFound, rig.host.accept(14));
     EXPECT_RESULT(Result::NotFound, rig.host.accept(99));
     TEST_ASSERT_FALSE(rig.host.handle(Frame{}, -50, reply));
     Frame forged{};
@@ -352,15 +353,17 @@ void test_offers_store_nothing_and_resist_spoofed_requests() {
     TEST_ASSERT_TRUE(rig.host.handle(request, -50, first));
     TEST_ASSERT_TRUE(rig.host.handle(request, -50, second));
     TEST_ASSERT_TRUE(sameFrame(first, second));
-    // An unauthenticated request with the offered node's ID and another nonce is ignored.
+    // Repeated adds never consume an enrollment slot.
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // Another device claiming the offered node's ID withdraws the offer: neither gets it.
     Frame spoofed{};
     TEST_ASSERT_TRUE(buildRequest(2, 6, keys.publicKey, spoofed));
     TEST_ASSERT_FALSE(rig.host.handle(spoofed, -50, second));
-    EXPECT_RESULT(HostState::Offered, rig.host.state());
-    TEST_ASSERT_TRUE(rig.host.handle(request, -50, second));
-    TEST_ASSERT_TRUE(sameFrame(first, second));
-    // Repeated adds, stopping and window expiry never consume an enrollment slot.
-    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    EXPECT_RESULT(HostState::Open, rig.host.state());
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].conflict);
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, second));
+    EXPECT_RESULT(Result::Conflict, rig.host.accept(2));
+    // Stopping, searching again and window expiry never consume a slot either.
     rig.host.close();
     rig.host.open();
     TEST_ASSERT_FALSE(rig.host.handle(request, -50, first));
@@ -369,6 +372,37 @@ void test_offers_store_nothing_and_resist_spoofed_requests() {
     rig.host.poll();
     EXPECT_RESULT(HostState::Closed, rig.host.state());
     TEST_ASSERT_EQUAL_size_t(BindingCapacity, rig.rx->freeSlots());
+}
+void test_injected_request_cannot_redirect_a_listed_node() {
+    PairRig rig;
+    CountingEntropy entropy;
+    KeyPair victim{}, attacker{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, victim));
+    TEST_ASSERT_TRUE(newKeyPair(entropy, attacker));
+    Frame request{}, injected{}, reply{};
+    rig.host.open();
+    TEST_ASSERT_TRUE(buildRequest(2, 5, victim.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    // The attacker repeats the victim's public node ID with its own key and nonce before
+    // the operator clicks Add. The listed key stays the victim's and Add is refused.
+    TEST_ASSERT_TRUE(buildRequest(2, 9, attacker.publicKey, injected));
+    TEST_ASSERT_FALSE(rig.host.handle(injected, -80, reply));
+    TEST_ASSERT_EQUAL_size_t(1, rig.host.candidateCount());
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].conflict);
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].publicKey == victim.publicKey);
+    TEST_ASSERT_EQUAL_UINT64(5, rig.host.candidates()[0].nonce);
+    EXPECT_RESULT(Result::Conflict, rig.host.accept(2));
+    EXPECT_RESULT(HostState::Open, rig.host.state());
+    // The same key with a new nonce (a restarted attempt) is also a conflict.
+    rig.host.open();
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    TEST_ASSERT_TRUE(buildRequest(2, 6, victim.publicKey, injected));
+    TEST_ASSERT_FALSE(rig.host.handle(injected, -50, reply));
+    EXPECT_RESULT(Result::Conflict, rig.host.accept(2));
+    // A new window starts clean.
+    rig.host.open();
+    TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
 }
 void test_previous_node_still_gets_done_after_another_add() {
     PairRig rig;
@@ -614,6 +648,7 @@ void runPairingTests() {
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
     RUN_TEST(test_host_ignores_input_outside_the_window_and_limits_candidates);
     RUN_TEST(test_offers_store_nothing_and_resist_spoofed_requests);
+    RUN_TEST(test_injected_request_cannot_redirect_a_listed_node);
     RUN_TEST(test_previous_node_still_gets_done_after_another_add);
     RUN_TEST(test_full_storage_is_refused_before_any_exchange);
     RUN_TEST(test_node_ignores_forged_offers_and_resends_confirm_until_done);

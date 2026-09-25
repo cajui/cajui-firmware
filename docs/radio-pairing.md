@@ -16,7 +16,10 @@ secret. A passive listener cannot compute the key. The exchange is **not authent
 against an active attacker** in radio range during the window: the node has no display
 on which to compare a code, so an attacker who answers first could pair with either side.
 Mitigations are the physical action on both devices, the short window, the displayed node
-ID and signal strength, and radio proximity. A per-device secret printed on a label can
+ID and signal strength, radio proximity, and key pinning: the first key heard for a node ID
+is kept for the whole window, and a second key or attempt nonce for that ID blocks adding
+it (see step 2). An attacker can therefore make pairing fail, as jamming would, but cannot
+silently take the place of a listed node once the node itself has been heard. A per-device secret printed on a label can
 later authenticate the exchange; it is not part of this version.
 
 Cryptography uses established libraries: X25519 through mbedTLS on ESP32 and OpenSSL on
@@ -62,13 +65,18 @@ of a new credential generation, exactly as a USB enrollment would store it.
 
 1. The node sends JOIN_REQUEST, then listens 1.5 s for an offer; it repeats every 2 s with
    jitter for up to two minutes.
-2. While the window is open, the receiver lists requesting nodes (at most four, with the
-   latest signal strength). When the administrator adds one, it refuses if no enrollment
-   slot is free, chooses a random generation (and a random network if it has none),
-   derives the key and keeps the offer **in memory only**, answering the node's next
-   request with JOIN_OFFER. A repeated request with the same attempt nonce receives the
-   identical offer. A request with another nonce does not cancel it: requests are
-   unauthenticated, and a node that restarted is added again.
+2. While the window is open, the receiver lists requesting nodes: the first four of the
+   window, with the latest signal strength. Later requesters are ignored rather than
+   evicting a listed node. The first public key and attempt nonce heard for a node ID are
+   pinned; a request for that ID with another key or nonce marks it as a **conflict**,
+   and the page shows it without an Add button until the window is opened again. When
+   the administrator adds a node, the receiver refuses if the node is in conflict or no
+   enrollment slot is free, chooses a random generation (and a random network if it has
+   none), derives the key and keeps the offer **in memory only**, answering the node's
+   next request with JOIN_OFFER. A repeated request with the pinned nonce receives the
+   identical offer. A conflicting request for the offered node withdraws the offer before
+   either device can confirm it. A node that restarted its attempt has a new key and
+   nonce, so it conflicts with itself: the administrator stops and searches again.
 3. The node validates the offer (its own ID and attempt nonce, nonzero identifiers,
    profile 1, a receiver ID different from its own, a valid tag under the derived key) and
    checks that its storage can accept it (a free slot, and the same network and receiver

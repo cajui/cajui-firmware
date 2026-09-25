@@ -50,6 +50,7 @@ struct PairingView {
     size_t count = 0;
     uint64_t nodes[MaxPairingCandidates]{};
     int16_t rssi[MaxPairingCandidates]{};
+    bool conflict[MaxPairingCandidates]{}; // Two devices claimed this ID: cannot be added.
     uint64_t offered = 0, paired = 0;
 };
 struct SetupView {

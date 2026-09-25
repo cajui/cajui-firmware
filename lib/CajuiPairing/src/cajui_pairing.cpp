@@ -254,21 +254,25 @@ void PairingHost::dropOffer() {
     offerFrame_ = Frame{};
     if (state_ == HostState::Offered) state_ = paired_ ? HostState::Paired : HostState::Open;
 }
-void PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKey, int16_t rssi) {
-    Candidate* slot = nullptr;
-    for (size_t i = 0; i < count_; ++i)
-        if (candidates_[i].node == node) slot = &candidates_[i];
-    if (!slot && count_ < MaxCandidates) slot = &candidates_[count_++];
-    if (!slot) { // Full: replace the least recently seen requester.
-        slot = &candidates_[0];
-        for (size_t i = 1; i < count_; ++i)
-            if (int32_t(candidates_[i].seenAt - slot->seenAt) < 0) slot = &candidates_[i];
+bool PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKey, int16_t rssi) {
+    for (size_t i = 0; i < count_; ++i) {
+        Candidate& listed = candidates_[i];
+        if (listed.node != node) continue;
+        // Never replace a pinned key: one injected frame would otherwise redirect the
+        // operator's click to an attacker while the list still shows the victim's ID.
+        if (listed.nonce != nonce || listed.publicKey != publicKey) listed.conflict = true;
+        listed.rssi = rssi;
+        listed.seenAt = clock_.nowMs();
+        return !listed.conflict;
     }
-    slot->node = node;
-    slot->nonce = nonce;
-    slot->publicKey = publicKey;
-    slot->rssi = rssi;
-    slot->seenAt = clock_.nowMs();
+    if (count_ == MaxCandidates) return false;
+    Candidate& slot = candidates_[count_++];
+    slot.node = node;
+    slot.nonce = nonce;
+    slot.publicKey = publicKey;
+    slot.rssi = rssi;
+    slot.seenAt = clock_.nowMs();
+    return true;
 }
 bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     reply = Frame{};
@@ -288,14 +292,17 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
         uint64_t nonce = 0;
         X25519Key publicKey{};
         if (!parseRequest(frame, node, nonce, publicKey) || node == store_.device()) return false;
-        track(node, nonce, publicKey, rssi);
-        // A different nonce is ignored rather than cancelling the offer: requests are
-        // unauthenticated. A node that restarted is added again by the operator.
-        if (state_ == HostState::Offered && node == offer_.node && nonce == offer_.nonce) {
-            reply = offerFrame_; // Identical retransmission for a repeated request.
-            return true;
+        const bool consistent = track(node, nonce, publicKey, rssi);
+        if (state_ != HostState::Offered || node != offer_.node) return false;
+        // Two devices claim the offered node: withdraw the offer before either confirms.
+        // Requests are unauthenticated, so this lets a radio attacker cancel an offer
+        // (like jamming would) but never redirect it.
+        if (!consistent) {
+            dropOffer();
+            return false;
         }
-        return false;
+        reply = offerFrame_; // Identical retransmission for a repeated request.
+        return true;
     }
     if (type != uint8_t(PairingType::Confirm) || state_ != HostState::Offered ||
         !verifyTagged(frame, PairingType::Confirm, offer_.network, offer_.node, offer_.nonce, key_))
@@ -330,6 +337,7 @@ Result PairingHost::accept(uint64_t node) {
     for (size_t i = 0; i < count_; ++i)
         if (candidates_[i].node == node) candidate = &candidates_[i];
     if (!candidate) return Result::NotFound;
+    if (candidate->conflict) return Result::Conflict;
     if (!store_.freeSlots()) return store_.healthy() ? Result::Full : Result::StorageError;
     KeyPair keys{};
     Offer offer{};

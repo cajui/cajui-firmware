@@ -214,6 +214,13 @@ void transmitterList(Html& page, const SetupView& v) {
                  unsigned(pairing->remainingSeconds));
         if (!pairing->count) page.raw("<p><small>No transmitter asking to join yet.</small></p>");
         for (size_t i = 0; i < pairing->count && i < MaxPairingCandidates; ++i) {
+            if (pairing->conflict[i]) {
+                page.raw("<p>%016" PRIx64 " <small>Two devices answered with this ID. Stop "
+                         "searching, keep only your transmitter in pairing mode and search "
+                         "again.</small></p>",
+                         pairing->nodes[i]);
+                continue;
+            }
             page.raw("<form method=\"post\" action=\"/pair/add\" data-live-form><p>%016" PRIx64
                      " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
                      "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",

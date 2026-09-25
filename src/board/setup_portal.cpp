@@ -230,6 +230,7 @@ void SetupPortal::fillPairing(cajui::PairingView& pairing) const {
     for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
         pairing.nodes[i] = pairing_->candidates()[i].node;
         pairing.rssi[i] = pairing_->candidates()[i].rssi;
+        pairing.conflict[i] = pairing_->candidates()[i].conflict;
     }
     if (pairing_->state() == cajui::HostState::Offered) pairing.offered = pairing_->offeredNode();
     pairing.paired = pairing_->pairedNode();
