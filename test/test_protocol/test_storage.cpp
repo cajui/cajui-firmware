@@ -231,6 +231,16 @@ void test_repeated_ack_repeats_the_stored_power_command_after_restart() {
     future[1] = 3;
     repairChecksum(future);
     TEST_ASSERT_FALSE(records::decode(future.data(), future.size(), old));
+    // A receipt of a v1 exchange carrying a power command is not a canonical record.
+    MemoryRecords v1Records;
+    auto v1Store = mounted(v1Records, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*v1Store));
+    receiveOk(*v1Store, 1); // data() seals v1 DATA.
+    auto& receipt = v1Records.bytes("r00");
+    receipt[receipt.size() - 5] = 7;
+    repairChecksum(receipt);
+    v1Store = remount(v1Records, Role::Receiver);
+    EXPECT_HEALTH(Health::Invalid, *v1Store);
 }
 void test_power_loss_at_each_commit_step() {
     // 0: queue record lost; 1: queue record written, receipt lost (the orphan case);

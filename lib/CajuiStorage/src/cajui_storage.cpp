@@ -111,7 +111,9 @@ Health PersistentStore::loadReceiver() {
         uint64_t counter = 0;
         if (e.state == Enrollment::Prepared || !record.receipt.counter ||
             !frameMatches(e, registry_.network, record.receipt.last, counter) ||
-            counter != record.receipt.counter)
+            counter != record.receipt.counter ||
+            // Only a v2 exchange carries a power command; one encoding per receipt.
+            (record.receipt.last.bytes[4] != WireV2 && record.receipt.ackPower != KeepPower))
             return Health::Invalid;
         receipts_[slot] = record;
         if (record.through > tail_) tail_ = record.through;
