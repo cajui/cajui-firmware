@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cajui_device.h"
+#include "cajui_crc32.h"
 
 namespace cajui {
 BootDecision decideBoot(const PersistentStore& store, bool mounted, uint16_t radioProfile,
@@ -44,6 +45,58 @@ const char* reasonName(AdminReason reason) {
     case AdminReason::None: break;
     }
     return "none";
+}
+namespace {
+constexpr uint8_t PowerKind = 'P', PowerVersion = 1;
+int8_t clampPower(int dbm, int8_t ceiling) {
+    return int8_t(dbm < MinPowerDbm ? MinPowerDbm : dbm > ceiling ? ceiling : dbm);
+}
+} // namespace
+bool validPower(int dbm) {
+    return dbm >= MinPowerDbm && dbm <= MaxPowerDbm;
+}
+ReadResult loadPower(AtomicBlob& blob, int8_t& dbm) {
+    dbm = DefaultPowerDbm;
+    uint8_t bytes[RadioRecordSize]{};
+    size_t size = 0;
+    const ReadResult read = blob.read(bytes, sizeof(bytes), size);
+    if (read != ReadResult::Ok) return read;
+    uint32_t crc = 0;
+    for (size_t i = 3; i < RadioRecordSize; ++i) crc = (crc << 8) | bytes[i];
+    // The stored byte is a two's-complement dBm value.
+    const int value = bytes[2] < 0x80 ? int(bytes[2]) : int(bytes[2]) - 0x100;
+    if (size != RadioRecordSize || bytes[0] != PowerKind || bytes[1] != PowerVersion ||
+        crc != crc32(bytes, 3) || !validPower(value))
+        return ReadResult::Error;
+    dbm = int8_t(value);
+    return ReadResult::Ok;
+}
+bool savePower(AtomicBlob& blob, int8_t dbm) {
+    if (!validPower(dbm)) return false;
+    uint8_t bytes[RadioRecordSize] = {PowerKind, PowerVersion, uint8_t(dbm)};
+    const uint32_t crc = crc32(bytes, 3);
+    for (int i = 0; i < 4; ++i) bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
+    return blob.replace(bytes, sizeof(bytes));
+}
+int8_t currentPower(const PowerState* state, int8_t configured) {
+    const int8_t ceiling = validPower(configured) ? configured : DefaultPowerDbm;
+    return state && state->ceiling == ceiling ? clampPower(state->dbm, ceiling) : ceiling;
+}
+PowerState nextPower(const PowerState& now, int8_t configured, bool acknowledged, int8_t command) {
+    const int8_t ceiling = validPower(configured) ? configured : DefaultPowerDbm;
+    PowerState next{};
+    next.ceiling = ceiling;
+    next.dbm = now.ceiling == ceiling ? clampPower(now.dbm, ceiling) : ceiling;
+    next.missed = now.ceiling == ceiling ? now.missed : 0;
+    const uint8_t missed = next.missed;
+    if (!acknowledged) {
+        next.missed = missed < MissedAckLimit ? uint8_t(missed + 1) : MissedAckLimit;
+        if (next.missed >= MissedAckLimit) next.dbm = ceiling;
+        return next;
+    }
+    next.missed = 0;
+    if (command != KeepPower) next.dbm = clampPower(command, ceiling);
+    return next;
 }
 uint32_t retryDelayMs(uint32_t consecutiveFaults) {
     uint32_t delay = FirstRetryMs;

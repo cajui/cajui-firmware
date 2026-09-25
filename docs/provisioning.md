@@ -117,6 +117,7 @@ CJ1 INFO <device:16> <node:16> <generation:16>
 CJ1 REVOKE <device:16> <node:16> <generation:16>
 CJ1 RESERVE <device:16> <node:16> <generation:16>
 CJ1 RESET <device:16> [discard]
+CJ1 POWER <device:16> [dbm]
 CJ1 REBOOT <device:16>
 ```
 
@@ -135,11 +136,26 @@ unhealthy, well-formed commands other than HELLO and REBOOT return `STORAGE`; RE
 stays available because restarting remounts the store. INFO, ACTIVATE, REVOKE and
 RESERVE return `NOT_FOUND` for an unknown node/generation pair. RESERVE returns
 `INVALID` on a receiver and `CONFLICT` for a prepared or revoked generation. RESET
-returns `QUEUED` while a receiver holds samples, unless `discard` is given.
+returns `QUEUED` while a receiver holds samples, unless `discard` is given. POWER without
+a value reports the configured transmit power (the −9 dBm default when none is stored)
+in both modes; with a signed decimal value from −9 to 22 it stores it, in admin mode
+only. It applies at the next restart.
 
 Profile `0001` is the initial direct-LoRa profile identifier; its field and regulatory
 validation remain pending. Radio pairing is the over-the-air alternative to USB
 enrollment. There is no remote administration: every CJ1 command needs USB access.
+
+## Transmit power
+
+```sh
+uv run tools/provision.py power --port <port>             # report
+uv run tools/provision.py power --port <port> --dbm 14    # store, then restart
+```
+
+The value is stored in the `radio` record of the `cajui` partition, separately from
+enrollment. It is the maximum a receiver's power command can use on a transmitter; see
+[radio applications](radio-applications.md#enrollment-and-image-changes). Choosing a
+value that the region and antenna permit is the operator's responsibility.
 
 ## Receiver uplink settings
 

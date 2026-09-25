@@ -436,6 +436,29 @@ def leave(link, discard_queue=False):
     }
 
 
+# Mirrors cajui::MinPowerDbm/MaxPowerDbm (SX1262 high-power amplifier). Stay within what
+# the region and antenna allow; the firmware only enforces the chip's range.
+POWER_RANGE = range(-9, 23)
+
+
+def power(link, dbm=None):
+    """Report or set the configured transmit power; a new value applies after restart."""
+    if dbm is None:
+        device = wake(link)["device"]
+        values = link.request("POWER " + device)
+        if len(values) != 1 or int(values[0]) not in POWER_RANGE:
+            raise ProvisioningError("Invalid power status")
+        return {"device": device, "power_dbm": int(values[0])}
+    if dbm not in POWER_RANGE:
+        raise ProvisioningError("Power must be -9 to 22 dBm")
+    status = ready(link)
+    values = link.request(f"POWER {status['device']} {dbm}")
+    if values != [str(dbm)]:
+        raise ProvisioningError("Device did not store the requested power")
+    release(link, status["device"])
+    return {"device": status["device"], "power_dbm": dbm, "role": status["role"]}
+
+
 def read_secret(path, prompt):
     """Read a secret from a file (first line) or an interactive prompt without echo."""
     if path is None:
@@ -534,6 +557,9 @@ def main():
     uplink_status.add_argument("--receiver", required=True)
     pair = sub.add_parser("pair", help="Start radio pairing on a transmitter")
     pair.add_argument("--transmitter", required=True)
+    power_command = sub.add_parser("power", help="Report or set the transmit power in dBm")
+    power_command.add_argument("--port", required=True)
+    power_command.add_argument("--dbm", type=int, help="New power, -9 to 22; omit to report")
     reset = sub.add_parser("reset", help="Leave the network, retiring every key")
     reset.add_argument("--port", required=True)
     reset.add_argument("--discard-queue", action="store_true", help="Receiver: drop samples")
@@ -563,6 +589,8 @@ def main():
             output = configure_uplink(connect(args.receiver), fields)
         elif args.action == "pair":
             output = start_pairing(connect(args.transmitter))
+        elif args.action == "power":
+            output = power(connect(args.port), args.dbm)
         elif args.action == "reset":
             output = leave(connect(args.port), args.discard_queue)
         elif args.action == "uplink-status":

@@ -11,9 +11,19 @@ pio run -e runtime_tx -e runtime_rx
 Building does not access devices. Uploads and RF tests are separate manual operations.
 Identify each board by its stable device ID before choosing a role or upload port.
 Both roles transmit: the receiver sends ACKs. Profile 1 uses 915.2 MHz, 125 kHz,
-SF7, CR4/5, an eight-symbol preamble, private sync word 0x12, explicit headers,
-CRC and **−9 dBm**. This is a bench configuration, not regional auto-configuration;
-minimum power does not make operation without a suitable antenna safe.
+SF7, CR4/5, an eight-symbol preamble, private sync word 0x12, explicit headers and CRC.
+Transmit power defaults to **−9 dBm**, a bench value; `CJ1 POWER` (or `provision.py
+power`) stores another one per device, from −9 to +22 dBm, the SX1262 range, applied at
+the next restart. Keep it within what the region and antenna allow: the firmware does not
+know either. This is not regional auto-configuration, and minimum power does not make
+operation without a suitable antenna safe.
+
+Transmitters send version 2 DATA, so the receiver's ACK can command a transmit power
+([protocol](protocol-v1.md#version-2-power-command)). The configured power is the
+ceiling; a commanded power is kept in RTC memory across deep sleep, and three cycles
+without an ACK, or a power cycle, return the node to the configured power. The receiver
+does not command any change yet: the steps of a power policy are still to be defined
+from field measurements. Update the receiver before its transmitters.
 
 ## Enrollment and image changes
 
@@ -65,7 +75,9 @@ different: the node stays awake in admin mode (`reason=storage`) for diagnosis o
 and never retries on its own, since remounting cannot repair it. The loop task runs under the ESP-IDF task
 watchdog (5 seconds), so a hang restarts the node.
 
-`CJAPP DELIVERY completion=1` means an authenticated matching ACK; other completion
+`CJAPP SAMPLE ... power=<dBm>` shows the power used for the cycle, and `CJAPP DELIVERY
+... power_command=<dBm>` the command of the ACK (127: keep). `CJAPP DELIVERY completion=1`
+means an authenticated matching ACK; other completion
 values follow `Completion` in `cajui_runtime.h` and are unconfirmed. Power consumption,
 GPIO hold behavior and actual sampling cadence require hardware measurement.
 
@@ -74,7 +86,9 @@ GPIO hold behavior and actual sampling cadence require hardware measurement.
 `ReceiverController` consumes at most one frame per poll. `untrustedDataNode` is only
 a bounded routing hint to an already enrolled binding, never proof of identity.
 The existing authenticated receive path commits the sample and replay receipt before
-starting the ACK. Unknown, revoked, corrupted, replayed or full-queue input receives
+starting the ACK. The radio's RSSI and SNR of each accepted frame are logged
+(`CJAPP ACCEPT ... rssi=<dBm> snr=<dB>`) and stored with the queued sample. Unknown,
+revoked, corrupted, replayed or full-queue input receives
 no acceptance ACK. A duplicate of the last committed sample gets the same ACK without
 another queue entry, even if the queue is full, at most three times per node per minute:
 a genuine node repeats a sample twice at most when its ACK is lost, and the bound keeps
@@ -100,7 +114,10 @@ JSON contract version 1. `device_id` is the node ID and `sample_id` is
 `<generation>.<counter>`, so a republished sample keeps its identity and Central
 deduplicates it. Metric 1/unit 1 map to `temperature`/`degC`, metric 2/unit 2 to
 `humidity`/`%`; other registry entries are sent as `metric-<n>`/`unit-<n>`. Error and
-skipped readings carry no value. `measured_at` is omitted: the receiver does not know
+skipped readings carry no value. The receiver's measurement of the frame follows as two
+readings of a `radio` sensor, `rssi` in `dBm` and `snr` in `dB`, so Central's version 1
+contract carries it unchanged; they are absent for samples queued before this was
+measured. `measured_at` is omitted: the receiver does not know
 when a queued sample was measured, so Central's receipt time for a backlog is the
 forwarding time.
 

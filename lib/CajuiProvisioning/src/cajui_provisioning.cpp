@@ -5,8 +5,8 @@
 namespace cajui {
 namespace {
 // Word counts include "CJ1", the command and the device ID.
-constexpr size_t MaxWords = 10, RebootWords = 3, ResetWords = 4, EnrollmentWords = 5,
-                 PrepareWords = 9, UplinkSetWords = 5;
+constexpr size_t MaxWords = 10, RebootWords = 3, ResetWords = 4, PowerSetWords = 4,
+                 EnrollmentWords = 5, PrepareWords = 9, UplinkSetWords = 5;
 constexpr size_t IdDigits = 16, ProfileDigits = 4;
 constexpr char FirstPrintable = ' ', LastPrintable = '~';
 int nibble(char c) {
@@ -199,6 +199,46 @@ bool setField(UplinkConfig& pending, const char* field, const char* value) {
     pending.port = port;
     return true;
 }
+// Parses a signed decimal power in dBm within the supported range.
+bool parsePower(const char* text, int8_t& dbm) {
+    constexpr size_t MaxDigits = 2;
+    constexpr int Decimal = 10;
+    const bool negative = *text == '-';
+    const char* digits = negative ? text + 1 : text;
+    const size_t length = std::strlen(digits);
+    if (!length || length > MaxDigits) return false;
+    int value = 0;
+    for (const char* c = digits; *c; ++c) {
+        if (*c < '0' || *c > '9') return false;
+        value = value * Decimal + (*c - '0');
+    }
+    value = negative ? -value : value;
+    if (!validPower(value)) return false;
+    dbm = int8_t(value);
+    return true;
+}
+}
+void Provisioning::power(size_t count, char* const* words, char* reply, size_t capacity) {
+    if (!radio_) return; // Reply stays CJ1 ERR INVALID.
+    int8_t dbm = DefaultPowerDbm;
+    if (count == RebootWords) { // Query: the stored power, or the default without one.
+        if (loadPower(*radio_, dbm) == ReadResult::Error) {
+            respond(Result::StorageError, "POWER", reply, capacity);
+            return;
+        }
+        std::snprintf(reply, capacity, "CJ1 OK POWER %d", int(dbm));
+        return;
+    }
+    if (count != PowerSetWords || !parsePower(words[3], dbm)) return;
+    if (mode_ == ConsoleMode::Operation) {
+        std::snprintf(reply, capacity, "CJ1 ERR ADMIN");
+        return;
+    }
+    if (!savePower(*radio_, dbm)) {
+        respond(Result::StorageError, "POWER", reply, capacity);
+        return;
+    }
+    std::snprintf(reply, capacity, "CJ1 OK POWER %d", int(dbm)); // Applies after restart.
 }
 void Provisioning::uplink(const char* command, size_t count, char* const* words, char* reply,
                           size_t capacity) {
@@ -272,6 +312,10 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     }
     if (!std::strncmp(command, "UPLINK", std::strlen("UPLINK"))) {
         uplink(command, count, words, reply, capacity);
+        return true;
+    }
+    if (!std::strcmp(command, "POWER")) {
+        power(count, words, reply, capacity);
         return true;
     }
     if (mode_ == ConsoleMode::Operation && std::strcmp(command, "INFO") != 0) {

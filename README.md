@@ -19,6 +19,10 @@ released.
 - Versioned per-record storage with an ESP32 NVS adapter, durable counter reservation,
   a 128-frame receiver queue committed before ACK in two small writes per sample,
   reusable enrollment slots and migration from the earlier single-snapshot layout.
+- Wire version 2: the ACK can command the transmitter's power (clamped to its configured
+  maximum, with a fallback after missed ACKs); version 1 nodes keep working. No power
+  policy is enabled yet. Transmit power is configurable per device over USB.
+- Radio RSSI/SNR of each accepted frame, logged and forwarded as `radio` readings.
 - Two-phase USB enrollment, resumable setup, key rotation, revocation and leaving a
   network (retired keys can never return).
 - A local Python tool with private recovery files and a software-restart check.

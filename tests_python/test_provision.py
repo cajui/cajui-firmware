@@ -33,6 +33,7 @@ class Device:
         # A fresh device boots in admin mode; asleep simulates a transmitter between samples.
         self.mode, self.asleep, self.resets = "admin", False, 0
         self.queued, self.ignore_reset = 0, False
+        self.power, self.power_reply = -9, None
 
     def reset(self):
         self.resets += 1
@@ -68,7 +69,14 @@ class Device:
             ]
         if words[1] != self.identity:
             raise provision.ProvisioningError("Wrong device identity")
-        if self.mode == "run" and verb not in {"INFO", "UPLINKINFO", "ADMIN", "REBOOT", "PAIR"}:
+        if self.mode == "run" and verb not in {
+            "INFO",
+            "UPLINKINFO",
+            "ADMIN",
+            "REBOOT",
+            "PAIR",
+            "POWER",
+        }:
             raise provision.ProvisioningError("Device rejected request: ADMIN")
         if verb == "PREPARE":
             proposed = words[2:]
@@ -103,6 +111,12 @@ class Device:
         elif verb == "ADMIN":
             self.boot += int(self.reboots)
             self.mode = "admin"
+        elif verb == "POWER":
+            if len(words) == 3:
+                if self.mode != "admin":
+                    raise provision.ProvisioningError("Device rejected request: ADMIN")
+                self.power = int(words[2])
+            return self.power_reply or [str(self.power)]
         elif verb == "RESET":
             if self.queued and words[2:] != ["discard"]:
                 raise provision.ProvisioningError("Device rejected request: QUEUED")
@@ -752,6 +766,27 @@ class UplinkCommandLineTests(unittest.TestCase):
         code, _, error = self.run_cli("reset", "--port", "rx-port")
         self.assertEqual(1, code)
         self.assertIn("did not leave", error)
+
+    def test_power_reports_and_sets_the_configured_value(self):
+        receiver = self.devices["rx-port"]
+        receiver.mode = "run"
+        code, output, _ = self.run_cli("power", "--port", "rx-port")
+        self.assertEqual(0, code)
+        self.assertEqual({"device": receiver.identity, "power_dbm": -9}, json.loads(output))
+        self.assertEqual("run", receiver.mode)  # A query never switches modes.
+        code, output, _ = self.run_cli("power", "--port", "rx-port", "--dbm", "14")
+        self.assertEqual(0, code)
+        self.assertEqual(14, json.loads(output)["power_dbm"])
+        self.assertEqual(14, receiver.power)
+        for bad in ("23", "-10"):
+            code, _, error = self.run_cli("power", "--port", "rx-port", "--dbm", bad)
+            self.assertEqual(1, code)
+            self.assertIn("-9 to 22", error)
+        receiver.power_reply = ["30"]
+        code, _, error = self.run_cli("power", "--port", "rx-port")
+        self.assertIn("Invalid power status", error)
+        code, _, error = self.run_cli("power", "--port", "rx-port", "--dbm", "5")
+        self.assertIn("did not store", error)
 
     def test_pair_starts_on_a_transmitter_only(self):
         self.devices["tx-port"] = Device("tx", "0000000000000002", [])
