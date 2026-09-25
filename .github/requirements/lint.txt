@@ -188,23 +188,26 @@ charset-normalizer==3.5.1 \
     --hash=sha256:fd0a274c0e5f9a21565cd9d3dd749b61f96b7aa1e20a93aa1ba4029518f2e5c0 \
     --hash=sha256:fdb8a068947befafba9952162645dc2fecaeb400e64584829ed5e9b2fbe21a7f
     # via requests
-clang-format==19.1.7 \
-    --hash=sha256:3e3c75fbdf8827bbb7277226b3057fc3785dabe7284d3a9d15fceb250f68f529 \
-    --hash=sha256:5dfde0be33f038114af89efb917144c2f766f8b7f3a3d3e4cb9c25f76d71ef81 \
-    --hash=sha256:6ce81d5b08e0169dc52037d3ff1802eafcaf86c281ceb8b38b8359ba7b6b7bdc \
-    --hash=sha256:776f89c7b056c498c0e256485bc031cbf514aaebe71e929ed54e50c478524b65 \
-    --hash=sha256:a09f34d2c89d176581858ff718c327eebc14eb6415c176dab4af5bfd8582a999 \
-    --hash=sha256:afdfb11584f5a6f15127a7061673a7ea12a0393fe9ee8d2ed84e74bb191ffc3b \
-    --hash=sha256:bbd4f94d929edf6d8d81e990dfaafc22bb10deaefcb2762150a136f281b01c00 \
-    --hash=sha256:bd6fc5272a41034a7844149203461d1f311bece9ed100d22eb3eebd952a25f49 \
-    --hash=sha256:bdcda63fffdbe2aac23b54d46408a6283ad16676a5230a95b3ed49eacd99129b \
-    --hash=sha256:c13a5802da986b1400afbee97162c29f841890ab9e20a0be7ede18189219f5f1 \
-    --hash=sha256:d27ac1a5a8783c9271d41cd5851766ca547ea003efa4e3764f880f319b2d3ed3 \
-    --hash=sha256:dac394c83a9233ab6707f66e1cdbd950f8b014b58604142a5b6f7998bf0bcc8c \
-    --hash=sha256:f4906fb463dd2033032978f56962caab268c9428a384126b9400543eb667f11c \
-    --hash=sha256:fc011dc7bbe3ac8a32e0caa37ab8ba6c1639ceef6ecd04feea8d37360fc175e4 \
-    --hash=sha256:ffca915c09aed9137f8c649ad7521bd5ce690c939121db1ba54af2ba63ac8374
-    # via -r .github/requirements/lint.in
+clang-format==23.1.1 \
+    --hash=sha256:09af54d2ef51680b34e36ed71b9f510bd399fb7b10b29a2a40843cd0e0344228 \
+    --hash=sha256:0cd866591d6cce31a6bf4b216a5810be3893cec1ad8213b746f21f5bee6d18bb \
+    --hash=sha256:29a70106390a32ec552591e73fec4d9b3c892668fe28fe5c2c47bf68d550fe55 \
+    --hash=sha256:64900462c1203cee2fec364536c2dda708baf0619e15b52ceda926648cc82f56 \
+    --hash=sha256:64edd9e43e1c6065239056ea1d8f091aa551379dd96ee311f9b1a973cabfcdde \
+    --hash=sha256:68521e74541e34f4a299b82f07735981bb3bce4b0d455ce7a60beb8d9ab4decc \
+    --hash=sha256:6d896cd6c6b32dc31a16c9ba0714e1ea4c0359719552462d12aef80a8e45dcb3 \
+    --hash=sha256:7f81856d845b6274b888d0d5f51a1f819f38f080a5b9637a38873f6e0e2cde3b \
+    --hash=sha256:8109e5d13028987912f4477c43afcefa242a016a4212b8ed34dc10395177448b \
+    --hash=sha256:8b2e286c8e7070609fbfbd511aed54ba2906a9a348237ba54b3fcab278c6eb78 \
+    --hash=sha256:8f8ea1e02f7cab8dace82a0d56733e532ffc3e6e41e658edc28261029e94c499 \
+    --hash=sha256:965c8bd87cabb26942a336bceb99186a2de6874a7d3f734e540090e634195726 \
+    --hash=sha256:a401297fe45f04ae0152f6b5f4c372ad602830be524c2e69469d700abdee1637 \
+    --hash=sha256:b71734b64d7b7ec7d4e4e167a67b34d0462dd83de5aa74af5de3af3a9d7546de \
+    --hash=sha256:d64a1788759c4cbc08a0aca21dd2bd38605c0758543aa15b8c0636508f0ebae7 \
+    --hash=sha256:eaf3075d7e2bf477c150c6d53bfff040eca851365c0429a06b9bec0de65186d5 \
+    --hash=sha256:f351726f4706aea605225978484986386167edafa3f85a467bad4a44bfdfa97f \
+    --hash=sha256:f965f1e50de06cb86af8ac23d55748b87876c12e7a156a53ec4417d91a6fe656
+    # via -r lint.in
 clang-tidy==19.1.0 \
     --hash=sha256:082f520652a5268c4c97d94c1ff04686e31c9a76c29077beead491f6c345ab94 \
     --hash=sha256:27104b3f7a6841d45ece284ba27f93ac7c982a5bf38a30fc6f280c4f0cd2fcfb \
@@ -215,7 +218,7 @@ clang-tidy==19.1.0 \
     --hash=sha256:be843086d18f7c794fe43d9f3378c0c556fd09151a2375ed1943ff703c144970 \
     --hash=sha256:c7403c57db174bc17f94fec651a4c6c0bb050da74dc12e542be44edea8a77546 \
     --hash=sha256:ee2fe7afb34529dd6be9b8f367eaa864814c47e91479d34e3caedd56df80549b
-    # via -r .github/requirements/lint.in
+    # via -r lint.in
 click==8.1.7 \
     --hash=sha256:ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28 \
     --hash=sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de
@@ -249,7 +252,7 @@ packaging==26.3 \
 platformio==6.1.18 \
     --hash=sha256:6ea19c66fba3c5272378afa6ae11abbf883243dd8e503ac5f4ff8ac277ccc7c6 \
     --hash=sha256:94ef70a242ddcb93e020b0250c4f61e65b347411e8dfe36f79efb759c09324fa
-    # via -r .github/requirements/lint.in
+    # via -r lint.in
 pyelftools==0.33 \
     --hash=sha256:660d82dcbeb8e83d1702bd97f223f761625da06111c0cc988eac6b8ab0c1b61f \
     --hash=sha256:f215ad5f47d3f1373a21496a6c9e0707c622840d0622f23ff7ce08678b020036
@@ -281,7 +284,7 @@ ruff==0.6.9 \
     --hash=sha256:b076ef717a8e5bc819514ee1d602bbdca5b4420ae13a9cf61a0c0a4f53a2baa2 \
     --hash=sha256:eae02b700763e3847595b9d2891488989cac00214da7f845f4bcf2989007d577 \
     --hash=sha256:eb61ec9bdb2506cffd492e05ac40e5bc6284873aceb605503d8494180d6fc84d
-    # via -r .github/requirements/lint.in
+    # via -r lint.in
 semantic-version==2.10.0 \
     --hash=sha256:bdabb6d336998cbb378d4b9db3a4b56a1e3235701dc05ea2690d9a997ed5041c \
     --hash=sha256:de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177
