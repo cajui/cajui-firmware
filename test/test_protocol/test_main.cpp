@@ -405,6 +405,7 @@ void runProvisioningTests();
 void runUplinkTests();
 void runSetupTests();
 void runPairingTests();
+void runDeviceTests();
 int runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_roundtrip_multiple_metrics_and_zero);
@@ -430,6 +431,7 @@ int runTests() {
     runUplinkTests();
     runSetupTests();
     runPairingTests();
+    runDeviceTests();
     return UNITY_END();
 }
 #ifdef ARDUINO
