@@ -25,7 +25,7 @@ bool wifiQr(const char* ssid, char* output, size_t capacity);
 
 enum class SetupError { None, Ssid, WifiPassword, Host, Port, Username, MqttPassword };
 // Stages fields into a pending configuration. An empty password keeps the staged one
-// when the network or username is unchanged, so saved secrets never need re-entry.
+// only for the same network (Wi-Fi) or the same host, port and username (broker).
 SetupError stageWifi(UplinkConfig&, const char* ssid, const char* password);
 SetupError stageBroker(UplinkConfig&, const char* host, const char* port, const char* username,
                        const char* password);

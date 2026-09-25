@@ -93,10 +93,17 @@ void test_broker_staging_validates_and_keeps_saved_password() {
     EXPECT_RESULT(SetupError::MqttPassword, stageBroker(c, "broker.local", "1883", "rx", nullptr));
     TEST_ASSERT_EQUAL_STRING("", c.host);
     EXPECT_RESULT(SetupError::None, stageBroker(c, "broker.local", "65535", "rx", "mqtt-secret"));
-    EXPECT_RESULT(SetupError::None, stageBroker(c, "10.0.0.2", "1883", "rx", ""));
+    EXPECT_RESULT(SetupError::None, stageBroker(c, "broker.local", "65535", "rx", ""));
     TEST_ASSERT_EQUAL_STRING("mqtt-secret", c.password);
+    // A different destination never receives the saved password (credential exfiltration).
+    EXPECT_RESULT(SetupError::MqttPassword, stageBroker(c, "10.0.0.2", "65535", "rx", ""));
+    EXPECT_RESULT(SetupError::MqttPassword, stageBroker(c, "broker.local", "1883", "rx", ""));
+    EXPECT_RESULT(SetupError::MqttPassword, stageBroker(c, "broker.local", "65535", "other", ""));
+    TEST_ASSERT_EQUAL_STRING("broker.local", c.host);
+    TEST_ASSERT_EQUAL_UINT16(65535, c.port);
+    EXPECT_RESULT(SetupError::None, stageBroker(c, "10.0.0.2", "1883", "rx", "new-secret"));
+    TEST_ASSERT_EQUAL_STRING("new-secret", c.password);
     TEST_ASSERT_EQUAL_UINT16(1883, c.port);
-    EXPECT_RESULT(SetupError::MqttPassword, stageBroker(c, "10.0.0.2", "1883", "other", ""));
     const SetupError all[] = {SetupError::None,         SetupError::Ssid, SetupError::WifiPassword,
                               SetupError::Host,         SetupError::Port, SetupError::Username,
                               SetupError::MqttPassword, SetupError(99)};

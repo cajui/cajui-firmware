@@ -171,7 +171,8 @@ void brokerForm(Html& page, const SetupView& v) {
     page.text(v.staged ? v.staged->username : "");
     page.raw("\"><label for=\"mqttpass\">Password</label><input id=\"mqttpass\" "
              "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
-             "placeholder=\"Leave empty to keep the saved one\"><button>Save broker</button>"
+             "placeholder=\"Empty keeps the saved one for the same broker\"><button>Save "
+             "broker</button>"
              "</form><p><small>The username is also the source ID of the samples. Plain MQTT: "
              "use a trusted network.</small></p></section>");
 }
@@ -308,8 +309,11 @@ SetupError stageBroker(UplinkConfig& pending, const char* host, const char* port
     if (!username || !validIdentity(username) ||
         !copy(next.username, sizeof(next.username), username))
         return SetupError::Username;
-    const bool keep =
-        password && !*password && pending.password[0] && !std::strcmp(pending.username, username);
+    // The saved password goes only to the broker it was entered for: changing the host or
+    // port without re-entering it would let anyone on the setup page collect it.
+    const bool keep = password && !*password && pending.password[0] &&
+                      !std::strcmp(pending.username, username) &&
+                      !std::strcmp(pending.host, next.host) && pending.port == next.port;
     if (!keep && (!password || !*password || !copy(next.password, sizeof(next.password), password)))
         return SetupError::MqttPassword;
     pending = next;
