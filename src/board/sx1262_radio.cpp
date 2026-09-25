@@ -127,6 +127,10 @@ cajui::ReceiveStatus Sx1262Radio::receive(cajui::Frame& out) {
     received_ = cajui::Frame{};
     return cajui::ReceiveStatus::Received;
 }
+int16_t Sx1262Radio::lastRssi() const {
+    Lock lock(mutex_);
+    return rssi_;
+}
 bool Sx1262Radio::sleep() {
     if (!initialized_) return false;
     Lock lock(mutex_);
@@ -179,7 +183,10 @@ void Sx1262Radio::handleInterrupt() {
         if (frame.size && frame.size <= cajui::MaxFrame) {
             const auto result = radio_.readData(frame.bytes.data(), frame.size);
             if (result == RADIOLIB_ERR_NONE) {
-                if (!received_.size) received_ = frame; // Bounded inbox; sender retries drops.
+                if (!received_.size) { // Bounded inbox; sender retries drops.
+                    received_ = frame;
+                    rssi_ = int16_t(radio_.getRSSI());
+                }
             } else if (result != RADIOLIB_ERR_CRC_MISMATCH) {
                 fail();
                 return;

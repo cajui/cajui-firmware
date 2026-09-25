@@ -129,6 +129,13 @@ bool PersistentStore::info(uint64_t node, uint64_t generation, EnrollmentInfo& o
     out.received = e.receipt.counter;
     return true;
 }
+size_t PersistentStore::freeSlots() const {
+    size_t count = 0;
+    if (!healthy()) return 0;
+    for (const auto& e : state_.entries)
+        if (e.state == Enrollment::Empty) ++count;
+    return count;
+}
 size_t PersistentStore::list(EnrollmentInfo* output, size_t capacity) const {
     size_t count = 0;
     if (!healthy() || !output) return 0;

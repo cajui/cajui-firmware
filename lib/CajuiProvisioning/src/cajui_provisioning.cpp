@@ -246,6 +246,13 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
         std::snprintf(reply, capacity, "CJ1 OK ADMIN");
         return true;
     }
+    // Radio pairing needs the radio: accepted in both modes, only on a transmitter.
+    if (!std::strcmp(command, "PAIR") && count == RebootWords) {
+        if (store_.role() != Role::Transmitter) return true; // Reply stays CJ1 ERR INVALID.
+        restart_ = pair_ = true;
+        std::snprintf(reply, capacity, "CJ1 OK PAIR");
+        return true;
+    }
     if (!std::strncmp(command, "UPLINK", std::strlen("UPLINK"))) {
         uplink(command, count, words, reply, capacity);
         return true;

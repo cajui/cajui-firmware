@@ -34,7 +34,12 @@ Coverage gates include `codec.cpp`, `delivery.cpp`, `cajui_runtime.cpp`, the hos
 `cajui_application.cpp`, the host branch of `crypto.cpp`, `cajui_storage.cpp`, `snapshot.cpp` and
 `cajui_provisioning.cpp` and `cajui_uplink.cpp`: 95% lines and 85% branches. Uplink tests
 check the exact Central JSON, the settings blob and PUBACK-gated queue removal against a
-publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Setup tests cover button timing, the
+publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Pairing tests check X25519 and HKDF against RFC 7748 and RFC 5869, tampering with every
+offer byte, a complete exchange between the node and receiver state machines followed by
+accepted DATA, rotation, window expiry, lost JOIN_DONE and a foreign network. The ESP32
+backends (mbedTLS X25519, HKDF composed from mbedTLS HMAC) were checked against the same
+vectors with a separate probe program on a board; running this Unity suite on the board
+itself printed no output and is not part of validation. Setup tests cover button timing, the
 Wi-Fi QR code, field staging and HTML escaping; the access point, DNS, HTTP server,
 scanning and mDNS discovery run only on hardware. Compiler/library allocation
 failures are not all induced. Neither a high coverage percentage nor a passing ESP32

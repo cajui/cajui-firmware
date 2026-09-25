@@ -156,7 +156,8 @@ void test_receiver_radio_failures_and_timeout_are_terminal() {
         TEST_ASSERT_EQUAL_UINT(1, r.radio.sleeps);
     }
 }
-void test_receiver_start_requires_healthy_enrolled_receiver() {
+void test_receiver_start_requires_healthy_receiver_storage_and_radio() {
+    // A receiver without bindings starts (scenario 2): radio pairing creates the first one.
     for (int scenario = 0; scenario < 4; ++scenario) {
         fixtures::MemoryBlob blob;
         auto store = fixtures::mounted(blob, scenario == 1 ? Role::Transmitter : Role::Receiver);
@@ -169,6 +170,11 @@ void test_receiver_start_requires_healthy_enrolled_receiver() {
         radio.listenOk = scenario != 3;
         TestClock clock;
         ReceiverController controller(radio, clock, *store);
+        SCENARIO(scenario);
+        if (scenario == 2) {
+            TEST_ASSERT_TRUE(controller.start());
+            continue;
+        }
         TEST_ASSERT_FALSE(controller.start());
         TEST_ASSERT_EQUAL_INT(int(ReceiverState::Failed), int(controller.state()));
     }
@@ -228,7 +234,7 @@ void runApplicationTests() {
     RUN_TEST(test_receiver_storage_failure_never_acknowledges);
     RUN_TEST(test_receiver_full_queue_preserves_receipt_and_reacks_duplicate);
     RUN_TEST(test_receiver_radio_failures_and_timeout_are_terminal);
-    RUN_TEST(test_receiver_start_requires_healthy_enrolled_receiver);
+    RUN_TEST(test_receiver_start_requires_healthy_receiver_storage_and_radio);
     RUN_TEST(test_routing_hint_is_bounded_and_never_authentication);
     RUN_TEST(test_climate_values_preserve_zero_and_flag_invalid_measurements);
 }

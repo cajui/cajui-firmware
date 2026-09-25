@@ -202,6 +202,64 @@ void test_setup_page_states_and_prefill() {
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "empty"));
 }
+void test_pairing_section_states() {
+    static char page[PageCapacity];
+    SetupView view{};
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "enrolled over USB"));
+    PairingView pairing{};
+    view.pairing = &pairing;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "action=\"/pair/open\""));
+    TEST_ASSERT_FALSE(contains(page, "Stop searching"));
+    pairing.open = true;
+    pairing.remainingSeconds = 95;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "Searching, 95 s left"));
+    TEST_ASSERT_TRUE(contains(page, "No transmitter asking to join yet"));
+    pairing.count = 2;
+    pairing.nodes[0] = 0x000048ca433c776cull;
+    pairing.rssi[0] = -37;
+    pairing.nodes[1] = 0x10;
+    pairing.rssi[1] = -90;
+    pairing.offered = 0x000048ca433c776cull;
+    pairing.paired = 0x20;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "000048ca433c776c <small>(-37 dBm)</small>"));
+    TEST_ASSERT_TRUE(contains(page, "name=\"node\" value=\"0000000000000010\""));
+    TEST_ASSERT_TRUE(contains(page, "Waiting for 000048ca433c776c to confirm"));
+    TEST_ASSERT_TRUE(contains(page, "Transmitter 0000000000000020 paired."));
+    TEST_ASSERT_TRUE(contains(page, "Stop searching"));
+    TEST_ASSERT_FALSE(contains(page, "No transmitter asking"));
+}
+void test_transmitters_section_refreshes_live_only_while_pairing() {
+    static char page[PageCapacity];
+    SetupView view{};
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "<section id=\"transmitters\">"));
+    TEST_ASSERT_FALSE(contains(page, "<script>")); // No pairing: nothing to refresh.
+    PairingView pairing{};
+    view.pairing = &pairing;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "fetch('/transmitters'"));
+    TEST_ASSERT_TRUE(contains(page, "action=\"/pair/open\" data-live-form"));
+    TEST_ASSERT_FALSE(contains(page, "data-live>")); // Closed window: no polling.
+    pairing.open = true;
+    pairing.count = 1;
+    pairing.nodes[0] = 2;
+    pairing.offered = 2;
+    static char fragment[PageCapacity];
+    TEST_ASSERT_TRUE(renderTransmitters(view, fragment, sizeof(fragment)));
+    const std::string html = fragment;
+    TEST_ASSERT_TRUE(contains(html, "<p data-live><span class=\"spin\"></span>Searching"));
+    TEST_ASSERT_TRUE(contains(html, "<span class=\"spin\"></span>Waiting for 0000000000000002"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/pair/add\" data-live-form"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/pair/stop\" data-live-form"));
+    TEST_ASSERT_FALSE(contains(html, "<section")); // Inner content only.
+    TEST_ASSERT_FALSE(contains(html, "<script>")); // The page script replaces this content.
+    TEST_ASSERT_FALSE(renderTransmitters(view, fragment, 20));
+    TEST_ASSERT_FALSE(renderTransmitters(view, nullptr, 0));
+}
 void test_confirmation_and_closed_pages() {
     static char page[PageCapacity];
     TEST_ASSERT_TRUE(renderRevoke(2, 10, page, sizeof(page)));
@@ -248,6 +306,8 @@ void runSetupTests() {
     RUN_TEST(test_broker_staging_validates_and_keeps_saved_password);
     RUN_TEST(test_setup_page_escapes_input_and_never_shows_passwords);
     RUN_TEST(test_setup_page_states_and_prefill);
+    RUN_TEST(test_pairing_section_states);
+    RUN_TEST(test_transmitters_section_refreshes_live_only_while_pairing);
     RUN_TEST(test_confirmation_and_closed_pages);
     RUN_TEST(test_store_lists_enrollments_with_last_received_counter);
 }

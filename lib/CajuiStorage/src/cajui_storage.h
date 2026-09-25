@@ -44,6 +44,8 @@ public:
     bool info(uint64_t node, uint64_t generation, EnrollmentInfo&) const;
     // Copies up to capacity occupied enrollments in slot order; returns how many.
     size_t list(EnrollmentInfo* output, size_t capacity) const;
+    // Empty enrollment slots. Slots are never freed, so each new generation uses one.
+    size_t freeSlots() const;
     bool binding(uint64_t node, Binding&) const;
     bool reserve(const Binding&, uint64_t&) override;
     bool load(const Binding&, Receipt&) override;

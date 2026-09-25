@@ -92,7 +92,9 @@ are rejected. Overflow discards the complete line before accepting another comma
 Requests are never echoed. Non-HELLO operations include the expected 16-digit device
 ID to prevent accidental writes to a swapped port. `HELLO` ends with the mode, `admin` or
 `run`; older admin-only images omitted it. `CJ1 ADMIN <device>` restarts into admin mode
-from either mode; in operation, other mutations answer `CJ1 ERR ADMIN`. Identifiers are lowercase fixed
+from either mode; in operation, other mutations answer `CJ1 ERR ADMIN`. `CJ1 PAIR
+<device>` restarts a transmitter into [radio pairing](radio-pairing.md) from either mode;
+`python3 tools/provision.py pair --transmitter <port>` sends it, waking the node first. Identifiers are lowercase fixed
 width hex, not decimal JSON numbers.
 
 ```text

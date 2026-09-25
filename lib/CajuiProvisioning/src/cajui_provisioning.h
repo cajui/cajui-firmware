@@ -20,10 +20,12 @@ public:
     bool restartRequested() const { return restart_; }
     // Set with restartRequested(): the next boot must start in ConsoleMode::Admin.
     bool adminRequested() const { return admin_; }
+    // Set with restartRequested(): the next boot must start radio pairing (transmitter).
+    bool pairRequested() const { return pair_; }
 
 private:
     PersistentStore& store_;
-    bool restart_ = false, admin_ = false;
+    bool restart_ = false, admin_ = false, pair_ = false;
     uint32_t boot_;
     AtomicBlob* uplink_;
     ConsoleMode mode_;

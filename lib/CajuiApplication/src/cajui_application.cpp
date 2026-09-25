@@ -4,6 +4,7 @@
 namespace cajui {
 namespace {
 constexpr uint32_t AckTransmitTimeoutMs = 3000;
+constexpr uint8_t PairingFirstType = 3, PairingLastType = 6; // docs/radio-pairing.md
 constexpr float MinTemperature = -40, MaxTemperature = 80, MaxHumidity = 100;
 constexpr float MilliScale = 1000;
 Reading measurement(uint16_t metric, float value, float minimum, float maximum) {
@@ -29,8 +30,8 @@ Data climateSample(float temperature, float humidity, uint32_t nextSeconds) {
 }
 bool ReceiverController::start() {
     if (state_ != ReceiverState::Stopped) return false;
-    if (!store_.healthy() || store_.role() != Role::Receiver || !store_.network() ||
-        !radio_.listen()) {
+    // A receiver without any binding may start: radio pairing creates the first one.
+    if (!store_.healthy() || store_.role() != Role::Receiver || !radio_.listen()) {
         fail();
         return false;
     }
@@ -62,6 +63,17 @@ void ReceiverController::poll() {
         return;
     }
     if (status == ReceiveStatus::Empty) return;
+    const uint8_t type = untrustedType(frame);
+    if (type >= PairingFirstType && type <= PairingLastType) {
+        if (!pairing_ || !pairing_->handle(frame, radio_.lastRssi(), ack_)) return;
+        startedAt_ = clock_.nowMs();
+        if (!radio_.startTransmit(ack_)) {
+            fail();
+            return;
+        }
+        state_ = ReceiverState::Acknowledging;
+        return;
+    }
     Binding binding{};
     const uint64_t node = untrustedDataNode(frame);
     if (!node || !store_.binding(node, binding)) {

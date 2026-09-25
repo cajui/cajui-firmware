@@ -16,9 +16,8 @@ Next milestones:
    reads, sleep, interference and battery policy. Keep RF validation separate from USB setup.
 3. Broker TLS for receiver forwarding and field validation of the MQTT uplink.
    Idempotent forwarding with PUBACK-gated queue removal is implemented.
-4. Authenticated radio pairing of transmitters from the receiver setup page, and a
-   per-device password for the setup access point. The page itself (Wi-Fi, broker,
-   status, revocation) is implemented.
+4. Authenticating radio pairing with a per-device label code, and a per-device password
+   for the setup access point. Radio pairing itself and the setup page are implemented.
 
 TDMA, mesh routing, radio firmware updates, actuator control and LoRaWAN mode are
 outside the first direct-LoRa version. No deadline or field-readiness claim is

@@ -8,7 +8,7 @@ namespace board {
 namespace {
 // Survives a software restart, not a power cycle; the magic value guards against the
 // random contents RTC memory has after power-on.
-constexpr uint32_t AdminMagic = 0x41444d4e; // "ADMN"
+constexpr uint32_t AdminMagic = 0x41444d4e, PairMagic = 0x50414952; // "ADMN", "PAIR"
 RTC_NOINIT_ATTR uint32_t bootRequest;
 constexpr uint32_t FlushDelayMs = 50;
 }
@@ -36,13 +36,22 @@ bool Console::poll() {
     }
     return false;
 }
-bool adminBootRequested() {
-    const bool requested = bootRequest == AdminMagic;
+BootRequest takeBootRequest() {
+    const BootRequest request = bootRequest == AdminMagic  ? BootRequest::Admin
+                                : bootRequest == PairMagic ? BootRequest::Pair
+                                                           : BootRequest::None;
     bootRequest = 0;
-    return requested;
+    return request;
 }
 void restartFor(const cajui::Provisioning& provisioning) {
-    bootRequest = provisioning.adminRequested() ? AdminMagic : 0;
+    restartInto(provisioning.pairRequested()    ? BootRequest::Pair
+                : provisioning.adminRequested() ? BootRequest::Admin
+                                                : BootRequest::None);
+}
+void restartInto(BootRequest request) {
+    bootRequest = request == BootRequest::Admin  ? AdminMagic
+                  : request == BootRequest::Pair ? PairMagic
+                                                 : 0;
     Serial.flush();
     delay(FlushDelayMs);
     ESP.restart();

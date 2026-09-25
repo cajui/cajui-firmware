@@ -1,4 +1,5 @@
 #pragma once
+#include "cajui_pairing.h"
 #include "cajui_setup.h"
 #include "mqtt_uplink.h"
 #include <DNSServer.h>
@@ -22,6 +23,8 @@ public:
         : store_(store), uplink_(uplink), blob_(uplinkBlob), apply_(apply) {}
     SetupPortal(const SetupPortal&) = delete;
     SetupPortal& operator=(const SetupPortal&) = delete;
+    // Optional: enables adding transmitters by radio pairing from the page.
+    void setPairing(cajui::PairingHost* pairing) { pairing_ = pairing; }
     void open();
     void close();
     bool active() const { return active_; }
@@ -33,6 +36,7 @@ private:
     MqttUplink& uplink_;
     cajui::AtomicBlob& blob_;
     Apply apply_;
+    cajui::PairingHost* pairing_ = nullptr;
     WebServer server_{80};
     DNSServer dns_;
     bool active_ = false, routed_ = false, mdns_ = false, saved_ = false;
@@ -57,6 +61,7 @@ private:
     void touch() { lastActivity_ = millis(); }
     void redirect(const char* notice);
     void home();
+    void fillPairing(cajui::PairingView&) const;
     void save();
     void scan();
     void discover();

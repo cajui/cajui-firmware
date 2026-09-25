@@ -1,7 +1,10 @@
 #ifdef CAJUI_RUNTIME_ROLE
 #include <Arduino.h>
 #include <DHT.h>
+#include <bootloader_random.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
+#include <esp_random.h>
 #include <esp_mac.h>
 #include <esp_sleep.h>
 #include <esp_log.h>
@@ -11,6 +14,8 @@
 #include "board/sx1262_radio.h"
 #include "board/admin_console.h"
 #include "cajui_provisioning.h"
+#include "cajui_pairing.h"
+#include "cajui_setup.h"
 #if CAJUI_RUNTIME_ROLE == 2
 #include "cajui_uplink.h"
 #include "board/mqtt_uplink.h"
@@ -35,6 +40,24 @@ public:
         return true;
     }
 };
+// Keys, nonces and generations. The hardware RNG is only a true RNG while Wi-Fi/BT run
+// or with the SAR ADC entropy source enabled; the transmitter never starts Wi-Fi.
+class BoardEntropy final : public cajui::Entropy {
+public:
+    bool fill(uint8_t* output, size_t size) override {
+#if CAJUI_RUNTIME_ROLE == 1
+        bootloader_random_enable();
+        esp_fill_random(output, size);
+        bootloader_random_disable();
+#else
+        esp_fill_random(output, size); // Pairing runs from the setup page, with Wi-Fi on.
+#endif
+        return true;
+    }
+};
+BoardEntropy entropy;
+constexpr uint8_t PairButton = 0; // PRG.
+constexpr uint32_t PairHoldMs = 3000, PairBlinkMs = 100;
 board::Sx1262Radio radio;
 cajui::NvsBlob blob;
 BoardClock clockSource;
@@ -49,6 +72,7 @@ cajui::Forwarder* forwarder = nullptr;
 uint32_t reportedForwards = 0, reportedRetries = 0;
 bool reportedOnline = false;
 board::SetupPortal* portal = nullptr;
+cajui::PairingHost* pairingHost = nullptr;
 cajui::LongPress setupButton(board::SetupHoldMs);
 // Called by the setup page after saving: restarts MQTT and forwarding without a reboot.
 bool applyUplink(const cajui::UplinkConfig& settings) {
@@ -97,6 +121,18 @@ void reportForwarding() {
 #endif
 uint32_t bootAt = 0;
 bool running = false;
+#if CAJUI_RUNTIME_ROLE == 1
+cajui::PairingClient* pairingClient = nullptr;
+cajui::LongPress pairButton(PairHoldMs);
+// True when PRG is held continuously for PairHoldMs after boot or wake.
+bool pairButtonHeld() {
+    pinMode(PairButton, INPUT_PULLUP);
+    const uint32_t start = millis();
+    while (digitalRead(PairButton) == LOW)
+        if (millis() - start >= PairHoldMs) return true;
+    return false;
+}
+#endif
 // Admin mode keeps the radio in reset and serves only the USB console.
 bool adminMode = false, restartPending = false;
 cajui::Provisioning* provisioning = nullptr;
@@ -126,6 +162,10 @@ void sleepNode() {
     hold(board::Led, LOW);
     hold(board::RadioCs, HIGH);
     gpio_deep_sleep_hold_en();
+    // PRG wakes the node so a long press can start radio pairing.
+    rtc_gpio_pullup_en(gpio_num_t(PairButton));
+    rtc_gpio_pulldown_dis(gpio_num_t(PairButton));
+    esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
     const uint32_t elapsed = millis() - bootAt;
     const uint32_t period = SampleSeconds * 1000;
     const uint32_t remaining = elapsed < period ? period - elapsed : period;
@@ -158,7 +198,9 @@ void setup() {
     // interleaved an MQTT error into the middle of a HELLO reply on hardware; CJAPP lines
     // remain the diagnostic output.
     esp_log_level_set("*", ESP_LOG_NONE);
-    const bool requested = board::adminBootRequested();
+    rtc_gpio_deinit(gpio_num_t(PairButton));
+    const board::BootRequest request = board::takeBootRequest();
+    const bool requested = request == board::BootRequest::Admin;
     static cajui::PersistentStore store(blob, cajui::Role(CAJUI_RUNTIME_ROLE), deviceId());
     const bool mounted = blob.begin() && store.mount();
     bool enrolled = mounted && store.network() && store.profile() == board::RadioProfile;
@@ -166,11 +208,19 @@ void setup() {
     cajui::Binding binding{};
     enrolled = enrolled && store.binding(store.device(), binding);
     cajui::AtomicBlob* settings = nullptr;
+    const bool pairing =
+        mounted && !requested && (request == board::BootRequest::Pair || pairButtonHeld());
 #else
+    // A receiver runs without bindings so radio pairing can create the first one.
+    enrolled = mounted && (!store.network() || store.profile() == board::RadioProfile);
     cajui::AtomicBlob* settings = uplinkBlob.begin() ? &uplinkBlob : nullptr;
 #endif
     // Without enrollment, or with unusable storage, administer over USB instead of halting.
+#if CAJUI_RUNTIME_ROLE == 1
+    adminMode = requested || (!enrolled && !pairing);
+#else
     adminMode = requested || !enrolled;
+#endif
     static cajui::Provisioning commands(store, esp_random(), settings,
                                         adminMode ? cajui::ConsoleMode::Admin
                                                   : cajui::ConsoleMode::Operation);
@@ -183,6 +233,24 @@ void setup() {
                                                             : "not_enrolled");
         return;
     }
+#if CAJUI_RUNTIME_ROLE == 1
+    if (pairing) {
+        if (!radio.begin()) {
+            halt("RADIO_INIT");
+            return;
+        }
+        static cajui::PairingClient client(radio, clockSource, jitter, store, entropy);
+        pairingClient = &client;
+        Serial.printf("CJAPP PAIR start node=%016llx\n",
+                      static_cast<unsigned long long>(store.device()));
+        if (!client.start()) {
+            halt("PAIR_START");
+            return;
+        }
+        running = true;
+        return;
+    }
+#endif
     if (!radio.begin()) {
         halt("RADIO_INIT");
         return;
@@ -217,7 +285,11 @@ void setup() {
     Serial.printf("CJAPP RECEIVER queued=%u\n", unsigned(store.queued()));
     startForwarding(store);
     pinMode(board::SetupButton, INPUT_PULLUP);
+    static cajui::PairingHost host(store, entropy, clockSource);
+    pairingHost = &host;
+    controller.setPairing(&host);
     static board::SetupPortal setupPortal(store, uplink, uplinkBlob, applyUplink);
+    setupPortal.setPairing(&host);
     portal = &setupPortal;
 #endif
     running = true;
@@ -227,9 +299,32 @@ void loop() {
     if (console && console->poll()) restartPending = true;
     if (adminMode || !running) {
         if (restartPending) board::restartFor(*provisioning);
+#if CAJUI_RUNTIME_ROLE == 1
+        // An unenrolled node waits in admin mode; a long press starts radio pairing.
+        if (pairButton.update(digitalRead(PairButton) == LOW, millis()))
+            board::restartInto(board::BootRequest::Pair);
+#endif
         delay(1);
         return;
     }
+#if CAJUI_RUNTIME_ROLE == 1
+    if (pairingClient) {
+        pairingClient->poll();
+        digitalWrite(board::Led, (millis() / PairBlinkMs) % 2 ? HIGH : LOW);
+        const auto state = pairingClient->state();
+        if (state == cajui::ClientState::Paired || state == cajui::ClientState::Failed) {
+            Serial.printf("CJAPP PAIR %s receiver=%016llx\n",
+                          state == cajui::ClientState::Paired ? "paired" : "failed",
+                          static_cast<unsigned long long>(pairingClient->receiver()));
+            digitalWrite(board::Led, LOW);
+            radio.sleep();
+            board::restartInto(board::BootRequest::None);
+        }
+        if (restartPending) board::restartFor(*provisioning);
+        delay(1);
+        return;
+    }
+#endif
     if (running) {
 #if CAJUI_RUNTIME_ROLE == 1
         sender.poll();
@@ -260,6 +355,7 @@ void loop() {
             portal->active() ? portal->close() : portal->open();
         if (running) portal->poll(listening);
         if (restartPending && listening) board::restartFor(*provisioning);
+        pairingHost->poll();
 #endif
     }
     delay(1);

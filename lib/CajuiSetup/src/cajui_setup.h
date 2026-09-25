@@ -42,6 +42,16 @@ struct BrokerView {
     uint16_t port = 0;
 };
 enum class WifiState { Idle, Connecting, Connected, Failed };
+// Radio pairing window state, docs/radio-pairing.md.
+constexpr size_t MaxPairingCandidates = 4;
+struct PairingView {
+    bool open = false;
+    uint32_t remainingSeconds = 0;
+    size_t count = 0;
+    uint64_t nodes[MaxPairingCandidates]{};
+    int16_t rssi[MaxPairingCandidates]{};
+    uint64_t offered = 0, paired = 0;
+};
 struct SetupView {
     uint64_t device = 0;
     WifiState wifi = WifiState::Idle;
@@ -59,12 +69,15 @@ struct SetupView {
     bool searching = false;
     const EnrollmentInfo* transmitters = nullptr;
     size_t transmitterCount = 0;
-    const char* prefillHost = nullptr; // Chosen from the discovered brokers.
+    const PairingView* pairing = nullptr; // Absent: new transmitters need USB.
+    const char* prefillHost = nullptr;    // Chosen from the discovered brokers.
     uint16_t prefillPort = 0;
     const char* notice = nullptr;
 };
 constexpr size_t PageCapacity = 12288;
 bool renderSetup(const SetupView&, char* output, size_t capacity);
+// The transmitters section alone (list and pairing), refreshed live by the setup page.
+bool renderTransmitters(const SetupView&, char* output, size_t capacity);
 bool renderRevoke(uint64_t node, uint64_t generation, char* output, size_t capacity);
 bool renderClosed(char* output, size_t capacity);
 } // namespace cajui
