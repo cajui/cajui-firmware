@@ -782,9 +782,11 @@ class UplinkCommandLineTests(unittest.TestCase):
             code, _, error = self.run_cli("power", "--port", "rx-port", "--dbm", bad)
             self.assertEqual(1, code)
             self.assertIn("-9 to 22", error)
-        receiver.power_reply = ["30"]
-        code, _, error = self.run_cli("power", "--port", "rx-port")
-        self.assertIn("Invalid power status", error)
+        for reply in (["30"], ["abc"], ["1", "2"]):
+            receiver.power_reply = reply
+            code, _, error = self.run_cli("power", "--port", "rx-port")
+            self.assertEqual(1, code)
+            self.assertIn("Invalid power status", error)  # Never a traceback.
         code, _, error = self.run_cli("power", "--port", "rx-port", "--dbm", "5")
         self.assertIn("did not store", error)
 

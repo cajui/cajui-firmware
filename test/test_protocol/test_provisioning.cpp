@@ -281,6 +281,7 @@ void test_usb_power_is_stored_and_changed_only_in_admin_mode() {
     const char* invalid[] = {"CJ1 POWER 0000000000000002 23", "CJ1 POWER 0000000000000002 -10",
                              "CJ1 POWER 0000000000000002 +5", "CJ1 POWER 0000000000000002 1a",
                              "CJ1 POWER 0000000000000002 -",  "CJ1 POWER 0000000000000002 100",
+                             "CJ1 POWER 0000000000000002 07", "CJ1 POWER 0000000000000002 -0",
                              "CJ1 POWER 0000000000000003 5",  "CJ1 POWER 0000000000000002 5 6"};
     for (auto input : invalid) {
         UNITY_SET_DETAIL(input);

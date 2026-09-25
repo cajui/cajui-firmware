@@ -446,7 +446,9 @@ def power(link, dbm=None):
     if dbm is None:
         device = wake(link)["device"]
         values = link.request("POWER " + device)
-        if len(values) != 1 or int(values[0]) not in POWER_RANGE:
+        if len(values) != 1 or not re.fullmatch(r"-?\d{1,2}", values[0]):
+            raise ProvisioningError("Invalid power status")
+        if int(values[0]) not in POWER_RANGE:
             raise ProvisioningError("Invalid power status")
         return {"device": device, "power_dbm": int(values[0])}
     if dbm not in POWER_RANGE:

@@ -206,7 +206,10 @@ bool parsePower(const char* text, int8_t& dbm) {
     const bool negative = *text == '-';
     const char* digits = negative ? text + 1 : text;
     const size_t length = std::strlen(digits);
-    if (!length || length > MaxDigits) return false;
+    // One spelling per value: no leading zero, and no "-0".
+    if (!length || length > MaxDigits || (length > 1 && digits[0] == '0') ||
+        (negative && digits[0] == '0'))
+        return false;
     int value = 0;
     for (const char* c = digits; *c; ++c) {
         if (*c < '0' || *c > '9') return false;
