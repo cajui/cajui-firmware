@@ -912,6 +912,29 @@ void test_repaired_node_keeps_its_used_key_until_it_sends_with_the_new_one() {
     EXPECT_RESULT(Result::Duplicate, receive(binding(2, 3), data(1, 2, 3), *store, ack));
     receiveOk(*store, 2, 2, 3); // The next sample completes the revocation.
     TEST_ASSERT_EQUAL_size_t(1, store->bindings(2, both, 2));
+    // Pairing again while that revocation is still pending keeps only the most recently
+    // used generation beside the new one, so the registry still mounts.
+    MemoryRecords pending;
+    auto rx = mounted(pending, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*rx));
+    receiveOk(*rx, 1);
+    EXPECT_RESULT(Result::Ok, rx->prepare(42, 1, 2, 11, key(2), 1));
+    EXPECT_RESULT(Result::Ok, rx->activateAlongside(2, 11));
+    pending.failAt = 2; // Sample under 11 durable, revocation of 10 lost.
+    EXPECT_RESULT(Result::StorageError, receive(binding(2, 2), data(1, 2, 2), *rx, ack));
+    rx = remount(pending, Role::Receiver);
+    TEST_ASSERT_EQUAL_size_t(2, rx->bindings(2, both, 2)); // Both used, both active.
+    EXPECT_RESULT(Result::Ok, rx->prepare(42, 1, 2, 12, key(3), 1));
+    EXPECT_RESULT(Result::Ok, rx->activateAlongside(2, 12));
+    Binding three[3]{};
+    TEST_ASSERT_EQUAL_size_t(2, rx->bindings(2, three, 3));
+    EnrollmentInfo info{};
+    TEST_ASSERT_TRUE(rx->info(2, 10, info));
+    EXPECT_RESULT(Enrollment::Revoked, info.state); // The older used one goes.
+    TEST_ASSERT_TRUE(rx->info(2, 11, info));
+    EXPECT_RESULT(Enrollment::Active, info.state);
+    rx = remount(pending, Role::Receiver);
+    TEST_ASSERT_TRUE(rx->healthy());
     MemoryRecords txRecords;
     auto tx = mounted(txRecords);
     EXPECT_RESULT(Result::Ok, tx->prepare(42, 1, 2, 10, key(), 1));

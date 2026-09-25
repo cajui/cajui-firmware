@@ -264,7 +264,9 @@ Result PersistentStore::prepare(uint64_t network, uint64_t receiver, uint64_t no
         uint64_t oldPrint = 0;
         if (!records::fingerprint(old.key, oldPrint)) return Result::CryptoError;
         nextRetired_ = retired_;
-        records::retire(nextRetired_, old.generation, oldPrint);
+        // A reclaim repeated after a power cut finds the credential already retired.
+        if (!records::isRetired(nextRetired_, old.generation, oldPrint))
+            records::retire(nextRetired_, old.generation, oldPrint);
         if (!saveRetired()) return Result::StorageError;
     }
     next_ = registry_;
@@ -303,10 +305,20 @@ Result PersistentStore::activateAlongside(uint64_t node, uint64_t generation) {
     if (target.state == Enrollment::Active) return Result::Ok;
     if (target.state != Enrollment::Prepared) return Result::Conflict;
     next_ = registry_;
-    // Keep only a previous generation the node has actually used: at most two stay active.
+    // Keep at most one previous generation: the one the node used most recently (the
+    // highest queue position its receipt filled). Two used generations can be active when
+    // the revocation after a first new sample was lost; neither of those may stay beside a
+    // third, or the registry would no longer mount.
+    int keep = -1;
+    for (size_t i = 0; i < BindingCapacity; ++i) {
+        const auto& e = registry_.entries[i];
+        if (e.node != node || e.state != Enrollment::Active || !receipts_[i].receipt.counter)
+            continue;
+        if (keep < 0 || receipts_[i].through > receipts_[size_t(keep)].through) keep = int(i);
+    }
     for (size_t i = 0; i < BindingCapacity; ++i) {
         auto& e = next_.entries[i];
-        if (e.node == node && e.state == Enrollment::Active && !receipts_[i].receipt.counter)
+        if (e.node == node && e.state == Enrollment::Active && int(i) != keep)
             e.state = Enrollment::Revoked;
     }
     next_.entries[size_t(index)].state = Enrollment::Active;
