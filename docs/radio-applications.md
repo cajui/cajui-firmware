@@ -56,10 +56,13 @@ implemented in this application; use USB while validating it. The schedule is
 wake mounts existing counters, reserves a new one and runs one bounded send cycle.
 Unconfirmed samples are logged and not backlogged. Radio shutdown, Vext off and
 GPIO holds precede deep sleep; a failed radio shutdown uses reset as a fallback.
-A radio or storage fault never erases enrollment and never leaves the node awake: it
+A radio or storage fault during operation never erases enrollment and never leaves the
+node awake: it
 logs `CJAPP STOP <reason> faults=<n> retry_s=<s>` and deep-sleeps for 10 seconds,
 doubling with each consecutive fault up to 15 minutes; the next wake retries. A
-completed delivery cycle clears the count. The loop task runs under the ESP-IDF task
+completed delivery cycle clears the count. Storage that cannot be mounted at boot is
+different: the node stays awake in admin mode (`reason=storage`) for diagnosis over USB,
+and never retries on its own, since remounting cannot repair it. The loop task runs under the ESP-IDF task
 watchdog (5 seconds), so a hang restarts the node.
 
 `CJAPP DELIVERY completion=1` means an authenticated matching ACK; other completion
@@ -82,7 +85,8 @@ Driver or storage failures latch the controller and stop the radio. The receiver
 logs `CJAPP STOP <reason> faults=<n> restart_s=<s>`, keeps the USB console available and
 restarts after 10 seconds, doubling with each consecutive fault up to 15 minutes; ten
 minutes of healthy operation clear the count. Restarting remounts storage, which fails
-closed. The loop task runs under the ESP-IDF task watchdog (5 seconds).
+closed. The loop task runs under the ESP-IDF task watchdog (5 seconds); a watchdog or
+panic restart happens at once but counts as a fault.
 Queue entries survive image changes and resets. At five-minute intervals, an initially
 empty queue holds 128 samples (about 10 hours 40 minutes from one transmitter). Never
 interpret receiver ACK as delivery to Cajuí Central.
@@ -104,7 +108,8 @@ One publication is in flight at a time. The queue front is removed durably only 
 the broker's PUBACK for that exact message. A missing PUBACK within 15 seconds or a
 broker disconnection abandons the attempt and retries after five seconds; a late
 PUBACK from an abandoned attempt is ignored. The ESP-IDF client enqueues the
-publication so the radio loop never blocks on network I/O, and forwarding runs only
+publication so the radio loop does not wait for network I/O; it can wait for the client's
+lock for at most the 2.5-second network timeout, below the loop watchdog, and forwarding runs only
 while the receiver is listening, never during an ACK transmission. A storage failure
 stops the radio and restarts the receiver after the fault delay described above. Without stored settings the receiver logs `CJAPP UPLINK disabled`
 and keeps queueing as before.
@@ -151,7 +156,8 @@ open (spinners while searching and while waiting for confirmation) and the pairi
 act in place; without it, the forms reload the page.
 
 The page answers only on the access point interface and only for its own address: a
-request through the receiver's station address on the home network gets 404, and a
+request through the receiver's station address on the home network gets 404, for any
+path, and a
 request naming another host (a DNS-rebinding name, a phone's captive-portal probe) is
 redirected to `192.168.4.1`. Each opening creates a random 128-bit session token that
 every form carries; a POST without it, or with a browser `Origin` other than the page,

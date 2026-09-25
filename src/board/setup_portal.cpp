@@ -97,7 +97,11 @@ void SetupPortal::open() {
     std::snprintf(address_, sizeof(address_), "%s", address.toString().c_str());
     // Wi-Fi runs now, so the hardware RNG is a true RNG for the session token.
     uint8_t random[cajui::SetupSession::TokenBytes]{};
-    entropy_.fill(random, sizeof(random));
+    if (!entropy_.fill(random, sizeof(random))) {
+        WiFi.softAPdisconnect(true); // No session without a random token.
+        Serial.println("CJAPP SETUP entropy_error");
+        return;
+    }
     session_.open(millis(), random);
     std::memset(random, 0, sizeof(random));
     dns_.start(DnsPort, "*", address); // Captive portal: every name resolves here.
@@ -540,6 +544,10 @@ void SetupPortal::route() {
     });
     // Phones probe fixed URLs to detect captive portals; redirecting them opens this page.
     server_.onNotFound([this] {
+        if (server_.client().localIP() != WiFi.softAPIP()) { // Nothing on the home network.
+            server_.send(404, "text/plain", "Not found");
+            return;
+        }
         server_.sendHeader("Location", String("http://") + address_ + "/");
         server_.send(302);
     });

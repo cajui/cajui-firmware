@@ -101,7 +101,9 @@ key, which means the node never received JOIN_DONE, revokes the new one. A lost 
 therefore never cuts the node off, and the page shows the unused generation with no
 sample yet. A previous generation that never carried a sample is revoked immediately, so
 at most two stay active. Replayed samples do not count: only a new, authenticated sample
-commits. The node itself replaces its binding as soon as it stores the new one.
+commits. An attacker who recorded an old-key sample while keeping it from the receiver
+could deliver it after a re-pairing and revoke the new generation; like jamming, this
+denies service but grants no access, within the active-attacker limit above. The node itself replaces its binding as soon as it stores the new one.
 
 A node that already belongs to a network can only pair again within that network:
 storage holds a single network per device. To move it, `tools/provision.py reset` makes
