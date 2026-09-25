@@ -1,4 +1,5 @@
 #pragma once
+#include "cajui_device.h"
 #include "cajui_provisioning.h"
 
 namespace board {
@@ -19,11 +20,10 @@ private:
     size_t used_ = 0;
     bool overflow_ = false;
 };
-enum class BootRequest { None, Admin, Pair };
 // Consumes the request left by the previous boot.
-BootRequest takeBootRequest();
+cajui::BootRequest takeBootRequest();
 // Restarts now; the next boot honours the request (admin mode or radio pairing).
-[[noreturn]] void restartInto(BootRequest);
+[[noreturn]] void restartInto(cajui::BootRequest);
 // Restarts as the console asked: admin, pairing or plain operation.
 [[noreturn]] void restartFor(const cajui::Provisioning&);
 } // namespace board

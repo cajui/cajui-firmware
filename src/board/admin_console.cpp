@@ -36,6 +36,7 @@ bool Console::poll() {
     }
     return false;
 }
+using cajui::BootRequest;
 BootRequest takeBootRequest() {
     const BootRequest request = bootRequest == AdminMagic  ? BootRequest::Admin
                                 : bootRequest == PairMagic ? BootRequest::Pair

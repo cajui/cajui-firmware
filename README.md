@@ -43,9 +43,11 @@ contracts and link here.
 - Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
   use USB for development. Without uplink settings, or while the broker is unreachable,
   the receiver stops accepting new samples once its 128-frame durable queue is full.
-- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range while
-  it is open can change the uplink settings or revoke transmitters. A per-device password
-  on a label/QR is planned.
+- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who
+  joins it while it is open (at most 30 minutes, after a button press) can change the
+  uplink settings, pair or revoke transmitters. The page itself refuses other origins,
+  other hosts and the home-network interface, and never reveals or re-sends a stored
+  password. A per-device password on a label/QR is planned.
 - **Radio pairing is not authenticated against an active attacker** in radio range during
   the two-minute window; a per-device label code is planned. Signal strength is shown,
   not enforced.

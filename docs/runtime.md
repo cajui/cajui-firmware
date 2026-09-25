@@ -16,8 +16,7 @@ images hold the radio in reset. No physical-radio behavior is validated by these
 | `Radio` adapter | Operate hardware, capture completion timestamps, bound incoming buffers and manage CAD/TX/RX events. |
 | `CajuiStorage` / `CajuiProvisioning` | Durable state and local enrollment; existing public interfaces are preserved. |
 
-These are software boundaries, not seven OSI protocol headers. No wire format,
-nonce construction or snapshot schema changed in this integration.
+These are software boundaries, not seven OSI protocol headers.
 The receiver acceptance path remains `receive(binding, frame, journal, ack)`.
 Its ACK means durable receiver acceptance, not server delivery. `ReceiverController` resolves existing bindings using an explicitly untrusted header
 hint, then authenticates and commits through this acceptance path.
