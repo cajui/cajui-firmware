@@ -1,3 +1,5 @@
 # Formatting-only commits; use with git blame --ignore-revs-file or blame.ignoreRevsFile.
 # style: apply clang-format and ruff format
 ae12a3752a759aad04a4b0dd8269033d6fb5e200
+# chore: add SPDX license identifiers
+0b288ffe03c32a0bdce2a00324b9b45637524b19
