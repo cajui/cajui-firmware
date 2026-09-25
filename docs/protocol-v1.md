@@ -109,7 +109,9 @@ must fail closed if state cannot be read. Only provisioning may create an empty
 receipt state.
 
 - Lower counter: reject as replay without ACK.
-- Equal counter, identical frame: acknowledge again without enqueuing again.
+- Equal counter, identical frame: acknowledge again without enqueuing again. An
+  application may bound how often it re-acknowledges one node, since anyone can replay
+  a recorded frame; the reference receiver allows three per node per minute.
 - Equal counter, different frame: reject as a conflict without ACK.
 - Higher counter: atomically commit both the queued sample and receipt, with the
   previous counter as a concurrency precondition. Generate ACK only after success.

@@ -445,6 +445,37 @@ void test_previous_node_still_gets_done_after_another_add() {
     Binding binding{};
     TEST_ASSERT_TRUE(rig.tx->binding(2, binding));
 }
+void test_repeated_confirmations_get_done_only_within_bounds() {
+    for (int scenario = 0; scenario < 2; ++scenario) {
+        SCENARIO(scenario);
+        PairRig rig;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        for (int i = 0; i < 30 && rig.rxRadio.sent.empty(); ++i) {
+            rig.client.poll();
+            rig.toReceiver();
+            rig.clock.time += 100;
+        }
+        rig.toNode();
+        rig.client.poll();
+        rig.client.poll(); // Confirm transmitted.
+        Frame confirm = rig.txRadio.sent.front();
+        rig.toReceiver();
+        TEST_ASSERT_EQUAL_size_t(1, rig.rxRadio.sent.size());
+        rig.rxRadio.sent.clear();
+        Frame reply{};
+        if (scenario == 0) { // A replayed confirmation: at most MaxDoneReplies in total.
+            for (int i = 1; i < MaxDoneReplies; ++i)
+                TEST_ASSERT_TRUE(rig.host.handle(confirm, -40, reply));
+            TEST_ASSERT_FALSE(rig.host.handle(confirm, -40, reply));
+        } else { // Much later, even within the reply count.
+            rig.clock.time += DoneReplayMs;
+            TEST_ASSERT_FALSE(rig.host.handle(confirm, -40, reply));
+        }
+    }
+}
 void test_full_storage_is_refused_before_any_exchange() {
     PairRig rig;
     for (uint64_t node = 10; node < 10 + BindingCapacity; ++node)
@@ -650,6 +681,7 @@ void runPairingTests() {
     RUN_TEST(test_offers_store_nothing_and_resist_spoofed_requests);
     RUN_TEST(test_injected_request_cannot_redirect_a_listed_node);
     RUN_TEST(test_previous_node_still_gets_done_after_another_add);
+    RUN_TEST(test_repeated_confirmations_get_done_only_within_bounds);
     RUN_TEST(test_full_storage_is_refused_before_any_exchange);
     RUN_TEST(test_node_ignores_forged_offers_and_resends_confirm_until_done);
     RUN_TEST(test_node_gives_up_without_storing_anything);

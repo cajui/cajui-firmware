@@ -28,6 +28,26 @@ Data climateSample(float temperature, float humidity, uint32_t nextSeconds) {
     data.readings[1] = measurement(2, humidity, 0, MaxHumidity);
     return data;
 }
+bool DuplicateAckLimiter::allow(uint64_t node, uint32_t now) {
+    Slot* slot = nullptr;
+    for (auto& candidate : slots_)
+        if (candidate.node == node) slot = &candidate;
+    if (!slot) { // Reuse a free or expired slot; with none, the node is not acknowledged.
+        for (auto& candidate : slots_)
+            if (!candidate.node || uint32_t(now - candidate.since) >= WindowMs) slot = &candidate;
+        if (!slot) return false;
+        *slot = Slot{};
+        slot->node = node;
+        slot->since = now;
+    }
+    if (uint32_t(now - slot->since) >= WindowMs) {
+        slot->since = now;
+        slot->count = 0;
+    }
+    if (slot->count >= PerWindow) return false;
+    ++slot->count;
+    return true;
+}
 bool ReceiverController::start() {
     if (state_ != ReceiverState::Stopped) return false;
     // A receiver without any binding may start: radio pairing creates the first one.
@@ -88,6 +108,7 @@ void ReceiverController::poll() {
         return;
     }
     if (result_ != Result::Ok && result_ != Result::Duplicate) return;
+    if (result_ == Result::Duplicate && !duplicates_.allow(node, clock_.nowMs())) return;
     startedAt_ = clock_.nowMs();
     if (!radio_.startTransmit(ack_)) {
         fail();

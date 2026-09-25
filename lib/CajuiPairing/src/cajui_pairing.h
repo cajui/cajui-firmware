@@ -45,6 +45,11 @@ bool verifyTagged(const Frame&, PairingType, uint64_t network, uint64_t node, ui
 
 constexpr size_t MaxCandidates = 4;
 constexpr uint32_t PairingWindowMs = 120000;
+// A node repeats JOIN_CONFIRM at most five times, 1.5 s apart, after a lost JOIN_DONE. The
+// receiver repeats the reply only within this bound, so a recorded confirmation cannot
+// make it transmit later or indefinitely.
+constexpr uint32_t DoneReplayMs = 15000;
+constexpr uint8_t MaxDoneReplies = 5;
 // A node that asked to join during the window. Requests are unauthenticated, so the first
 // key seen for a node ID is pinned: another key or nonce for that ID marks a conflict and
 // the node cannot be added until the operator searches again.
@@ -100,7 +105,10 @@ private:
         uint64_t network = 0, node = 0, nonce = 0;
         Key key{};
         Frame done{};
+        uint32_t at = 0;
+        uint8_t replies = 0;
     } last_{};
+    void forgetCompleted();
     // False when the request conflicts with the key already pinned for its node.
     bool track(uint64_t node, uint64_t nonce, const X25519Key&, int16_t rssi);
     void dropOffer();

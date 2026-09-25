@@ -226,10 +226,13 @@ PairingHost::~PairingHost() {
     wipe(key_.data(), key_.size());
     wipe(last_.key.data(), last_.key.size());
 }
-void PairingHost::open() {
-    close();
+void PairingHost::forgetCompleted() {
     wipe(last_.key.data(), last_.key.size());
     last_ = Completed{};
+}
+void PairingHost::open() {
+    close();
+    forgetCompleted();
     state_ = HostState::Open;
     openedAt_ = clock_.nowMs();
     paired_ = 0;
@@ -279,10 +282,15 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     poll();
     const uint8_t type = untrustedType(frame);
     // A repeated confirmation of the last completed exchange, even after the window closed
-    // or while another node is being added: answer with the identical JOIN_DONE.
+    // or while another node is being added: answer with the identical JOIN_DONE, within
+    // the bounds a genuine node needs.
+    if (last_.node && (uint32_t(clock_.nowMs() - last_.at) >= DoneReplayMs ||
+                       last_.replies >= MaxDoneReplies))
+        forgetCompleted();
     if (type == uint8_t(PairingType::Confirm) && last_.node &&
         verifyTagged(frame, PairingType::Confirm, last_.network, last_.node, last_.nonce,
                      last_.key)) {
+        ++last_.replies;
         reply = last_.done;
         return true;
     }
@@ -321,7 +329,9 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
         wipe(done.key.data(), done.key.size());
         return false;
     }
-    wipe(last_.key.data(), last_.key.size());
+    forgetCompleted();
+    done.at = clock_.nowMs();
+    done.replies = 1; // This first JOIN_DONE.
     last_ = done;
     wipe(done.key.data(), done.key.size());
     paired_ = offer_.node;

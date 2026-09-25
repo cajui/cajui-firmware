@@ -84,7 +84,9 @@ of a new credential generation, exactly as a USB enrollment would store it.
    to five times, still without storing anything.
 4. On a valid confirmation the receiver stores the binding already active and answers
    JOIN_DONE. It keeps that reply apart from any new offer, so a repeated confirmation
-   receives the identical reply even after the window closed or another node was added.
+   receives the identical reply even after the window closed or another node was added,
+   for 15 seconds and five replies in total: enough for a node's five confirmations, and
+   no more for someone replaying a recorded one.
    On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
 Enrollment slots are never freed, so nothing is stored for an attempt that has not been

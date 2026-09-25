@@ -65,7 +65,9 @@ a bounded routing hint to an already enrolled binding, never proof of identity.
 The existing authenticated receive path commits the sample and replay receipt before
 starting the ACK. Unknown, revoked, corrupted, replayed or full-queue input receives
 no acceptance ACK. A duplicate of the last committed sample gets the same ACK without
-another queue entry, even if the queue is full.
+another queue entry, even if the queue is full, at most three times per node per minute:
+a genuine node repeats a sample twice at most when its ACK is lost, and the bound keeps
+a replayed frame from making the receiver transmit on demand.
 
 ACK TX has a three-second watchdog. Driver or storage failures latch a terminal
 state and stop the radio. Keep the controller alive until radio shutdown is confirmed.

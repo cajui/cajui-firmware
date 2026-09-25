@@ -156,6 +156,38 @@ void test_receiver_radio_failures_and_timeout_are_terminal() {
         TEST_ASSERT_EQUAL_UINT(1, r.radio.sleeps);
     }
 }
+void test_replayed_duplicate_is_acknowledged_a_bounded_number_of_times() {
+    Rig r;
+    r.start();
+    r.pollData();
+    r.complete();
+    for (int replay = 0; replay < 10; ++replay) {
+        r.pollData(); // A recorded frame replayed over the air.
+        EXPECT_RESULT(Result::Duplicate, r.controller.lastResult());
+        r.complete();
+    }
+    const size_t allowed = 1 + DuplicateAckLimiter::PerWindow;
+    TEST_ASSERT_EQUAL_UINT(allowed, r.radio.sends);
+    r.clock.time += DuplicateAckLimiter::WindowMs;
+    r.pollData();
+    TEST_ASSERT_EQUAL_UINT(allowed + 1, r.radio.sends);
+    r.complete();
+    r.pollData(2); // New samples are never limited.
+    EXPECT_RESULT(Result::Ok, r.controller.lastResult());
+    TEST_ASSERT_EQUAL_UINT(allowed + 2, r.radio.sends);
+}
+void test_duplicate_limiter_tracks_nodes_independently() {
+    DuplicateAckLimiter limiter;
+    uint32_t now = UINT32_MAX - 10; // Windows survive clock wrap.
+    for (uint64_t node = 1; node <= BindingCapacity; ++node) TEST_ASSERT_TRUE(limiter.allow(node, now));
+    TEST_ASSERT_FALSE(limiter.allow(BindingCapacity + 1, now)); // No slot left.
+    for (int i = 1; i < DuplicateAckLimiter::PerWindow; ++i) TEST_ASSERT_TRUE(limiter.allow(1, now));
+    TEST_ASSERT_FALSE(limiter.allow(1, now + 100));
+    TEST_ASSERT_TRUE(limiter.allow(2, now + 100));
+    now += DuplicateAckLimiter::WindowMs;
+    TEST_ASSERT_TRUE(limiter.allow(1, now));
+    TEST_ASSERT_TRUE(limiter.allow(BindingCapacity + 1, now)); // An expired slot is reused.
+}
 void test_late_poll_after_completed_ack_keeps_listening() {
     Rig r;
     r.start();
@@ -245,6 +277,8 @@ void runApplicationTests() {
     RUN_TEST(test_receiver_storage_failure_never_acknowledges);
     RUN_TEST(test_receiver_full_queue_preserves_receipt_and_reacks_duplicate);
     RUN_TEST(test_receiver_radio_failures_and_timeout_are_terminal);
+    RUN_TEST(test_replayed_duplicate_is_acknowledged_a_bounded_number_of_times);
+    RUN_TEST(test_duplicate_limiter_tracks_nodes_independently);
     RUN_TEST(test_late_poll_after_completed_ack_keeps_listening);
     RUN_TEST(test_receiver_start_requires_healthy_receiver_storage_and_radio);
     RUN_TEST(test_routing_hint_is_bounded_and_never_authentication);
