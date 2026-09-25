@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Install Cajuí firmware</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+  body { font: 16px system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 640px;
+         background: #faf9f5; color: #24382f; }
+  section { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px;
+            margin: 12px 0; }
+  small { color: #55665c; }
+</style>
+<h1>Install Cajuí firmware</h1>
+<p>Version <b>{{VERSION}}</b> for the Heltec WiFi LoRa 32 V3. Connect the board by USB and use
+Chrome or Edge on a computer; the browser asks which serial port to use.</p>
+<section>
+  <h2>Receiver</h2>
+  <esp-web-install-button manifest="manifest-receiver.json"></esp-web-install-button>
+</section>
+<section>
+  <h2>Transmitter</h2>
+  <esp-web-install-button manifest="manifest-transmitter.json"></esp-web-install-button>
+</section>
+<section>
+  <h2>What installing does</h2>
+  <p>It writes the bootloader, the partition table and the application. It never erases the
+  <code>cajui</code> storage partition, so an updated device keeps its enrollment, counters and
+  queued samples. A new device starts in administration mode and joins a network by radio
+  pairing or USB enrollment.</p>
+  <p><small>A receiver can also be updated without a computer: download its <code>.cjfw</code>
+  file from the <a href="https://github.com/cajui/cajui-firmware/releases">releases</a> and install
+  it from the receiver's setup page. Downgrading a receiver that has already stored samples with
+  a newer version needs its storage reset; see the documentation.</small></p>
+</section>
+<p><small><a href="https://github.com/cajui/cajui-firmware">Source and documentation</a> ·
+Apache-2.0</small></p>
+</html>
