@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 // Receiver image: listens for enrolled transmitters, queues their samples durably, forwards
 // them to MQTT and serves the setup page. See docs/radio-applications.md.

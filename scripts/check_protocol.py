@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Run native Unity tests, optional LLVM coverage and lint checks without accessing boards."""
 
 import argparse

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Locate the host OpenSSL installation without embedding machine-specific paths."""
 
 import os

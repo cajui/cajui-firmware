@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["pyserial==3.5"]

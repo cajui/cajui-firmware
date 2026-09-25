@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "mqtt_uplink.h"
 #include <WiFi.h>

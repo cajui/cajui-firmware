@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "snapshot.h"
 #include "cajui_crc32.h"
 #include <cstring>

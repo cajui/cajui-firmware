@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifdef CAJUI_RUNTIME_ROLE
 #include "common.h"
 #include "sx1262_radio.h"

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Regression tests for the client coverage gate, independent of the coverage tool."""
 
 import contextlib

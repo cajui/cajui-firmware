@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "cajui_device.h"
 #include "cajui_provisioning.h"

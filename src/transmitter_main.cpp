@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
 // Transmitter image: wakes, reads the DHT22, delivers one sample and sleeps; or pairs by
 // radio when its button is held. See docs/radio-applications.md.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_storage.h"
 #include <cstring>
 #include <memory>

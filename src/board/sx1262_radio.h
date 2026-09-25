@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #pragma once
 #ifdef CAJUI_RUNTIME_ROLE
 #include <Arduino.h>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "cajui_uplink.h"
 #include "cajui_crc32.h"
 #include "cajui_text.h"
