@@ -165,8 +165,12 @@ void transmitterList(Html& page, const SetupView& v) {
         page.format("<table><tr><th>Node</th><th>State</th><th>Last sample</th><th></th></tr>");
         for (size_t i = 0; i < v.transmitterCount; ++i) {
             const auto& t = v.transmitters[i];
-            page.format("<tr><td>%016" PRIx64 "</td><td>%s</td><td>%" PRIu64 "</td><td>", t.node,
-                        stateName(t.state), t.received);
+            page.format("<tr><td>%016" PRIx64 "</td><td>%s</td><td>", t.node, stateName(t.state));
+            // A re-paired node shows two active rows until its first sample under the new key.
+            if (t.received)
+                page.format("%" PRIu64 "</td><td>", t.received);
+            else
+                page.format("none yet</td><td>");
             if (t.state == Enrollment::Active)
                 page.format("<form method=\"post\" action=\"/revoke\"><input type=\"hidden\" "
                             "name=\"node\" value=\"%016" PRIx64 "\"><input type=\"hidden\" "
@@ -215,7 +219,9 @@ void transmitterList(Html& page, const SetupView& v) {
                     "searching</button></form>");
     }
     if (pairing->paired)
-        page.format("<p class=\"notice\">Transmitter %016" PRIx64 " paired.</p>", pairing->paired);
+        page.format("<p class=\"notice\">Transmitter %016" PRIx64 " paired. Its previous key, if "
+                    "any, keeps working until it sends with the new one.</p>",
+                    pairing->paired);
     page.format("<p><small>Add only a transmitter you just put in pairing mode, and keep it close. "
                 "Pairing is not protected against an attacker in radio range during the search."
                 "</small></p>");

@@ -303,6 +303,61 @@ void test_pairing_again_rotates_the_generation_on_both_sides() {
     EXPECT_RESULT(Enrollment::Revoked, old.state);
     TEST_ASSERT_EQUAL_UINT64(42, rig.rx->network()); // Same network kept.
 }
+// Delivers one DATA frame from the node's stored binding through the receiver controller.
+Result sendSample(PairRig& rig, uint64_t counter) {
+    Binding atNode{};
+    TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
+    Message m{};
+    m.counter = counter;
+    m.data = fixtures::sample();
+    Frame frame{};
+    EXPECT_RESULT(Result::Ok, seal(atNode, m, frame));
+    rig.rxRadio.inbox.push_back(frame);
+    rig.controller.poll();
+    rig.controller.poll();
+    rig.rxRadio.sent.clear();
+    return rig.controller.lastResult();
+}
+void test_lost_done_on_repairing_never_cuts_the_node_off() {
+    for (int doneArrives = 0; doneArrives < 2; ++doneArrives) {
+        SCENARIO(doneArrives);
+        PairRig rig;
+        TEST_ASSERT_TRUE(fixtures::enroll(*rig.rx));
+        TEST_ASSERT_TRUE(fixtures::enroll(*rig.tx));
+        EXPECT_RESULT(Result::Ok, sendSample(rig, 1)); // Generation 10 is in use.
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.host.open();
+        rig.run(1);
+        EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+        if (doneArrives) {
+            rig.run(40);
+            EXPECT_RESULT(ClientState::Paired, rig.client.state());
+        } else {
+            for (int i = 0; i < 200 && rig.client.state() != ClientState::Failed; ++i) {
+                rig.client.poll();
+                rig.toReceiver();
+                for (auto it = rig.rxRadio.sent.begin(); it != rig.rxRadio.sent.end();)
+                    it = untrustedType(*it) == uint8_t(PairingType::Done) // Every DONE is lost.
+                             ? rig.rxRadio.sent.erase(it)
+                             : it + 1;
+                rig.toNode();
+                rig.clock.time += 100;
+            }
+            EXPECT_RESULT(ClientState::Failed, rig.client.state());
+        }
+        EXPECT_RESULT(HostState::Paired, rig.host.state());
+        EnrollmentInfo old{};
+        TEST_ASSERT_TRUE(rig.rx->info(2, 10, old));
+        EXPECT_RESULT(Enrollment::Active, old.state); // Still valid at the receiver.
+        // The node's next sample, under whichever key it holds, is accepted and settles it.
+        EXPECT_RESULT(Result::Ok, sendSample(rig, doneArrives ? 1 : 2));
+        Binding bindings[2]{};
+        TEST_ASSERT_EQUAL_size_t(1, rig.rx->bindings(2, bindings, 2));
+        Binding atNode{};
+        TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
+        TEST_ASSERT_TRUE(bindings[0].key == atNode.key);
+    }
+}
 void test_host_ignores_input_outside_the_window_and_limits_candidates() {
     PairRig rig;
     CountingEntropy entropy;
@@ -679,6 +734,7 @@ void runPairingTests() {
     RUN_TEST(test_pairing_frames_round_trip_and_reject_tampering);
     RUN_TEST(test_radio_pairing_creates_matching_active_bindings);
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
+    RUN_TEST(test_lost_done_on_repairing_never_cuts_the_node_off);
     RUN_TEST(test_host_ignores_input_outside_the_window_and_limits_candidates);
     RUN_TEST(test_offers_store_nothing_and_resist_spoofed_requests);
     RUN_TEST(test_injected_request_cannot_redirect_a_listed_node);

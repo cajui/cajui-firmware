@@ -92,16 +92,21 @@ of a new credential generation, exactly as a USB enrollment would store it.
 Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
 stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each
 side, like a USB rotation; revoked generations free theirs when a slot is needed, see
-[storage limits](persistence.md#limits-and-retained-history). If JOIN_DONE is lost for all five
-confirmations, the receiver holds an active binding the node never stored; the node keeps
-its previous binding and the administrator pairs it again or revokes the stale one on the
-setup page.
+[storage limits](persistence.md#limits-and-retained-history).
+
+Pairing a node that already has a binding does not revoke the old one on the receiver
+at once: the receiver keeps both generations active, and the node's **first sample**
+decides. A sample under the new key revokes the old generation; a sample under the old
+key, which means the node never received JOIN_DONE, revokes the new one. A lost JOIN_DONE
+therefore never cuts the node off, and the page shows the unused generation with no
+sample yet. A previous generation that never carried a sample is revoked immediately, so
+at most two stay active. Replayed samples do not count: only a new, authenticated sample
+commits. The node itself replaces its binding as soon as it stores the new one.
 
 A node that already belongs to a network can only pair again within that network:
 storage holds a single network per device. To move it, `tools/provision.py reset` makes
-it leave its network first, retiring its keys.
-Pairing again within the network creates a new generation and revokes the previous one
-on both sides, as USB rotation does.
+it leave its network first, retiring its keys. Pairing again within the network creates a new generation, which replaces the previous
+one as described above.
 
 ## Devices
 

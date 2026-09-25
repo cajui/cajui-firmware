@@ -864,6 +864,62 @@ void test_snapshot_codec_round_trips_without_a_blob() {
     EXPECT_RESULT(Health::Corrupt,
                   snapshot::decode(bytes.data(), size - 1, Role::Transmitter, 2, *decoded));
 }
+void test_repaired_node_keeps_its_used_key_until_it_sends_with_the_new_one() {
+    for (int useNew = 0; useNew < 2; ++useNew) {
+        SCENARIO(useNew);
+        MemoryRecords records;
+        auto store = mounted(records, Role::Receiver);
+        TEST_ASSERT_TRUE(enroll(*store));
+        receiveOk(*store, 1); // Generation 10 is in use.
+        EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 11, key(2), 1));
+        EXPECT_RESULT(Result::Ok, store->activateAlongside(2, 11));
+        EXPECT_RESULT(Result::Ok, store->activateAlongside(2, 11));
+        Binding both[3]{};
+        TEST_ASSERT_EQUAL_size_t(2, store->bindings(2, both, 3));
+        store = remount(records, Role::Receiver); // Two active generations are valid.
+        TEST_ASSERT_TRUE(store->healthy());
+        // The first new sample decides: the other generation is revoked durably.
+        if (useNew)
+            receiveOk(*store, 1, 2, 2);
+        else
+            receiveOk(*store, 2); // JOIN_DONE was lost: the node still uses the old key.
+        EnrollmentInfo info{};
+        TEST_ASSERT_TRUE(store->info(2, useNew ? 10 : 11, info));
+        EXPECT_RESULT(Enrollment::Revoked, info.state);
+        store = remount(records, Role::Receiver);
+        TEST_ASSERT_EQUAL_size_t(1, store->bindings(2, both, 3));
+        TEST_ASSERT_TRUE(both[0].key == key(useNew ? 2 : 1));
+    }
+    MemoryRecords records;
+    auto store = mounted(records, Role::Receiver);
+    TEST_ASSERT_TRUE(enroll(*store));
+    // An unused previous generation is revoked at once; so is a second pending one.
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 11, key(2), 1));
+    EXPECT_RESULT(Result::Ok, store->activateAlongside(2, 11));
+    Binding both[2]{};
+    TEST_ASSERT_EQUAL_size_t(1, store->bindings(2, both, 2));
+    EXPECT_RESULT(Result::NotFound, store->activateAlongside(2, 99));
+    EXPECT_RESULT(Result::Conflict, store->activateAlongside(2, 10));
+    TEST_ASSERT_EQUAL_size_t(0, store->bindings(2, nullptr, 2));
+    receiveOk(*store, 1, 2, 2);
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 2, 12, key(3), 1));
+    EXPECT_RESULT(Result::Ok, store->activateAlongside(2, 12));
+    records.failAt = 2; // Sample durable, revocation of the superseded key lost.
+    Frame ack{};
+    EXPECT_RESULT(Result::StorageError, receive(binding(2, 3), data(1, 2, 3), *store, ack));
+    store = remount(records, Role::Receiver);
+    EXPECT_RESULT(Result::Duplicate, receive(binding(2, 3), data(1, 2, 3), *store, ack));
+    receiveOk(*store, 2, 2, 3); // The next sample completes the revocation.
+    TEST_ASSERT_EQUAL_size_t(1, store->bindings(2, both, 2));
+    MemoryRecords txRecords;
+    auto tx = mounted(txRecords);
+    EXPECT_RESULT(Result::Ok, tx->prepare(42, 1, 2, 10, key(), 1));
+    EXPECT_RESULT(Result::Invalid, tx->activateAlongside(2, 10));
+    EXPECT_RESULT(Result::Ok, store->prepare(42, 1, 5, 50, key(50), 1));
+    records.failBefore = true;
+    EXPECT_RESULT(Result::StorageError, store->activateAlongside(5, 50));
+    EXPECT_RESULT(Result::StorageError, store->activateAlongside(5, 50));
+}
 // The v1 decoder now only feeds migration, but must still refuse anything invalid.
 std::vector<uint8_t> v1Bytes(Role role) {
     std::unique_ptr<snapshot::State> state(new snapshot::State());
@@ -982,4 +1038,5 @@ void runStorageTests() {
     RUN_TEST(test_record_codecs_reject_malformed_input);
     RUN_TEST(test_snapshot_codec_round_trips_without_a_blob);
     RUN_TEST(test_v1_snapshot_decoder_still_fails_closed);
+    RUN_TEST(test_repaired_node_keeps_its_used_key_until_it_sends_with_the_new_one);
 }

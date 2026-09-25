@@ -152,6 +152,9 @@ void test_setup_page_escapes_input_and_never_shows_passwords() {
     TEST_ASSERT_TRUE(contains(html, "/?host=192.168.1.20&amp;port=1883"));
     TEST_ASSERT_TRUE(contains(html, "Changes are staged")); // saved=false
     TEST_ASSERT_TRUE(contains(html, "0000000000000002</td><td>active</td><td>34"));
+    transmitters[1] = enrollment(Enrollment::Active, 2, 12, 0); // A pending re-pairing.
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "0000000000000002</td><td>active</td><td>none yet"));
     TEST_ASSERT_TRUE(contains(html, "0000000000000003</td><td>revoked</td><td>5"));
     TEST_ASSERT_TRUE(contains(html, "name=\"generation\" value=\"000000000000000a\""));
     TEST_ASSERT_FALSE(contains(html, "value=\"000000000000000b\"")); // Revoked: no button.

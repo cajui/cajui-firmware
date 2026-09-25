@@ -293,6 +293,24 @@ Result PersistentStore::activate(uint64_t node, uint64_t generation) {
     next_.entries[size_t(index)].state = Enrollment::Active;
     return saveRegistry() ? Result::Ok : Result::StorageError;
 }
+Result PersistentStore::activateAlongside(uint64_t node, uint64_t generation) {
+    if (!healthy()) return Result::StorageError;
+    if (role_ != Role::Receiver) return Result::Invalid;
+    const int index = find(node, generation);
+    if (index < 0) return Result::NotFound;
+    const auto& target = registry_.entries[size_t(index)];
+    if (target.state == Enrollment::Active) return Result::Ok;
+    if (target.state != Enrollment::Prepared) return Result::Conflict;
+    next_ = registry_;
+    // Keep only a previous generation the node has actually used: at most two stay active.
+    for (size_t i = 0; i < BindingCapacity; ++i) {
+        auto& e = next_.entries[i];
+        if (e.node == node && e.state == Enrollment::Active && !receipts_[i].receipt.counter)
+            e.state = Enrollment::Revoked;
+    }
+    next_.entries[size_t(index)].state = Enrollment::Active;
+    return saveRegistry() ? Result::Ok : Result::StorageError;
+}
 Result PersistentStore::revoke(uint64_t node, uint64_t generation) {
     if (!healthy()) return Result::StorageError;
     const int index = find(node, generation);
@@ -350,6 +368,14 @@ bool PersistentStore::binding(uint64_t node, Binding& out) const {
         }
     return false;
 }
+size_t PersistentStore::bindings(uint64_t node, Binding* output, size_t capacity) const {
+    size_t count = 0;
+    if (!healthy() || !output) return 0;
+    for (const auto& e : registry_.entries)
+        if (e.node == node && e.state == Enrollment::Active && count < capacity)
+            output[count++] = bindingOf(e, registry_.network);
+    return count;
+}
 bool PersistentStore::reserve(const Binding& b, uint64_t& out) {
     out = 0;
     const int index = authorized(b);
@@ -405,6 +431,18 @@ Result PersistentStore::commit(const Binding& b, uint64_t expected, const Receip
     receipts_[slot] = next;
     ++tail_;
     ++queuedBySlot_[slot];
+    // The node used a re-paired generation: its previous one is revoked now, not at
+    // pairing, so a lost JOIN_DONE never cuts the node off. The sample is already durable.
+    bool superseded = false;
+    next_ = registry_;
+    for (size_t i = 0; i < BindingCapacity; ++i) {
+        auto& e = next_.entries[i];
+        if (i != slot && e.node == b.node && e.state == Enrollment::Active) {
+            e.state = Enrollment::Revoked;
+            superseded = true;
+        }
+    }
+    if (superseded && !saveRegistry()) return Result::StorageError;
     return Result::Ok;
 }
 Health PersistentStore::readFront(records::QueueRecord& record) {

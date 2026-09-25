@@ -95,13 +95,16 @@ void ReceiverController::poll() {
         state_ = ReceiverState::Acknowledging;
         return;
     }
-    Binding binding{};
+    // A re-paired node has two active bindings until it uses the new one; the frame
+    // authenticates under at most one of them.
+    Binding bindings[2]{};
     const uint64_t node = untrustedDataNode(frame);
-    if (!node || !store_.binding(node, binding)) {
-        result_ = Result::Unauthorized;
-        return;
+    const size_t count = node ? store_.bindings(node, bindings, 2) : 0;
+    result_ = Result::Unauthorized;
+    for (size_t i = 0; i < count; ++i) {
+        result_ = cajui::receive(bindings[i], frame, store_, ack_);
+        if (result_ != Result::CryptoError) break;
     }
-    result_ = cajui::receive(binding, frame, store_, ack_);
     if (result_ == Result::StorageError) {
         fail();
         return;

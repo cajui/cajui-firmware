@@ -71,6 +71,10 @@ public:
     Result prepare(uint64_t network, uint64_t receiver, uint64_t node, uint64_t generation,
                    const Key&, uint16_t profile);
     Result activate(uint64_t node, uint64_t generation);
+    // Receiver, radio pairing: activates without revoking the node's previous generation,
+    // which stays valid until the node's first sample under the new one (commit revokes
+    // it then). A previous generation that never received a sample is revoked now.
+    Result activateAlongside(uint64_t node, uint64_t generation);
     Result revoke(uint64_t node, uint64_t generation);
     bool info(uint64_t node, uint64_t generation, EnrollmentInfo&) const;
     // Copies up to capacity occupied enrollments in slot order; returns how many.
@@ -79,6 +83,8 @@ public:
     // which prepare() retires to make room.
     size_t freeSlots() const;
     bool binding(uint64_t node, Binding&) const;
+    // Every active binding of a node: two on a receiver while a re-pairing is pending.
+    size_t bindings(uint64_t node, Binding* output, size_t capacity) const;
     bool reserve(const Binding&, uint64_t&) override;
     bool load(const Binding&, Receipt&) override;
     Result commit(const Binding&, uint64_t expectedCounter, const Receipt&) override;

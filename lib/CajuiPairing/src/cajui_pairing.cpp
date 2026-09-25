@@ -310,7 +310,8 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     if (type != uint8_t(PairingType::Confirm) || state_ != HostState::Offered ||
         !verifyTagged(frame, PairingType::Confirm, offer_.network, offer_.node, offer_.nonce, key_))
         return false;
-    // The node proved it holds the key: store the binding, already active.
+    // The node proved it holds the key: store the binding, already active. A previous
+    // generation of the node stays valid until the node sends with the new one.
     Completed done{};
     done.network = offer_.network;
     done.node = offer_.node;
@@ -318,7 +319,7 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
     done.key = key_;
     if (prepareFresh(store_, offer_.network, offer_.receiver, offer_.node, offer_.generation,
                      key_) != Result::Ok ||
-        store_.activate(offer_.node, offer_.generation) != Result::Ok ||
+        store_.activateAlongside(offer_.node, offer_.generation) != Result::Ok ||
         !buildTagged(PairingType::Done, done.network, done.node, done.nonce, done.key, done.done)) {
         store_.revoke(offer_.node, offer_.generation);
         wipe(done.key.data(), done.key.size());
