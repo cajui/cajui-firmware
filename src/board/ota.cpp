@@ -12,10 +12,16 @@ extern "C" bool verifyRollbackLater() {
 namespace board {
 bool OtaSink::begin(size_t size) {
     abort();
+    // After an install the free slot is the one selected for the next boot: writing into it
+    // again, even a file that then fails verification, would leave those bytes bootable.
+    if (pending()) return false;
     target_ = esp_ota_get_next_update_partition(nullptr);
     if (!target_ || size > target_->size) return false;
     open_ = esp_ota_begin(target_, size, &handle_) == ESP_OK;
     return open_;
+}
+bool OtaSink::pending() {
+    return esp_ota_get_boot_partition() != esp_ota_get_running_partition();
 }
 bool OtaSink::write(const uint8_t* data, size_t size) {
     return open_ && esp_ota_write(handle_, data, size) == ESP_OK;
@@ -29,6 +35,10 @@ bool OtaSink::commit() {
 void OtaSink::abort() {
     if (open_) esp_ota_abort(handle_);
     open_ = false;
+    // Defence in depth: never leave a slot that was being written selected for boot.
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (target_ && target_ == esp_ota_get_boot_partition() && running)
+        esp_ota_set_boot_partition(running);
 }
 size_t OtaSink::capacity() {
     const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
@@ -48,12 +58,15 @@ void reportFirmware() {
                                                            : "other",
                   unsigned(invalid != nullptr));
 }
-void confirmFirmware() {
+bool confirmFirmware() {
     const esp_partition_t* running = esp_ota_get_running_partition();
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
-    if (running && esp_ota_get_state_partition(running, &state) == ESP_OK &&
-        state == ESP_OTA_IMG_PENDING_VERIFY && esp_ota_mark_app_valid_cancel_rollback() == ESP_OK)
-        Serial.println("CJAPP FIRMWARE confirmed");
+    if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY)
+        return true;
+    if (esp_ota_mark_app_valid_cancel_rollback() != ESP_OK) return false; // Retried later.
+    Serial.println("CJAPP FIRMWARE confirmed");
+    return true;
 }
 } // namespace board
 #endif

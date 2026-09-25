@@ -94,6 +94,7 @@ enum class Notice : uint8_t {
     UpdateIncomplete,
     UpdateBadSignature,
     UpdateFailed,
+    UpdatePending,
     Count
 };
 const char* noticeText(Notice);

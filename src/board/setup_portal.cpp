@@ -446,7 +446,9 @@ void SetupPortal::upload() {
     HTTPUpload& part = server_.upload();
     if (part.status == UPLOAD_FILE_START) {
         delete update_;
-        uploadAllowed_ = server_.client().localIP() == WiFi.softAPIP() &&
+        // One install per restart: after it, nothing more is written until the receiver has
+        // restarted into it (OtaSink refuses as well).
+        uploadAllowed_ = !OtaSink::pending() && server_.client().localIP() == WiFi.softAPIP() &&
                          cajui::allowedHost(server_.hostHeader().c_str(), address_) &&
                          cajui::allowedOrigin(server_.header("Origin").c_str(), address_) &&
                          session_.validToken(server_.arg("token").c_str());
@@ -459,12 +461,15 @@ void SetupPortal::upload() {
         return;
     }
     if (!update_) return;
-    if (part.status == UPLOAD_FILE_WRITE)
+    if (part.status == UPLOAD_FILE_WRITE) {
         update_->feed(part.buf, part.currentSize);
-    else if (part.status == UPLOAD_FILE_END)
-        update_->finish();
-    else if (part.status == UPLOAD_FILE_ABORTED)
+    } else if (part.status == UPLOAD_FILE_END) {
+        // Restart even if the response never reaches the client, so an installed image
+        // never waits for some unrelated restart.
+        if (update_->finish() == cajui::UpdateStatus::Installed) control_.restartForUpdate();
+    } else if (part.status == UPLOAD_FILE_ABORTED) {
         update_->cancel();
+    }
     session_.touch(millis()); // A large upload is activity.
 }
 void SetupPortal::uploaded() {
@@ -475,6 +480,7 @@ void SetupPortal::uploaded() {
     }
     cajui::UpdateStatus status = cajui::UpdateStatus::Truncated;
     uint32_t version = 0;
+    if (!update_ && OtaSink::pending()) return redirect(cajui::Notice::UpdatePending);
     if (update_) {
         update_->cancel(); // No effect once installed; aborts a transfer that never ended.
         status = update_->status();
@@ -488,7 +494,6 @@ void SetupPortal::uploaded() {
     case cajui::UpdateStatus::Installed:
         cajui::renderUpdated(version, page_, sizeof(page_));
         server_.send(200, "text/html; charset=utf-8", page_);
-        control_.restartForUpdate();
         return;
     case cajui::UpdateStatus::BadHeader:
     case cajui::UpdateStatus::WrongRole: return redirect(cajui::Notice::UpdateWrongFile);

@@ -15,6 +15,8 @@ public:
     bool commit() override;
     void abort() override;
     static size_t capacity(); // Size of the slot an update would use.
+    // An installed update waits for its restart; no other update may start before it.
+    static bool pending();
 
 private:
     const esp_partition_t* target_ = nullptr;
@@ -25,6 +27,7 @@ private:
 void reportFirmware();
 // A new image stays on probation after an update: any restart before this call (a crash,
 // the watchdog, a fault restart) makes the bootloader return to the previous image.
-void confirmFirmware();
+// True once nothing is left to confirm (also for an image written over USB).
+bool confirmFirmware();
 } // namespace board
 #endif

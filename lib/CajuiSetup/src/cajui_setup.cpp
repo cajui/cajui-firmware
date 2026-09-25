@@ -357,6 +357,8 @@ const char* noticeText(Notice notice) {
     case Notice::UpdateBadSignature:
         return "The update is not signed by the Cajuí project; nothing was installed.";
     case Notice::UpdateFailed: return "The update could not be written; nothing was installed.";
+    case Notice::UpdatePending:
+        return "An update is already installed and the receiver is restarting into it.";
     case Notice::AddConflict:
         return "Two devices answered with this ID. Stop, keep only your transmitter in pairing "
                "mode and search again.";
