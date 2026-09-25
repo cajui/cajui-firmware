@@ -51,7 +51,8 @@ private:
     std::unique_ptr<cajui::Provisioning> commands_;
     std::unique_ptr<Console> console_;
     bool adminMode_ = false, running_ = false, restartPending_ = false, healthy_ = false,
-         confirmed_ = false;
+         confirmed_ = false, setupRunning_ = false;
+    uint32_t confirmAttemptAt_ = 0;
     uint32_t startedAt_ = 0, retryAt_ = 0, reportedForwards_ = 0, reportedRetries_ = 0;
     bool reportedOnline_ = false;
     void startForwarding();
@@ -151,7 +152,8 @@ void ReceiverApp::setup() {
     Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power));
     startForwarding();
     portal_.setPairing(&pairing_);
-    if (!portal_.start(listening_)) Serial.println("CJAPP SETUP unavailable");
+    setupRunning_ = portal_.start(listening_);
+    if (!setupRunning_) Serial.println("CJAPP SETUP unavailable");
     running_ = true;
     startedAt_ = millis();
     enableLoopWDT(); // The loop never blocks: a hang restarts the receiver.
@@ -212,9 +214,12 @@ void ReceiverApp::loop() {
     }
     // A minute of healthy operation confirms a freshly updated image; until then any
     // restart returns to the previous one.
-    if (!confirmed_ && uint32_t(millis() - startedAt_) >= ConfirmAfterMs) {
-        confirmed_ = true;
-        confirmFirmware();
+    // The setup page is the receiver's only update channel without a cable: an image
+    // without it is never kept.
+    if (!confirmed_ && setupRunning_ && uint32_t(millis() - startedAt_) >= ConfirmAfterMs &&
+        uint32_t(millis() - confirmAttemptAt_) >= ConfirmAfterMs) {
+        confirmAttemptAt_ = millis();
+        confirmed_ = confirmFirmware();
     }
     if (!healthy_ && uint32_t(millis() - startedAt_) >= cajui::HealthyRunMs) {
         healthy_ = true;
