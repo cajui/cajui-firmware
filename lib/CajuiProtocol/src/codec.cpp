@@ -14,12 +14,17 @@ using wire::NodeAt;
 using wire::put;
 using wire::TypeAt;
 using wire::VersionAt;
-constexpr uint8_t ProtocolVersion = wire::Version;
+bool knownVersion(uint8_t version) {
+    return version == WireV1 || version == WireV2;
+}
+constexpr size_t AckPowerSize = 1; // v2 ACK: tag of the DATA, then the power command.
 // DATA payload offsets, then offsets within each reading.
 constexpr size_t BatteryAt = 0, NextSecondsAt = 2, CountAt = 6;
 constexpr size_t SensorAt = 0, MetricAt = 2, UnitAt = 4, StatusAt = 5, ValueAt = 6;
-void nonceFor(Type type, uint64_t counter, uint8_t nonce[NonceSize]) {
+// The version byte is part of the nonce, so v1 and v2 frames never share one.
+void nonceFor(Type type, uint8_t version, uint64_t counter, uint8_t nonce[NonceSize]) {
     wire::nonce(uint8_t(type), counter, nonce);
+    nonce[3] = version;
 }
 }
 
@@ -46,7 +51,7 @@ uint8_t untrustedType(const Frame& frame) {
     if (frame.size < HeaderSize || frame.size > MaxFrame) return 0;
     const auto* h = frame.bytes.data();
     const size_t length = size_t(get(h + LengthAt, 2));
-    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || h[VersionAt] != ProtocolVersion ||
+    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || !knownVersion(h[VersionAt]) ||
         frame.size < HeaderSize + length)
         return 0;
     return h[TypeAt];
@@ -55,7 +60,7 @@ uint64_t untrustedDataNode(const Frame& frame) {
     if (frame.size < HeaderSize + MinDataPayload + TagSize || frame.size > MaxFrame) return 0;
     const auto* h = frame.bytes.data();
     const size_t length = size_t(get(h + LengthAt, 2));
-    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || h[VersionAt] != ProtocolVersion ||
+    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || !knownVersion(h[VersionAt]) ||
         h[TypeAt] != uint8_t(Type::Data) || length < MinDataPayload ||
         frame.size != HeaderSize + length + TagSize || (length - DataPrefixSize) % ReadingSize)
         return 0;
@@ -65,9 +70,11 @@ uint64_t untrustedDataNode(const Frame& frame) {
 Result seal(const Binding& b, const Message& m, Frame& out) {
     out = Frame{};
     if (!detail::usable(b)) return Result::Unauthorized;
-    if (!m.counter || (m.type != Type::Data && m.type != Type::Ack)) return Result::Invalid;
+    if (!m.counter || (m.type != Type::Data && m.type != Type::Ack) || !knownVersion(m.version) ||
+        (m.version == WireV1 && m.powerDbm != KeepPower))
+        return Result::Invalid;
     uint8_t plain[MaxPayload]{};
-    size_t length = TagSize;
+    size_t length = m.version == WireV2 ? TagSize + AckPowerSize : TagSize;
     if (m.type == Type::Data) {
         if (!detail::validData(m.data)) return Result::Invalid;
         length = DataPrefixSize + size_t(m.data.count) * ReadingSize;
@@ -85,18 +92,19 @@ Result seal(const Binding& b, const Message& m, Frame& out) {
         }
     } else {
         std::memcpy(plain, m.dataTag.data(), TagSize);
+        if (m.version == WireV2) plain[TagSize] = static_cast<uint8_t>(m.powerDbm);
     }
     Frame frame{};
     auto* h = frame.bytes.data();
     std::memcpy(h, Magic, sizeof(Magic));
-    h[VersionAt] = ProtocolVersion;
+    h[VersionAt] = m.version;
     h[TypeAt] = uint8_t(m.type);
     put(h + NetworkAt, b.network, 8);
     put(h + NodeAt, b.node, 8);
     put(h + CounterAt, m.counter, 8);
     put(h + LengthAt, length, 2);
     uint8_t nonce[NonceSize];
-    nonceFor(m.type, m.counter, nonce);
+    nonceFor(m.type, m.version, m.counter, nonce);
     if (!encrypt(b.key, nonce, h, HeaderSize, plain, length, h + HeaderSize,
                  h + HeaderSize + length))
         return Result::CryptoError;
@@ -110,30 +118,34 @@ Result open(const Binding& b, const Frame& frame, Message& out) {
     if (!detail::usable(b)) return Result::Unauthorized;
     if (frame.size < HeaderSize + TagSize || frame.size > MaxFrame) return Result::Invalid;
     const auto* h = frame.bytes.data();
-    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || h[VersionAt] != ProtocolVersion ||
+    if (std::memcmp(h, Magic, sizeof(Magic)) != 0 || !knownVersion(h[VersionAt]) ||
         (h[TypeAt] != uint8_t(Type::Data) && h[TypeAt] != uint8_t(Type::Ack)))
         return Result::Invalid;
+    const uint8_t version = h[VersionAt];
+    const size_t ackLength = version == WireV2 ? TagSize + AckPowerSize : TagSize;
     if (get(h + NetworkAt, 8) != b.network || get(h + NodeAt, 8) != b.node)
         return Result::Unauthorized;
     const auto type = static_cast<Type>(h[TypeAt]);
     const uint64_t counter = get(h + CounterAt, 8);
     const size_t length = size_t(get(h + LengthAt, 2));
     if (!counter || length > MaxPayload || frame.size != HeaderSize + length + TagSize ||
-        (type == Type::Ack && length != TagSize) ||
+        (type == Type::Ack && length != ackLength) ||
         (type == Type::Data &&
          (length < MinDataPayload || (length - DataPrefixSize) % ReadingSize)))
         return Result::Invalid;
     uint8_t plain[MaxPayload]{};
     uint8_t nonce[NonceSize];
-    nonceFor(type, counter, nonce);
+    nonceFor(type, version, counter, nonce);
     if (!decrypt(b.key, nonce, h, HeaderSize, h + HeaderSize, length, h + HeaderSize + length,
                  plain))
         return Result::CryptoError;
     Message decoded{};
     decoded.type = type;
+    decoded.version = version;
     decoded.counter = counter;
     if (type == Type::Ack) {
         std::memcpy(decoded.dataTag.data(), plain, TagSize);
+        if (version == WireV2) decoded.powerDbm = static_cast<int8_t>(plain[TagSize]);
     } else {
         auto& d = decoded.data;
         d.batteryMv = uint16_t(get(plain + BatteryAt, 2));

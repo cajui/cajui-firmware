@@ -32,7 +32,7 @@ in full as authenticated additional data (AAD):
 | Offset | Bytes | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `CJLR` |
-| 4 | 1 | Version: `1` |
+| 4 | 1 | Version: `1` or `2` (see [version 2](#version-2-power-command)) |
 | 5 | 1 | Type: DATA=`1`, ACK=`2` |
 | 6 | 8 | Network ID |
 | 14 | 8 | Node ID |
@@ -68,10 +68,27 @@ positive IDs for extension; drivers and consumers must understand their meaning.
 A physical connector does not imply automatic sensor discovery.
 
 DATA occupies 65–135 bytes including header and tag; two metrics occupy 75 bytes.
-ACK occupies 64 bytes. It carries the DATA sample counter and an encrypted payload
-containing exactly the 16-byte tag of the accepted DATA frame. ACK has no variable
+A version 1 ACK occupies 64 bytes. It carries the DATA sample counter and an encrypted
+payload containing exactly the 16-byte tag of the accepted DATA frame. ACK has no
 status or timestamp field. It confirms durable acceptance by the receiver, not
 successful delivery to a server.
+
+### Version 2: power command
+
+Version 2 DATA has the same payload as version 1. A version 2 ACK (65 bytes) appends one
+byte to the encrypted payload: the transmit power, in dBm as a signed byte, that the node
+should use from its next frame, or `127` for "keep the current power". A receiver
+answers in the version of the DATA it accepted, so version 1 nodes keep working with an
+updated receiver; a version 2 node needs an updated receiver. An ACK in another version
+than its DATA is rejected. Pairing frames keep version 1.
+
+The ACK reuses the DATA counter, so a repeated ACK must repeat the exact bytes of the
+first one. The receiver therefore stores the command with the replay receipt and answers
+a duplicate with the stored command, never a newly computed one. The node applies a
+command only from an authenticated ACK, clamps it to its configured maximum and the
+chip's minimum, and returns to its configured power after three cycles without an ACK,
+so a wrong command cannot leave it unheard. The reference receiver sends `127` until a
+power policy is defined.
 
 ## Authenticated encryption and counters
 
@@ -81,8 +98,9 @@ cryptographically secure random generator. Never derive keys from device names o
 IDs, share a global default key, or expose credentials in logs, source or radio
 traffic.
 
-The 12-byte nonce is `43 4a <type> 01` followed by the big-endian sample counter.
-The type separates DATA and ACK nonces. Keys must be unique per binding. A counter
+The 12-byte nonce is `43 4a <type> <version>` followed by the big-endian sample counter.
+The type separates DATA and ACK nonces, and the version separates version 1 and 2
+frames. Keys must be unique per binding. A counter
 must never identify new content under an existing key. `seal` is a low-level
 primitive; production senders must reserve counters durably through `Sender` and
 `CounterStore` instead of choosing them directly.
@@ -96,8 +114,9 @@ Skipped counters are valid. New keys permit new counter state; restoring an old 
 with reset counters is forbidden.
 
 Retries reuse the identical serialized frame. Duplicate ACKs have identical bytes.
-Do not re-encrypt changed content with an existing counter. Adding variable ACK
-fields would require a revised nonce/counter design. The protocol provides no
+Do not re-encrypt changed content with an existing counter: any variable ACK field, like
+the version 2 power command, must be fixed per accepted counter and stored with the
+receipt. The protocol provides no
 forward secrecy and does not protect against RF jamming or physical extraction
 of credentials from unprotected storage. Administration and storage protection
 remain integration responsibilities. A revoked binding has `active=false`.

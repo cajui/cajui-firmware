@@ -380,6 +380,72 @@ void test_codec_matches_pre_refactor_wire_fixture() {
     TEST_ASSERT_EQUAL_UINT(sizeof(expected), frame.size);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, frame.bytes.data(), sizeof(expected));
 }
+void test_v2_ack_carries_an_authenticated_power_command_and_v1_still_works() {
+    for (uint8_t version : {WireV1, WireV2}) {
+        SCENARIO(version);
+        MemoryJournal journal;
+        MemoryCounter counter;
+        Sender sender;
+        EXPECT_RESULT(Result::Ok, sender.begin(vectorBinding(), twoReadings(), counter, version));
+        const Frame data = *sender.nextAttempt();
+        TEST_ASSERT_EQUAL_UINT8(version, data.bytes[4]);
+        TEST_ASSERT_EQUAL_UINT64(1234, untrustedDataNode(data));
+        Frame ack{};
+        Link link{};
+        link.known = true;
+        link.rssiDbm = -71;
+        link.snrTenthsDb = 95;
+        EXPECT_RESULT(Result::Ok, receive(vectorBinding(), data, journal, ack, link, 14));
+        TEST_ASSERT_TRUE(journal.state.link.known);
+        TEST_ASSERT_EQUAL_INT16(-71, journal.state.link.rssiDbm);
+        Message decoded{};
+        EXPECT_RESULT(Result::Ok, open(vectorBinding(), ack, decoded));
+        TEST_ASSERT_EQUAL_UINT8(version, decoded.version);
+        // A v1 node never receives a command it cannot parse.
+        TEST_ASSERT_EQUAL_INT8(version == WireV2 ? 14 : KeepPower, decoded.powerDbm);
+        TEST_ASSERT_EQUAL_size_t(HeaderSize + TagSize + (version == WireV2 ? 1 : 0) + TagSize,
+                                 ack.size);
+        Frame tampered = ack;
+        tampered.bytes[HeaderSize + TagSize] ^= 1; // The command is authenticated.
+        EXPECT_RESULT(Result::CryptoError, sender.acknowledge(tampered));
+        EXPECT_RESULT(Result::Ok, sender.acknowledge(ack));
+        TEST_ASSERT_EQUAL_INT8(version == WireV2 ? 14 : KeepPower, sender.powerCommand());
+    }
+    // An ACK in another version than the DATA is refused, and v1 cannot carry a command.
+    MemoryCounter counter;
+    Sender sender;
+    EXPECT_RESULT(Result::Ok, sender.begin(vectorBinding(), twoReadings(), counter));
+    const Frame data = *sender.nextAttempt();
+    Message ack{};
+    ack.type = Type::Ack;
+    ack.version = WireV1;
+    ack.counter = 1;
+    std::memcpy(ack.dataTag.data(), data.bytes.data() + data.size - TagSize, TagSize);
+    Frame frame{};
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), ack, frame));
+    EXPECT_RESULT(Result::Invalid, sender.acknowledge(frame));
+    TEST_ASSERT_EQUAL_INT8(KeepPower, sender.powerCommand());
+    ack.powerDbm = 10;
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), ack, frame));
+    ack.version = 3;
+    EXPECT_RESULT(Result::Invalid, seal(vectorBinding(), ack, frame));
+    Sender other;
+    EXPECT_RESULT(Result::Invalid, other.begin(vectorBinding(), twoReadings(), counter, 3));
+    // The version is part of the nonce: the same counter in v1 and v2 never shares one.
+    Message m{};
+    m.counter = 9;
+    m.data = twoReadings();
+    Frame v1{}, v2{};
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), m, v1));
+    m.version = WireV2;
+    EXPECT_RESULT(Result::Ok, seal(vectorBinding(), m, v2));
+    TEST_ASSERT_EQUAL_size_t(v1.size, v2.size);
+    TEST_ASSERT_FALSE(std::memcmp(v1.bytes.data() + HeaderSize, v2.bytes.data() + HeaderSize,
+                                  v1.size - HeaderSize) == 0);
+    v2.bytes[4] = 3; // Unknown versions are not even routed.
+    TEST_ASSERT_EQUAL_UINT64(0, untrustedDataNode(v2));
+    TEST_ASSERT_EQUAL_UINT8(0, untrustedType(v2));
+}
 void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     // NIST GCM: AES-128, zero key/IV/plaintext, no AAD, one 16-byte block.
     const uint8_t expectedCipher[16] = {0x03, 0x88, 0xda, 0xce, 0x60, 0xb6, 0xa3, 0x92,
@@ -430,6 +496,7 @@ int runTests() {
     RUN_TEST(test_untrusted_lengths_and_bytes_under_sanitizers);
     RUN_TEST(test_wire_header_is_portable_and_ack_direction_is_separate);
     RUN_TEST(test_nist_aes_gcm_known_answer_and_failure_wipes_output);
+    RUN_TEST(test_v2_ack_carries_an_authenticated_power_command_and_v1_still_works);
     RUN_TEST(test_codec_matches_pre_refactor_wire_fixture);
     runApplicationTests();
     runRuntimeTests();

@@ -15,6 +15,11 @@ constexpr size_t MaxFrame = HeaderSize + MaxPayload + TagSize;
 using Key = std::array<uint8_t, KeySize>;
 using Tag = std::array<uint8_t, TagSize>;
 enum class Type : uint8_t { Data = 1, Ack = 2 };
+// Wire versions of DATA and ACK. Version 2 adds a transmit-power command to the ACK; a
+// receiver answers in the version of the DATA it accepted, so version 1 nodes keep working.
+constexpr uint8_t WireV1 = 1, WireV2 = 2;
+// Power command meaning "keep the current power": the only value a v1 ACK can express.
+constexpr int8_t KeepPower = 127;
 // Pairing types, defined in docs/radio-pairing.md and handled by CajuiPairing.
 constexpr uint8_t FirstPairingType = 3, LastPairingType = 6;
 constexpr size_t X25519Size = 32;
@@ -55,9 +60,19 @@ struct Frame {
 };
 struct Message {
     Type type = Type::Data;
+    uint8_t version = WireV1;
     uint64_t counter = 0;
     Data data{};
     Tag dataTag{}; // ACK also authenticates the accepted DATA tag.
+    // v2 ACK: transmit power the node should use from its next frame, in dBm, or KeepPower.
+    int8_t powerDbm = KeepPower;
+};
+// Signal quality of a received frame as measured by the receiving radio. Not part of any
+// frame and not authenticated; `known` is false when it was not measured, never a zero.
+struct Link {
+    bool known = false;
+    int16_t rssiDbm = 0;
+    int16_t snrTenthsDb = 0;
 };
 // AES-128-GCM backend: mbedTLS on ESP32, OpenSSL on the host.
 // Use established crypto libraries. Input and output buffers must be distinct.
@@ -84,6 +99,10 @@ bool sameFrame(const Frame&, const Frame&);
 struct Receipt {
     uint64_t counter = 0;
     Frame last{};
+    Link link{}; // Of `last`; stored with its queued sample, not with the receipt.
+    // Power command of the ACK for `last`. Stored with the receipt: a repeated ACK reuses
+    // the counter and therefore the GCM nonce, so it must repeat these exact bytes.
+    int8_t ackPower = KeepPower;
 };
 class Journal {
 public:
@@ -93,7 +112,11 @@ public:
     // Failure leaves both unchanged; expectedCounter guards concurrent updates.
     virtual Result commit(const Binding&, uint64_t expectedCounter, const Receipt&) = 0;
 };
-Result receive(const Binding&, const Frame&, Journal&, Frame& ack);
+// A v2 DATA frame gets a v2 ACK carrying `powerDbm` (KeepPower for no change); a v1 frame
+// gets a v1 ACK. `link` is recorded with the committed sample. A duplicate is answered
+// with the command stored with its receipt, never a new one: identical bytes, same nonce.
+Result receive(const Binding&, const Frame&, Journal&, Frame& ack, const Link& link = Link{},
+               int8_t powerDbm = KeepPower);
 
 class CounterStore {
 public:
@@ -104,9 +127,12 @@ public:
 // One pending sample per node. Retries reuse identical bytes without re-encryption.
 class Sender {
 public:
-    Result begin(const Binding&, const Data&, CounterStore&);
+    // Seals DATA in `version`; v2 lets the receiver answer with a power command.
+    Result begin(const Binding&, const Data&, CounterStore&, uint8_t version = WireV2);
     const Frame* nextAttempt(); // At most three transmissions; does not drive the radio.
     Result acknowledge(const Frame&);
+    // Power command of the accepted ACK; KeepPower before one or for a v1 exchange.
+    int8_t powerCommand() const { return power_; }
     void abandon(); // Stop radio/close the ACK window first; account for unconfirmed loss.
     bool delivered() const { return delivered_; }
     uint8_t attempts() const { return attempts_; }
@@ -116,7 +142,8 @@ private:
     Binding binding_{};
     Frame pending_{};
     uint64_t counter_ = 0;
-    uint8_t attempts_ = 0;
+    uint8_t attempts_ = 0, version_ = WireV1;
+    int8_t power_ = KeepPower;
     bool delivered_ = false;
 };
 } // namespace cajui

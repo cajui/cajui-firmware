@@ -3,7 +3,8 @@
 #include <cstring>
 
 namespace cajui {
-Result receive(const Binding& b, const Frame& frame, Journal& journal, Frame& ack) {
+Result receive(const Binding& b, const Frame& frame, Journal& journal, Frame& ack, const Link& link,
+               int8_t powerDbm) {
     ack = Frame{};
     Message m{};
     const auto decoded = open(b, frame, m);
@@ -18,24 +19,31 @@ Result receive(const Binding& b, const Frame& frame, Journal& journal, Frame& ac
         Receipt next{};
         next.counter = m.counter;
         next.last = frame;
+        next.link = link;
+        next.ackPower = m.version == WireV2 ? powerDbm : KeepPower;
         const auto saved = journal.commit(b, old.counter, next);
         if (saved != Result::Ok) return saved;
     }
     Message response{};
     response.type = Type::Ack;
+    response.version = m.version;
+    response.powerDbm = duplicate ? old.ackPower : m.version == WireV2 ? powerDbm : KeepPower;
+    if (m.version != WireV2) response.powerDbm = KeepPower;
     response.counter = m.counter;
     std::memcpy(response.dataTag.data(), frame.bytes.data() + frame.size - TagSize, TagSize);
     const auto sealed = seal(b, response, ack);
     if (sealed != Result::Ok) return sealed;
     return duplicate ? Result::Duplicate : Result::Ok;
 }
-Result Sender::begin(const Binding& b, const Data& data, CounterStore& store) {
+Result Sender::begin(const Binding& b, const Data& data, CounterStore& store, uint8_t version) {
     if (pending_.size && !delivered_) return Result::Conflict;
     if (!detail::usable(b)) return Result::Unauthorized;
-    if (!detail::validData(data)) return Result::Invalid;
+    if (!detail::validData(data) || (version != WireV1 && version != WireV2))
+        return Result::Invalid;
     uint64_t counter = 0;
     if (!store.reserve(b, counter) || !counter) return Result::StorageError;
     Message m{};
+    m.version = version;
     m.counter = counter;
     m.data = data;
     Frame next{};
@@ -44,11 +52,14 @@ Result Sender::begin(const Binding& b, const Data& data, CounterStore& store) {
     binding_ = b;
     pending_ = next;
     counter_ = counter;
+    version_ = version;
+    power_ = KeepPower;
     attempts_ = 0;
     delivered_ = false;
     return Result::Ok;
 }
 void Sender::abandon() {
+    power_ = KeepPower;
     pending_ = Frame{};
     counter_ = 0;
     attempts_ = 0;
@@ -64,11 +75,12 @@ Result Sender::acknowledge(const Frame& ack) {
     Message m{};
     const auto result = open(binding_, ack, m);
     if (result != Result::Ok) return result;
-    if (m.type != Type::Ack || m.counter != counter_ ||
+    if (m.type != Type::Ack || m.counter != counter_ || m.version != version_ ||
         std::memcmp(m.dataTag.data(), pending_.bytes.data() + pending_.size - TagSize, TagSize) !=
             0)
         return Result::Invalid;
     delivered_ = true;
+    power_ = m.powerDbm;
     return Result::Ok;
 }
 } // namespace cajui
