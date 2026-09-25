@@ -35,6 +35,14 @@ public:
         }
     }
 };
+// Opens a POST form carrying the session token; `live` forms are submitted in place.
+void form(Html& page, const char* action, const char* token, bool live = false) {
+    page.format("<form method=\"post\" action=\"%s\"%s><input type=\"hidden\" name=\"token\" "
+                "value=\"",
+                action, live ? " data-live-form" : "");
+    page.text(token);
+    page.format("\">");
+}
 bool copy(char* output, size_t capacity, const char* value) {
     const size_t length = std::strlen(value);
     if (length >= capacity) return false;
@@ -85,6 +93,9 @@ void status(Html& page, const SetupView& v) {
     case WifiState::Failed: page.format("<b>could not connect</b>; check the password"); break;
     case WifiState::Idle: page.format("not configured"); break;
     }
+    if (v.wifiTrialFailed)
+        page.format("<br><b>The new Wi-Fi settings did not connect.</b> Nothing was saved; check "
+                    "the network and password.");
     page.format("<br>Broker: %s", v.brokerOnline ? "<b>online</b>" : "offline");
     if (v.staged && v.staged->host[0]) {
         page.format(" (");
@@ -100,8 +111,9 @@ void status(Html& page, const SetupView& v) {
     page.format("<p><a href=\"/\">Refresh</a></p></section>");
 }
 void wifiForm(Html& page, const SetupView& v) {
+    page.format("<section><h2>Wi-Fi</h2>");
+    form(page, "/wifi", v.token);
     page.format(
-        "<section><h2>Wi-Fi</h2><form method=\"post\" action=\"/wifi\">"
         "<label for=\"ssid\">Network (2.4 GHz)</label>"
         "<input id=\"ssid\" name=\"ssid\" list=\"networks\" maxlength=\"32\" required value=\"");
     page.text(v.staged ? v.staged->ssid : "");
@@ -115,12 +127,15 @@ void wifiForm(Html& page, const SetupView& v) {
         "</datalist><label for=\"wifipass\">Password</label><input id=\"wifipass\" "
         "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
         "placeholder=\"Leave empty to keep the saved one\"><button>Connect</button></form>");
-    if (v.scanning)
+    if (v.scanning) {
         page.format("<p><small>Scanning for networks&hellip;</small></p>");
-    else
-        page.format("<p><small>%u networks found%s. <a href=\"/scan\">Scan again</a></small></p>",
+    } else {
+        page.format("<p><small>%u networks found%s.</small></p>",
                     unsigned(v.networkCount + v.networksOmitted),
                     v.networksOmitted ? ", not all listed" : "");
+        form(page, "/scan", v.token);
+        page.format("<button>Scan again</button></form>");
+    }
     page.format("</section>");
 }
 void brokerForm(Html& page, const SetupView& v) {
@@ -138,9 +153,12 @@ void brokerForm(Html& page, const SetupView& v) {
     if (!v.searching && !v.brokerCount)
         page.format("<p><small>No broker announced on this network. Enter its address below."
                     "</small></p>");
-    if (v.wifi == WifiState::Connected)
-        page.format("<p><small><a href=\"/discover\">Search again</a></small></p>");
-    page.format("<form method=\"post\" action=\"/broker\"><label for=\"host\">Address</label>"
+    if (v.wifi == WifiState::Connected) {
+        form(page, "/discover", v.token);
+        page.format("<button>Search again</button></form>");
+    }
+    form(page, "/broker", v.token);
+    page.format("<label for=\"host\">Address</label>"
                 "<input id=\"host\" name=\"host\" maxlength=\"64\" required value=\"");
     page.text(host);
     page.format("\"><label for=\"port\">Port</label><input id=\"port\" name=\"port\" "
@@ -171,12 +189,13 @@ void transmitterList(Html& page, const SetupView& v) {
                 page.format("%" PRIu64 "</td><td>", t.received);
             else
                 page.format("none yet</td><td>");
-            if (t.state == Enrollment::Active)
-                page.format("<form method=\"post\" action=\"/revoke\"><input type=\"hidden\" "
-                            "name=\"node\" value=\"%016" PRIx64 "\"><input type=\"hidden\" "
-                            "name=\"generation\" value=\"%016" PRIx64 "\"><button>Revoke</button>"
-                            "</form>",
+            if (t.state == Enrollment::Active) {
+                form(page, "/revoke", v.token);
+                page.format("<input type=\"hidden\" name=\"node\" value=\"%016" PRIx64
+                            "\"><input type=\"hidden\" name=\"generation\" value=\"%016" PRIx64
+                            "\"><button>Revoke</button></form>",
                             t.node, t.generation);
+            }
             page.format("</td></tr>");
         }
         page.format("</table>");
@@ -188,8 +207,8 @@ void transmitterList(Html& page, const SetupView& v) {
     }
     page.format("<h3>Add a transmitter</h3>");
     if (!pairing->open) {
-        page.format("<form method=\"post\" action=\"/pair/open\" data-live-form><button>Search for "
-                    "transmitters (2 minutes)</button></form>");
+        form(page, "/pair/open", v.token, true);
+        page.format("<button>Search for transmitters (2 minutes)</button></form>");
     } else {
         // data-live keeps the page script refreshing this section while the window is open.
         page.format("<p data-live><span class=\"spin\"></span>Searching, %u s left. Hold the PRG "
@@ -206,17 +225,17 @@ void transmitterList(Html& page, const SetupView& v) {
                             pairing->nodes[i]);
                 continue;
             }
-            page.format("<form method=\"post\" action=\"/pair/add\" data-live-form><p>%016" PRIx64
-                        " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
-                        "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
+            form(page, "/pair/add", v.token, true);
+            page.format("<p>%016" PRIx64 " <small>(%d dBm)</small> <input type=\"hidden\" "
+                        "name=\"node\" value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
                         pairing->nodes[i], int(pairing->rssi[i]), pairing->nodes[i]);
         }
         if (pairing->offered)
             page.format("<p><span class=\"spin\"></span>Waiting for %016" PRIx64
                         " to confirm&hellip;</p>",
                         pairing->offered);
-        page.format("<form method=\"post\" action=\"/pair/stop\" data-live-form><button>Stop "
-                    "searching</button></form>");
+        form(page, "/pair/stop", v.token, true);
+        page.format("<button>Stop searching</button></form>");
     }
     if (pairing->paired)
         page.format("<p class=\"notice\">Transmitter %016" PRIx64 " paired. Its previous key, if "
@@ -244,6 +263,101 @@ void transmitters(Html& page, const SetupView& v) {
 }
 } // namespace
 
+void SetupSession::open(uint32_t now, const uint8_t (&random)[TokenBytes]) {
+    static const char digits[] = "0123456789abcdef";
+    constexpr uint8_t Nibble = 0xf;
+    for (size_t i = 0; i < TokenBytes; ++i) {
+        token_[2 * i] = digits[random[i] >> 4];
+        token_[2 * i + 1] = digits[random[i] & Nibble];
+    }
+    token_[2 * TokenBytes] = 0;
+    openedAt_ = lastActivity_ = now;
+    active_ = true;
+}
+void SetupSession::close() {
+    active_ = false;
+    for (auto& c : token_) c = 0;
+}
+void SetupSession::touch(uint32_t now) {
+    if (active_) lastActivity_ = now;
+}
+bool SetupSession::expired(uint32_t now) const {
+    return active_ &&
+           (uint32_t(now - lastActivity_) >= IdleMs || uint32_t(now - openedAt_) >= MaxMs);
+}
+bool SetupSession::validToken(const char* candidate) const {
+    if (!active_ || !candidate) return false;
+    uint8_t difference = 0;
+    size_t i = 0;
+    for (; i < 2 * TokenBytes && candidate[i]; ++i) difference |= uint8_t(candidate[i] ^ token_[i]);
+    return i == 2 * TokenBytes && !candidate[i] && !difference;
+}
+bool allowedHost(const char* host, const char* address) {
+    if (!host || !address || !*address) return false;
+    const size_t length = std::strlen(address);
+    return !std::strncmp(host, address, length) &&
+           (!host[length] || !std::strcmp(host + length, ":80"));
+}
+bool allowedOrigin(const char* origin, const char* address) {
+    static const char scheme[] = "http://";
+    if (!origin || !*origin) return true;
+    if (std::strncmp(origin, scheme, sizeof(scheme) - 1) != 0) return false;
+    return allowedHost(origin + sizeof(scheme) - 1, address);
+}
+const char* noticeText(Notice notice) {
+    switch (notice) {
+    case Notice::WifiUnchanged: return "Wi-Fi settings unchanged.";
+    case Notice::WifiTrying:
+        return "Connecting to the new network. The settings are saved once it connects and the "
+               "broker section is complete.";
+    case Notice::WifiStaged: return "Connecting. Complete the broker section to save.";
+    case Notice::WifiFailed:
+        return "Could not connect with the new Wi-Fi settings; the saved ones were kept.";
+    case Notice::BrokerSaved: return "Broker saved. Forwarding restarts with these settings.";
+    case Notice::BrokerStaged: return "Broker staged. It is saved once the Wi-Fi section connects.";
+    case Notice::SaveFailed: return "Could not save the settings.";
+    case Notice::Revoked: return "Transmitter revoked.";
+    case Notice::RevokeFailed: return "Could not revoke.";
+    case Notice::UnknownTransmitter: return "Unknown transmitter.";
+    case Notice::PairingUnavailable: return "Radio pairing is not available.";
+    case Notice::PairingOpened: return "Searching for transmitters for 2 minutes.";
+    case Notice::PairingStopped: return "Stopped searching.";
+    case Notice::OfferSent: return "Offer sent. The transmitter confirms on its next request.";
+    case Notice::AddFailed: return "Could not add this transmitter; search again.";
+    case Notice::AddConflict:
+        return "Two devices answered with this ID. Stop, keep only your transmitter in pairing "
+               "mode and search again.";
+    case Notice::SsidInvalid:
+    case Notice::WifiPasswordInvalid:
+    case Notice::HostInvalid:
+    case Notice::PortInvalid:
+    case Notice::UsernameInvalid:
+    case Notice::MqttPasswordInvalid:
+        return describe(SetupError(unsigned(notice) - unsigned(Notice::SsidInvalid) + 1));
+    case Notice::None:
+    case Notice::Count: break;
+    }
+    return nullptr;
+}
+static_assert(unsigned(Notice::MqttPasswordInvalid) - unsigned(Notice::SsidInvalid) ==
+                  unsigned(SetupError::MqttPassword) - unsigned(SetupError::Ssid),
+              "Notices for setup errors must follow SetupError");
+Notice noticeFor(SetupError error) {
+    return error == SetupError::None ? Notice::None
+                                     : Notice(unsigned(Notice::SsidInvalid) + unsigned(error) -
+                                              unsigned(SetupError::Ssid));
+}
+Notice parseNotice(const char* value) {
+    constexpr size_t Digits = 2;
+    constexpr unsigned Decimal = 10;
+    if (!value || !*value || std::strlen(value) > Digits) return Notice::None;
+    unsigned code = 0;
+    for (const char* c = value; *c; ++c) {
+        if (*c < '0' || *c > '9') return Notice::None;
+        code = code * Decimal + unsigned(*c - '0');
+    }
+    return code < unsigned(Notice::Count) ? Notice(code) : Notice::None;
+}
 bool LongPress::update(bool pressed, uint32_t now) {
     if (!pressed) {
         down_ = fired_ = false;
@@ -321,7 +435,8 @@ bool renderPage(const SetupView& v, char* output, size_t capacity) {
     Html page(output, capacity);
     head(page, "Cajuí receiver setup");
     page.format("<h1>Cajuí receiver</h1><p><small>Device %016" PRIx64
-                ". Setup closes after 10 minutes without activity.</small></p>",
+                ". Setup closes after 10 minutes without activity, and 30 minutes after "
+                "opening at the latest.</small></p>",
                 v.device);
     if (v.notice) {
         page.format("<p class=\"notice\">");
@@ -332,8 +447,8 @@ bool renderPage(const SetupView& v, char* output, size_t capacity) {
     wifiForm(page, v);
     brokerForm(page, v);
     transmitters(page, v);
-    page.format("<form method=\"post\" action=\"/close\"><button>Close setup</button></form>"
-                "</html>");
+    form(page, "/close", v.token);
+    page.format("<button>Close setup</button></form></html>");
     return page.ok();
 }
 } // namespace
@@ -358,18 +473,21 @@ bool renderTransmitters(const SetupView& v, char* output, size_t capacity) {
     transmitterList(page, v);
     return page.ok();
 }
-bool renderRevoke(uint64_t node, uint64_t generation, char* output, size_t capacity) {
-    if (!output || !capacity) return false;
+bool renderRevoke(uint64_t node, uint64_t generation, const char* token, char* output,
+                  size_t capacity) {
+    if (!output || !capacity || !token) return false;
     Html page(output, capacity);
     head(page, "Revoke transmitter");
     page.format("<h1>Revoke transmitter %016" PRIx64 "?</h1><p>The receiver will reject its "
-                "samples. Samples already queued are still forwarded. It can only be enrolled "
-                "again with a new key over USB.</p><form method=\"post\" action=\"/revoke\">"
-                "<input type=\"hidden\" name=\"node\" value=\"%016" PRIx64 "\"><input "
+                "samples. Samples already queued are still forwarded. To use it again, pair it "
+                "by radio or enroll it over USB; either gives it a new key.</p>",
+                node);
+    form(page, "/revoke", token);
+    page.format("<input type=\"hidden\" name=\"node\" value=\"%016" PRIx64 "\"><input "
                 "type=\"hidden\" name=\"generation\" value=\"%016" PRIx64 "\"><input "
                 "type=\"hidden\" name=\"confirm\" value=\"1\"><button>Revoke</button></form>"
                 "<p><a href=\"/\">Cancel</a></p></html>",
-                node, node, generation);
+                node, generation);
     return page.ok();
 }
 bool renderClosed(char* output, size_t capacity) {

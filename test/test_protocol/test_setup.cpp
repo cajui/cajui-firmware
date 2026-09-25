@@ -27,6 +27,119 @@ UplinkConfig complete() {
     return c;
 }
 
+size_t count(const std::string& text, const char* part) {
+    size_t found = 0;
+    for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + 1))
+        ++found;
+    return found;
+}
+void test_every_form_posts_the_session_token() {
+    auto staged = complete();
+    EnrollmentInfo transmitters[1]{};
+    transmitters[0] = enrollment(Enrollment::Active, 2, 10, 1);
+    PairingView pairing{};
+    pairing.open = true;
+    pairing.count = 1;
+    pairing.nodes[0] = 3;
+    SetupView view{};
+    view.wifi = WifiState::Connected;
+    view.staged = &staged;
+    view.transmitters = transmitters;
+    view.transmitterCount = 1;
+    view.pairing = &pairing;
+    view.token = "00112233445566778899aabbccddeeff";
+    static char page[PageCapacity];
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    const std::string html = page;
+    // wifi, scan, discover, broker, revoke, pair/add, pair/stop, close: all POST.
+    TEST_ASSERT_EQUAL_size_t(8, count(html, "<form method=\"post\""));
+    TEST_ASSERT_EQUAL_size_t(
+        8, count(html, "name=\"token\" value=\"00112233445566778899aabbccddeeff\""));
+    TEST_ASSERT_FALSE(contains(html, "href=\"/scan\""));
+    TEST_ASSERT_FALSE(contains(html, "href=\"/discover\""));
+    TEST_ASSERT_TRUE(renderTransmitters(view, page, sizeof(page)));
+    TEST_ASSERT_EQUAL_size_t(3, count(page, "name=\"token\""));
+}
+void test_session_expires_on_idle_and_absolute_limits() {
+    uint8_t random[SetupSession::TokenBytes];
+    for (size_t i = 0; i < sizeof(random); ++i) random[i] = uint8_t(0xa0 + i);
+    SetupSession session;
+    TEST_ASSERT_FALSE(session.validToken("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"));
+    TEST_ASSERT_FALSE(session.expired(0));
+    const uint32_t start = UINT32_MAX - 1000; // Limits survive clock wrap.
+    session.open(start, random);
+    TEST_ASSERT_TRUE(session.active());
+    TEST_ASSERT_EQUAL_STRING("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf", session.token());
+    TEST_ASSERT_TRUE(session.validToken("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"));
+    TEST_ASSERT_FALSE(session.validToken("a0a1a2a3a4a5a6a7a8a9aaabacadaeae"));
+    TEST_ASSERT_FALSE(session.validToken("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf0"));
+    TEST_ASSERT_FALSE(session.validToken("a0a1"));
+    TEST_ASSERT_FALSE(session.validToken(""));
+    TEST_ASSERT_FALSE(session.validToken(nullptr));
+    TEST_ASSERT_FALSE(session.expired(start + SetupSession::IdleMs - 1));
+    TEST_ASSERT_TRUE(session.expired(start + SetupSession::IdleMs));
+    // Activity extends the idle limit but never the absolute one.
+    uint32_t now = start;
+    while (uint32_t(now - start) + 60000 < SetupSession::MaxMs) {
+        now += 60000;
+        session.touch(now);
+        TEST_ASSERT_FALSE(session.expired(now));
+    }
+    session.touch(start + SetupSession::MaxMs - 1);
+    TEST_ASSERT_TRUE(session.expired(start + SetupSession::MaxMs));
+    session.close();
+    TEST_ASSERT_FALSE(session.active());
+    TEST_ASSERT_FALSE(session.validToken("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"));
+    session.touch(1);
+    TEST_ASSERT_FALSE(session.expired(start + SetupSession::MaxMs * 2));
+}
+void test_requests_must_address_the_access_point() {
+    const char* ap = "192.168.4.1";
+    TEST_ASSERT_TRUE(allowedHost("192.168.4.1", ap));
+    TEST_ASSERT_TRUE(allowedHost("192.168.4.1:80", ap));
+    const char* hosts[] = {"192.168.4.10",
+                           "192.168.4.1:8080",
+                           "evil.example",
+                           "192.168.4.1.evil.example",
+                           "",
+                           "connectivitycheck.gstatic.com"};
+    for (auto host : hosts) {
+        UNITY_SET_DETAIL(host);
+        TEST_ASSERT_FALSE(allowedHost(host, ap));
+    }
+    TEST_ASSERT_FALSE(allowedHost(nullptr, ap));
+    TEST_ASSERT_FALSE(allowedHost("192.168.4.1", ""));
+    TEST_ASSERT_TRUE(allowedOrigin(nullptr, ap)); // Non-browser clients: the token decides.
+    TEST_ASSERT_TRUE(allowedOrigin("", ap));
+    TEST_ASSERT_TRUE(allowedOrigin("http://192.168.4.1", ap));
+    TEST_ASSERT_TRUE(allowedOrigin("http://192.168.4.1:80", ap));
+    const char* origins[] = {"null", "https://192.168.4.1", "http://evil.example",
+                             "http://192.168.4.1.evil.example"};
+    for (auto origin : origins) {
+        UNITY_SET_DETAIL(origin);
+        TEST_ASSERT_FALSE(allowedOrigin(origin, ap));
+    }
+}
+void test_notices_are_fixed_messages_chosen_by_code() {
+    for (unsigned code = 1; code < unsigned(Notice::Count); ++code) {
+        char text[4];
+        std::snprintf(text, sizeof(text), "%u", code);
+        TEST_ASSERT_EQUAL_INT(int(code), int(parseNotice(text)));
+        TEST_ASSERT_NOT_NULL(noticeText(Notice(code)));
+    }
+    const char* invalid[] = {"", "0", "99", "123", "1a", "-1"};
+    for (auto value : invalid) {
+        UNITY_SET_DETAIL(value);
+        EXPECT_RESULT(Notice::None, parseNotice(value));
+    }
+    EXPECT_RESULT(Notice::None, parseNotice(nullptr));
+    TEST_ASSERT_NULL(noticeText(Notice::None));
+    TEST_ASSERT_NULL(noticeText(Notice::Count));
+    EXPECT_RESULT(Notice::None, noticeFor(SetupError::None));
+    TEST_ASSERT_EQUAL_STRING(describe(SetupError::Port), noticeText(noticeFor(SetupError::Port)));
+    TEST_ASSERT_EQUAL_STRING(describe(SetupError::MqttPassword),
+                             noticeText(noticeFor(SetupError::MqttPassword)));
+}
 void test_long_press_fires_once_per_hold() {
     LongPress button(3000);
     TEST_ASSERT_FALSE(button.update(false, 0));
@@ -147,13 +260,16 @@ void test_setup_page_escapes_input_and_never_shows_passwords() {
     TEST_ASSERT_FALSE(contains(html, "wifi-secret"));
     TEST_ASSERT_FALSE(contains(html, "mqtt-secret"));
     TEST_ASSERT_TRUE(contains(html, "connected to <b>Home</b> (192.168.1.50)"));
+    TEST_ASSERT_FALSE(contains(html, "did not connect"));
     TEST_ASSERT_TRUE(contains(html, "Broker: <b>online</b> (192.168.1.20:1883, user receiver-1)"));
     TEST_ASSERT_TRUE(contains(html, "Samples waiting to be forwarded: 3"));
     TEST_ASSERT_TRUE(contains(html, "/?host=192.168.1.20&amp;port=1883"));
     TEST_ASSERT_TRUE(contains(html, "Changes are staged")); // saved=false
     TEST_ASSERT_TRUE(contains(html, "0000000000000002</td><td>active</td><td>34"));
     transmitters[1] = enrollment(Enrollment::Active, 2, 12, 0); // A pending re-pairing.
+    view.wifiTrialFailed = true;
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "The new Wi-Fi settings did not connect"));
     TEST_ASSERT_TRUE(contains(page, "0000000000000002</td><td>active</td><td>none yet"));
     TEST_ASSERT_TRUE(contains(html, "0000000000000003</td><td>revoked</td><td>5"));
     TEST_ASSERT_TRUE(contains(html, "name=\"generation\" value=\"000000000000000a\""));
@@ -246,14 +362,17 @@ void test_hostile_network_names_never_break_the_page() {
     view.transmitters = transmitters;
     view.transmitterCount = BindingCapacity;
     view.pairing = &pairing;
-    view.notice = "Connecting with the new Wi-Fi settings. Refresh in a few seconds.";
+    view.notice = noticeText(Notice::WifiTrying);
+    view.token = "00112233445566778899aabbccddeeff";
     static char page[PageCapacity];
-    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page))); // The worst case fits.
+    TEST_ASSERT_TRUE(contains(page, "12 networks found.</small>"));
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page) * 3 / 4)); // Beyond it: trimmed.
     TEST_ASSERT_TRUE(contains(page, "12 networks found, not all listed"));
     TEST_ASSERT_TRUE(contains(page, "Close setup"));
     view.networkCount = 2; // Typical content is shown in full.
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
-    TEST_ASSERT_TRUE(contains(page, "2 networks found. "));
+    TEST_ASSERT_TRUE(contains(page, "2 networks found.</small>"));
     TEST_ASSERT_FALSE(renderSetup(view, page, 2048)); // The fixed content alone does not fit.
 }
 void test_pairing_section_states() {
@@ -320,11 +439,14 @@ void test_transmitters_section_refreshes_live_only_while_pairing() {
 }
 void test_confirmation_and_closed_pages() {
     static char page[PageCapacity];
-    TEST_ASSERT_TRUE(renderRevoke(2, 10, page, sizeof(page)));
+    TEST_ASSERT_TRUE(renderRevoke(2, 10, "t0k3n", page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "Revoke transmitter 0000000000000002?"));
     TEST_ASSERT_TRUE(contains(page, "name=\"confirm\" value=\"1\""));
-    TEST_ASSERT_FALSE(renderRevoke(2, 10, page, 50));
-    TEST_ASSERT_FALSE(renderRevoke(2, 10, nullptr, 0));
+    TEST_ASSERT_TRUE(contains(page, "name=\"token\" value=\"t0k3n\""));
+    TEST_ASSERT_TRUE(contains(page, "pair it by radio or enroll it over USB"));
+    TEST_ASSERT_FALSE(renderRevoke(2, 10, "t0k3n", page, 50));
+    TEST_ASSERT_FALSE(renderRevoke(2, 10, nullptr, page, sizeof(page)));
+    TEST_ASSERT_FALSE(renderRevoke(2, 10, "t0k3n", nullptr, 0));
     TEST_ASSERT_TRUE(renderClosed(page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "Setup closed"));
     TEST_ASSERT_FALSE(renderClosed(page, 10));
@@ -359,6 +481,10 @@ void test_store_lists_enrollments_with_last_received_counter() {
 void runSetupTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_long_press_fires_once_per_hold);
+    RUN_TEST(test_every_form_posts_the_session_token);
+    RUN_TEST(test_session_expires_on_idle_and_absolute_limits);
+    RUN_TEST(test_requests_must_address_the_access_point);
+    RUN_TEST(test_notices_are_fixed_messages_chosen_by_code);
     RUN_TEST(test_setup_network_name_and_join_code);
     RUN_TEST(test_wifi_staging_validates_and_keeps_saved_password);
     RUN_TEST(test_broker_staging_validates_and_keeps_saved_password);
