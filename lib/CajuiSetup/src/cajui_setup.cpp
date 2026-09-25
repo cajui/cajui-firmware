@@ -246,6 +246,29 @@ void transmitterList(Html& page, const SetupView& v) {
                 "Pairing is not protected against an attacker in radio range during the search."
                 "</small></p>");
 }
+void version(Html& page, uint32_t code) {
+    constexpr uint32_t Part = 100;
+    if (code)
+        page.format("%u.%u.%u", unsigned(code / (Part * Part)), unsigned(code / Part % Part),
+                    unsigned(code % Part));
+    else
+        page.format("local build");
+}
+// Signed update upload. The token travels in the URL: a multipart body is streamed to
+// flash before its fields could be read.
+void firmware(Html& page, const SetupView& v) {
+    page.format("<section><h2>Firmware</h2><p>Installed: ");
+    version(page, v.firmwareVersion);
+    page.format("</p><form method=\"post\" action=\"/update?token=");
+    page.query(v.token);
+    page.format("\" enctype=\"multipart/form-data\"><label for=\"image\">Update file "
+                "(.cjfw)</label><input id=\"image\" name=\"image\" type=\"file\" "
+                "accept=\".cjfw\" required><button>Install</button></form><p><small>Only "
+                "updates signed by the Cajuí project install, never an older version. The "
+                "receiver restarts into the update and returns to the current firmware if the "
+                "update does not run correctly. Samples keep queueing during the upload."
+                "</small></p></section>");
+}
 // Refreshes the transmitters section every second while it is live, and submits the pairing
 // forms in place. Without JavaScript the forms reload the page as before.
 constexpr char LiveScript[] =
@@ -325,6 +348,17 @@ const char* noticeText(Notice notice) {
     case Notice::PairingStopped: return "Stopped searching.";
     case Notice::OfferSent: return "Offer sent. The transmitter confirms on its next request.";
     case Notice::AddFailed: return "Could not add this transmitter; search again.";
+    case Notice::UpdateWrongFile:
+        return "This file is not a firmware update for this receiver. Use the .cjfw file of a "
+               "receiver release.";
+    case Notice::UpdateOlder: return "This update is older than the installed firmware.";
+    case Notice::UpdateTooLarge: return "This update does not fit the receiver.";
+    case Notice::UpdateIncomplete: return "The upload stopped before the end. Try again.";
+    case Notice::UpdateBadSignature:
+        return "The update is not signed by the Cajuí project; nothing was installed.";
+    case Notice::UpdateFailed: return "The update could not be written; nothing was installed.";
+    case Notice::UpdatePending:
+        return "An update is already installed and the receiver is restarting into it.";
     case Notice::AddConflict:
         return "Two devices answered with this ID. Stop, keep only your transmitter in pairing "
                "mode and search again.";
@@ -453,6 +487,7 @@ bool renderPage(const SetupView& v, char* output, size_t capacity) {
     wifiForm(page, v);
     brokerForm(page, v);
     transmitters(page, v);
+    if (v.updates) firmware(page, v);
     form(page, "/close", v.token);
     page.format("<button>Close setup</button></form></html>");
     return page.ok();
@@ -494,6 +529,16 @@ bool renderRevoke(uint64_t node, uint64_t generation, const char* token, char* o
                 "type=\"hidden\" name=\"confirm\" value=\"1\"><button>Revoke</button></form>"
                 "<p><a href=\"/\">Cancel</a></p></html>",
                 node, generation);
+    return page.ok();
+}
+bool renderUpdated(uint32_t installed, char* output, size_t capacity) {
+    if (!output || !capacity) return false;
+    Html page(output, capacity);
+    head(page, "Update installed");
+    page.format("<h1>Update installed</h1><p>Firmware ");
+    version(page, installed);
+    page.format(" is installed. The receiver restarts into it now and closes this page; hold "
+                "the button again to reopen it.</p></html>");
     return page.ok();
 }
 bool renderClosed(char* output, size_t capacity) {

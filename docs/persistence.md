@@ -107,10 +107,11 @@ about 42 KB of heap once; the store itself keeps no copy of the queue in RAM.
 
 ## Partition layout
 
-`partitions.csv` reserves 256 KiB for the dedicated NVS partition at `0x310000`,
-with a single 3 MiB factory application. There is no OTA slot in this development
-layout. Back up existing device state before changing a partition table; never restore
-old counter state under a key that has already been used with newer counters.
+`partitions.csv` reserves 256 KiB for the dedicated NVS partition at `0x310000`, between
+two 3 MiB application slots for [firmware updates](updates.md); its offset is unchanged
+from the earlier single-slot layout, so installing over USB preserves it. Back up existing
+device state before changing a partition table; never restore old counter state under a
+key that has already been used with newer counters.
 
 Only an absent registry and snapshot permit initial setup. Restoring lost or rolled-back
 state from a recovery file cannot be treated as routine resume: use fresh credentials

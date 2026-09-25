@@ -1,0 +1,130 @@
+name: Release
+# A tag vX.Y.Z builds both images with that version, signs the update files and publishes
+# them on a GitHub release and on the web installer page. The signing key is used only in
+# the sign job, which runs nothing but openssl and the stdlib-only packaging tool; the
+# build job, which runs third-party build code, never sees it or a write token.
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: read
+env:
+  ESP_WEB_TOOLS: 10.4.0
+  ESP_WEB_TOOLS_SHA512: 3pwkeFFm5Fj7UQo8SJNYK5RXrtNCpq6X9QoI6bMT4GBZWgrJqjn0YvM9ihG74BtMoSFYXfmDtkehuxe50PTMPQ==
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r .github/requirements/release.txt
+      - name: Version from the tag
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CODE="$(python tools/package_firmware.py version-code "$VERSION")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "CAJUI_FIRMWARE_VERSION=$CODE" >> "$GITHUB_ENV"
+      - name: Build
+        run: pio run -e runtime_tx -e runtime_rx
+      - name: Merge images and assemble the installer page
+        run: |
+          set -euo pipefail
+          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          mkdir -p out/images out/site/esp-web-tools
+          # Erased storage for first installs: 0xff is what NVS reads as empty pages.
+          python -c "open('out/site/blank-storage.bin','wb').write(b'\xff' * 0x40000)"
+          for pair in tx:transmitter rx:receiver; do
+            ROLE="${pair%%:*}"; NAME="${pair##*:}"; BUILD=".pio/build/runtime_$ROLE"
+            cp "$BUILD/firmware.bin" "out/images/$NAME.bin"
+            FULL="cajui-$NAME-$VERSION-full.bin"
+            python -m esptool --chip esp32s3 merge_bin -o "out/site/$FULL" \
+              --flash_mode dio --flash_freq 80m --flash_size 8MB \
+              0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" \
+              0xe000 "$BOOT_APP0" 0x10000 "$BUILD/firmware.bin"
+            python tools/package_firmware.py manifest --name "Cajuí $NAME" --version "$VERSION" \
+              --image "$FULL" --output "out/site/update-$NAME.json"
+            python tools/package_firmware.py manifest --name "Cajuí $NAME" --version "$VERSION" \
+              --image "$FULL" --erase-storage blank-storage.bin --output "out/site/new-$NAME.json"
+          done
+          curl -sSfL -o ewt.tgz "https://registry.npmjs.org/esp-web-tools/-/esp-web-tools-$ESP_WEB_TOOLS.tgz"
+          python -c "import base64, hashlib, os, sys; data = open('ewt.tgz', 'rb').read(); \
+            sys.exit(base64.b64encode(hashlib.sha512(data).digest()).decode() != os.environ['ESP_WEB_TOOLS_SHA512'])"
+          tar -xzf ewt.tgz --strip-components=3 -C out/site/esp-web-tools package/dist/web
+          sed "s/{{VERSION}}/$VERSION/" site/index.html > out/site/index.html
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned
+          path: out
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned
+          path: out
+      - name: Sign and check against the key in the firmware
+        env:
+          SIGNING_KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          VERSION="${GITHUB_REF_NAME#v}"
+          KEY="$RUNNER_TEMP/signing-key.pem"
+          printf '%s\n' "$SIGNING_KEY" > "$KEY"
+          mkdir -p signed
+          for pair in tx:transmitter rx:receiver; do
+            ROLE="${pair%%:*}"; NAME="${pair##*:}"
+            python3 tools/package_firmware.py package --image "out/images/$NAME.bin" --role "$ROLE" \
+              --version "$VERSION" --key "$KEY" --output "signed/cajui-$NAME-$VERSION.cjfw"
+          done
+          rm -f "$KEY"
+          # A secret that does not match release_key.h would publish updates no board accepts.
+          python3 tools/package_firmware.py verify --key-header src/board/release_key.h signed/*.cjfw
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed
+          path: signed
+  publish:
+    needs: sign
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp artifacts/signed/*.cjfw artifacts/unsigned/site/cajui-*-full.bin dist/
+          (cd dist && sha256sum * > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: artifacts/unsigned/site
+  pages:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

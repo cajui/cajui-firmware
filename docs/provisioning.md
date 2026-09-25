@@ -16,7 +16,9 @@ it is done.
 Install PlatformIO 6.1.18. Confirm the target and stable MAC of each physical device
 before uploading; serial port names and USB-bridge serial numbers are not reliable
 identities. Back up existing flash/state before changing the partition layout.
-The images use the [dedicated storage layout](persistence.md), not an OTA update.
+The images use the [dedicated storage layout](persistence.md). Released images install
+from the [web installer](updates.md#web-installer-usb) without PlatformIO; a receiver also
+accepts [signed updates](updates.md#signed-updates-setup-page) from its setup page.
 
 ```sh
 # Replace these placeholders with the independently identified serial ports.

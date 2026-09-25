@@ -6,10 +6,14 @@
 #include <mbedtls/ecp.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/md.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/sha256.h>
 #else
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
+#include <openssl/x509.h>
 #endif
+#include <new>
 
 namespace cajui {
 namespace {
@@ -213,4 +217,85 @@ bool hkdfSha256(const uint8_t* ikm, size_t ikmSize, const uint8_t* salt, size_t 
     if (!ok) std::memset(output, 0, outputSize);
     return ok;
 }
+} // namespace cajui
+
+namespace cajui {
+#ifdef ESP_PLATFORM
+Sha256::Sha256() {
+    auto* context = new (std::nothrow) mbedtls_sha256_context;
+    if (!context) return;
+    mbedtls_sha256_init(context);
+    context_ = context;
+    ok_ = mbedtls_sha256_starts_ret(context, 0) == 0;
+}
+Sha256::~Sha256() {
+    auto* context = static_cast<mbedtls_sha256_context*>(context_);
+    if (!context) return;
+    mbedtls_sha256_free(context);
+    delete context;
+}
+bool Sha256::update(const uint8_t* data, size_t size) {
+    auto* context = static_cast<mbedtls_sha256_context*>(context_);
+    ok_ = ok_ && (!size || (data && mbedtls_sha256_update_ret(context, data, size) == 0));
+    return ok_;
+}
+bool Sha256::finish(uint8_t digest[Sha256Size]) {
+    auto* context = static_cast<mbedtls_sha256_context*>(context_);
+    const bool done = ok_ && mbedtls_sha256_finish_ret(context, digest) == 0;
+    ok_ = false;
+    return done;
+}
+bool verifyP256(const uint8_t* publicKey, size_t keySize, const uint8_t digest[Sha256Size],
+                const uint8_t* signature, size_t signatureSize) {
+    if (!publicKey || !keySize || !digest || !signature || !signatureSize) return false;
+    mbedtls_pk_context key;
+    mbedtls_pk_init(&key);
+    const bool ok =
+        mbedtls_pk_parse_public_key(&key, publicKey, keySize) == 0 &&
+        mbedtls_pk_can_do(&key, MBEDTLS_PK_ECKEY) && mbedtls_pk_get_bitlen(&key) == 256 &&
+        mbedtls_pk_verify(&key, MBEDTLS_MD_SHA256, digest, Sha256Size, signature, signatureSize) ==
+            0;
+    mbedtls_pk_free(&key);
+    return ok;
+}
+#else
+Sha256::Sha256() {
+    EVP_MD_CTX* context = EVP_MD_CTX_new();
+    if (!context) return;
+    context_ = context;
+    ok_ = EVP_DigestInit_ex(context, EVP_sha256(), nullptr) == 1;
+}
+Sha256::~Sha256() {
+    EVP_MD_CTX_free(static_cast<EVP_MD_CTX*>(context_));
+}
+bool Sha256::update(const uint8_t* data, size_t size) {
+    ok_ = ok_ && (!size ||
+                  (data && EVP_DigestUpdate(static_cast<EVP_MD_CTX*>(context_), data, size) == 1));
+    return ok_;
+}
+bool Sha256::finish(uint8_t digest[Sha256Size]) {
+    unsigned size = 0;
+    const bool done = ok_ &&
+                      EVP_DigestFinal_ex(static_cast<EVP_MD_CTX*>(context_), digest, &size) == 1 &&
+                      size == Sha256Size;
+    ok_ = false;
+    return done;
+}
+bool verifyP256(const uint8_t* publicKey, size_t keySize, const uint8_t digest[Sha256Size],
+                const uint8_t* signature, size_t signatureSize) {
+    if (!publicKey || !keySize || !digest || !signature || !signatureSize) return false;
+    const unsigned char* cursor = publicKey;
+    EVP_PKEY* key = d2i_PUBKEY(nullptr, &cursor, long(keySize));
+    // The whole buffer must be the key, and the key a P-256 EC key.
+    bool ok = key && cursor == publicKey + keySize && EVP_PKEY_base_id(key) == EVP_PKEY_EC &&
+              EVP_PKEY_bits(key) == 256;
+    EVP_PKEY_CTX* context = ok ? EVP_PKEY_CTX_new(key, nullptr) : nullptr;
+    ok = context && EVP_PKEY_verify_init(context) == 1 &&
+         EVP_PKEY_CTX_set_signature_md(context, EVP_sha256()) == 1 &&
+         EVP_PKEY_verify(context, signature, signatureSize, digest, Sha256Size) == 1;
+    EVP_PKEY_CTX_free(context);
+    EVP_PKEY_free(key);
+    return ok;
+}
+#endif
 } // namespace cajui

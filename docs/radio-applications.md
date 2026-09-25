@@ -188,6 +188,9 @@ anyone in range who joins it can use the page. It opens only by physical action,
 after at most 30 minutes, and a per-device password on a label/QR is planned. HTTP is not
 encrypted.
 
+The Firmware section shows the installed version and installs a signed `.cjfw` update;
+see [firmware updates](updates.md).
+
 The page runs in its own FreeRTOS task, so a slow or idle HTTP client never delays radio
 processing. It uses the store, pairing host and uplink record only while holding the
 lock the radio loop holds around each poll; storage writes additionally wait until the

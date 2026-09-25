@@ -4,6 +4,7 @@
 #include "cajui_setup.h"
 #include "common.h"
 #include "mqtt_uplink.h"
+#include "ota.h"
 #include <DNSServer.h>
 #include <WebServer.h>
 #include <atomic>
@@ -20,6 +21,8 @@ public:
     virtual ~ReceiverControl() = default;
     // Replaces the broker connection with these settings. Called without the lock held.
     virtual bool applyUplink(const cajui::UplinkConfig&) = 0;
+    // An update was installed: restart into it once the radio is idle.
+    virtual void restartForUpdate() = 0;
 };
 
 // Receiver administration page on a temporary access point, opened by the button.
@@ -82,6 +85,11 @@ private:
     bool trialConnected() const;
     cajui::EnrollmentInfo transmitters_[cajui::BindingCapacity]{};
     char page_[cajui::PageCapacity]{};
+    OtaSink ota_;
+    cajui::UpdateReceiver* update_ = nullptr; // Lives from upload start to its response.
+    bool uploadAllowed_ = false;
+    void upload();
+    void uploaded();
     static void task(void* self);
     void run();
     void open();

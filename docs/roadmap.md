@@ -21,6 +21,6 @@ Next milestones:
 5. Static analysis of `src/` with the Arduino headers; clang-tidy now covers `lib/` and
    `test/` only.
 
-TDMA, mesh routing, radio firmware updates, actuator control and LoRaWAN mode are
+TDMA, mesh routing, firmware updates over LoRa, actuator control and LoRaWAN mode are
 outside the first direct-LoRa version. No deadline or field-readiness claim is
 attached to these milestones.
