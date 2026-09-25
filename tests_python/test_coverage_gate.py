@@ -59,7 +59,7 @@ def native(files):
             {
                 "files": [
                     {
-                        "filename": "/work/repo/" + name,
+                        "filename": "/var/lib/work/repo/" + name,
                         "summary": {
                             "lines": {"count": 100, "percent": lines},
                             "branches": {
@@ -104,3 +104,11 @@ class NativeCoverageGateTests(unittest.TestCase):
             with self.subTest(data=data):
                 self.assertEqual(1, len(checks.check_native_coverage(data, ())))
         self.assertTrue(set(checks.BRANCH_FLOORS) <= set(checks.GATED_FILES))
+
+    def test_files_without_counted_lines_fail(self):
+        report = native([("lib/A/src/a.cpp", 0.0, None)])
+        report["data"][0]["files"][0]["summary"]["lines"]["count"] = 0
+        self.assertEqual(
+            ["lib/A/src/a.cpp: no counted lines"],
+            checks.check_native_coverage(report, ("lib/A/src/a.cpp",)),
+        )

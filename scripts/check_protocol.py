@@ -31,8 +31,10 @@ def pio():
 
 
 def tool(name):
-    # uvx guarantees the pinned version; CI installs the same pins with pip instead.
-    return ["uvx", "--from", TOOLS[name], name] if shutil.which("uvx") else [name]
+    # uvx guarantees the pinned version locally; CI installs the same pins with hashes and
+    # must use those, even if a runner image ships uv.
+    local = shutil.which("uvx") and not os.environ.get("CI")
+    return ["uvx", "--from", TOOLS[name], name] if local else [name]
 
 
 def tracked(*patterns):
@@ -92,12 +94,16 @@ def check_native_coverage(export, expected=GATED_FILES):
     seen = set()
     for entry in entries:
         name = entry["filename"]
-        path = name[name.index("lib/") :] if "lib/" in name else name
+        # Match on the repository-relative suffix, not the first "lib/" of the absolute
+        # path (a checkout can live under /var/lib).
+        path = next((gated for gated in expected if name.endswith("/" + gated)), name)
         summary = entry["summary"]
         lines, branches = summary["lines"], summary["branches"]
         seen.add(path)
         floor = BRANCH_FLOORS.get(path, BRANCH_MINIMUM)
-        if lines["count"] and lines["percent"] < LINE_MINIMUM:
+        if not lines["count"]:
+            failures.append(f"{path}: no counted lines")
+        elif lines["percent"] < LINE_MINIMUM:
             failures.append(f"{path}: lines {lines['percent']:.2f}% < {LINE_MINIMUM}%")
         if branches["count"] and branches["percent"] < floor:
             failures.append(f"{path}: branches {branches['percent']:.2f}% < {floor}%")
