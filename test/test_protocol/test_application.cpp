@@ -50,7 +50,7 @@ public:
     }
 };
 struct Rig {
-    fixtures::MemoryBlob blob;
+    fixtures::MemoryRecords blob;
     std::unique_ptr<PersistentStore> store = fixtures::mounted(blob, Role::Receiver);
     TestClock clock;
     TestRadio radio;
@@ -204,7 +204,7 @@ void test_late_poll_after_completed_ack_keeps_listening() {
 void test_receiver_start_requires_healthy_receiver_storage_and_radio() {
     // A receiver without bindings starts (scenario 2): radio pairing creates the first one.
     for (int scenario = 0; scenario < 4; ++scenario) {
-        fixtures::MemoryBlob blob;
+        fixtures::MemoryRecords blob;
         auto store = fixtures::mounted(blob, scenario == 1 ? Role::Transmitter : Role::Receiver);
         if (scenario != 2) TEST_ASSERT_TRUE(fixtures::enroll(*store));
         if (scenario == 0) {

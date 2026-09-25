@@ -2,7 +2,8 @@
 
 Unity 2.6.1 runs the shared C++11 suite through PlatformIO. Native tests use real
 OpenSSL AES-GCM with ASan/UBSan. Protocol tests use journal/counter doubles; storage
-tests exercise the real snapshot state machine over a fault-injection blob adapter.
+tests exercise the real store over an in-memory record adapter that injects failures
+before, during and after each write, including ambiguous and torn writes.
 This is not a flash simulation with a proven power-loss model. The NVS adapter and
 radio images are also compiled, without physical access during CI.
 
@@ -22,7 +23,7 @@ pio test -e protocol_esp32 --without-uploading --without-testing
 
 `--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
-snapshot offsets are deliberate literals. `src/` is not analyzed because it needs the
+record offsets are deliberate literals. `src/` is not analyzed because it needs the
 Arduino headers. PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
 would build LLVM from source; on such machines, run `--lint` on macOS or in an x86-64
 container.

@@ -89,15 +89,17 @@ of a new credential generation, exactly as a USB enrollment would store it.
    no more for someone replaying a recorded one.
    On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
-Enrollment slots are never freed, so nothing is stored for an attempt that has not been
-confirmed: abandoned, expired, stopped or spoofed attempts cost no slot. Each successful
-pairing uses one slot on each side, like a USB rotation. If JOIN_DONE is lost for all five
+Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
+stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each
+side, like a USB rotation; revoked generations free theirs when a slot is needed, see
+[storage limits](persistence.md#limits-and-retained-history). If JOIN_DONE is lost for all five
 confirmations, the receiver holds an active binding the node never stored; the node keeps
 its previous binding and the administrator pairs it again or revokes the stale one on the
 setup page.
 
 A node that already belongs to a network can only pair again within that network:
-storage holds a single network per device, and there is no reset that would keep keys.
+storage holds a single network per device. To move it, `tools/provision.py reset` makes
+it leave its network first, retiring its keys.
 Pairing again within the network creates a new generation and revokes the previous one
 on both sides, as USB rotation does.
 

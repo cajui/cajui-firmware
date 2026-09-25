@@ -10,6 +10,7 @@
 namespace {
 using namespace cajui;
 using fixtures::MemoryBlob;
+using fixtures::MemoryRecords;
 
 UplinkConfig validConfig() {
     UplinkConfig c{};
@@ -242,7 +243,7 @@ public:
     }
 };
 struct ForwardRig {
-    MemoryBlob blob;
+    MemoryRecords blob;
     std::unique_ptr<PersistentStore> store = fixtures::mounted(blob, Role::Receiver);
     TestClock clock;
     TestPublisher publisher;
@@ -358,7 +359,7 @@ void test_forwarder_stops_on_storage_failure_and_handles_changed_front() {
     unhealthy.forwarder.poll(true);
     EXPECT_RESULT(ForwardState::Failed, unhealthy.forwarder.state());
 
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = fixtures::mounted(blob, Role::Receiver);
     TestClock clock;
     TestPublisher publisher;
@@ -410,7 +411,8 @@ std::string set(const char* field, const char* value) {
     return std::string("CJ1 UPLINKSET 0000000000000001 ") + field + " " + hexOf(value);
 }
 void test_usb_uplink_settings_are_staged_saved_and_never_echoed() {
-    MemoryBlob snapshot, settings;
+    MemoryRecords snapshot;
+    MemoryBlob settings;
     auto store = fixtures::mounted(snapshot, Role::Receiver);
     Provisioning admin(*store, 1, &settings);
     COMMAND(admin, "CJ1 UPLINKINFO 0000000000000001", "CJ1 OK UPLINKINFO 0");
@@ -435,7 +437,8 @@ void test_usb_uplink_settings_are_staged_saved_and_never_echoed() {
     COMMAND(admin, "CJ1 UPLINKINFO 0000000000000001", "CJ1 ERR STORAGE");
 }
 void test_usb_uplink_rejects_bad_values_roles_and_devices() {
-    MemoryBlob snapshot, settings;
+    MemoryRecords snapshot;
+    MemoryBlob settings;
     auto store = fixtures::mounted(snapshot, Role::Receiver);
     Provisioning admin(*store, 1, &settings);
     const std::string invalid[] = {
@@ -460,7 +463,7 @@ void test_usb_uplink_rejects_bad_values_roles_and_devices() {
     COMMAND(admin, set("port", "65535").c_str(), "CJ1 OK UPLINKSET");
     Provisioning noBlob(*store);
     COMMAND(noBlob, "CJ1 UPLINKINFO 0000000000000001", "CJ1 ERR INVALID");
-    MemoryBlob txSnapshot;
+    MemoryRecords txSnapshot;
     auto transmitter = fixtures::mounted(txSnapshot, Role::Transmitter);
     Provisioning tx(*transmitter, 1, &settings);
     COMMAND(tx, "CJ1 UPLINKINFO 0000000000000002", "CJ1 ERR INVALID");

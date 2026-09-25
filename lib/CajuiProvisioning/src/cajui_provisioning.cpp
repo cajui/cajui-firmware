@@ -4,8 +4,8 @@
 namespace cajui {
 namespace {
 // Word counts include "CJ1", the command and the device ID.
-constexpr size_t MaxWords = 10, RebootWords = 3, EnrollmentWords = 5, PrepareWords = 9,
-                 UplinkSetWords = 5;
+constexpr size_t MaxWords = 10, RebootWords = 3, ResetWords = 4, EnrollmentWords = 5,
+                 PrepareWords = 9, UplinkSetWords = 5;
 constexpr size_t IdDigits = 16, ProfileDigits = 4;
 constexpr char FirstPrintable = ' ', LastPrintable = '~';
 int nibble(char c) {
@@ -283,6 +283,16 @@ bool Provisioning::execute(const char* input, size_t length, char* reply, size_t
     }
     if (!std::strcmp(command, "PREPARE") && count == PrepareWords) {
         respond(prepare(store_, fields), command, reply, capacity);
+        return true;
+    }
+    // Leaves the network. Queued samples are discarded only when asked explicitly.
+    if (!std::strcmp(command, "RESET") &&
+        (count == RebootWords || (count == ResetWords && !std::strcmp(words[3], "discard")))) {
+        const Result result = store_.reset(count == ResetWords);
+        if (result == Result::Conflict)
+            std::snprintf(reply, capacity, "CJ1 ERR QUEUED");
+        else
+            respond(result, command, reply, capacity);
         return true;
     }
     uint64_t node = 0;

@@ -16,9 +16,11 @@ released.
 
 - Bounded DATA/ACK frames with up to eight sensor metrics and AES-128-GCM.
 - Per-device credentials, replay/duplicate handling and bounded sender attempts.
-- Versioned snapshot storage with an ESP32 NVS adapter, durable counter reservation,
-  a 128-frame receiver queue and atomic queue/receipt updates before ACK.
-- Two-phase USB enrollment, resumable setup, key rotation and revocation.
+- Versioned per-record storage with an ESP32 NVS adapter, durable counter reservation,
+  a 128-frame receiver queue committed before ACK in two small writes per sample,
+  reusable enrollment slots and migration from the earlier single-snapshot layout.
+- Two-phase USB enrollment, resumable setup, key rotation, revocation and leaving a
+  network (retired keys can never return).
 - A local Python tool with private recovery files and a software-restart check.
 - A nonblocking send controller with injected radio, clock and jitter, bounded
   channel waits, ACK deadlines and cancellation.

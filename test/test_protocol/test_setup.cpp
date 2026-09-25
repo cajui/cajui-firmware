@@ -328,7 +328,7 @@ void test_confirmation_and_closed_pages() {
     TEST_ASSERT_FALSE(renderClosed(nullptr, 0));
 }
 void test_store_lists_enrollments_with_last_received_counter() {
-    fixtures::MemoryBlob blob;
+    fixtures::MemoryRecords blob;
     auto store = fixtures::mounted(blob, Role::Receiver);
     EnrollmentInfo list[BindingCapacity]{};
     TEST_ASSERT_EQUAL_size_t(0, store->list(list, BindingCapacity));

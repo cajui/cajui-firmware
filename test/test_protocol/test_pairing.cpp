@@ -8,7 +8,7 @@
 
 namespace {
 using namespace cajui;
-using fixtures::MemoryBlob;
+using fixtures::MemoryRecords;
 
 X25519Key hexKey(const char* hex) {
     X25519Key key{};
@@ -215,7 +215,7 @@ void test_pairing_frames_round_trip_and_reject_tampering() {
 
 // Receiver (device 1) and node (device 2) with in-memory storage and radios.
 struct PairRig {
-    MemoryBlob rxBlob, txBlob;
+    MemoryRecords rxBlob, txBlob;
     std::unique_ptr<PersistentStore> rx = fixtures::mounted(rxBlob, Role::Receiver);
     std::unique_ptr<PersistentStore> tx = fixtures::mounted(txBlob, Role::Transmitter);
     TestClock clock;
@@ -490,15 +490,17 @@ void test_full_storage_is_refused_before_any_exchange() {
     TEST_ASSERT_TRUE(buildRequest(2, 5, keys.publicKey, request));
     TEST_ASSERT_FALSE(rig.host.handle(request, -50, reply));
     EXPECT_RESULT(Result::Full, rig.host.accept(2));
-    MemoryBlob full;
+    MemoryRecords full;
     auto node = fixtures::mounted(full, Role::Transmitter);
     for (uint64_t generation = 1; generation <= BindingCapacity; ++generation) {
         TEST_ASSERT_TRUE(node->prepare(42, 1, 2, generation, fixtures::key(uint8_t(generation)),
                                        1) == Result::Ok);
         TEST_ASSERT_TRUE(node->activate(2, generation) == Result::Ok);
     }
+    // Fifteen revoked generations are reclaimed: a transmitter can always pair again.
+    TEST_ASSERT_EQUAL_size_t(BindingCapacity - 1, node->freeSlots());
     PairingClient client(rig.txRadio, rig.clock, rig.jitter, *node, entropy);
-    TEST_ASSERT_FALSE(client.start());
+    TEST_ASSERT_TRUE(client.start());
 }
 void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     PairRig lossy;
@@ -631,7 +633,7 @@ void test_node_failures_deadline_radio_and_foreign_network() {
         TEST_ASSERT_FALSE(rig.rx->binding(2, binding)); // Refused before confirming.
     }
     {
-        MemoryBlob blob;
+        MemoryRecords blob;
         auto store = fixtures::mounted(blob, Role::Receiver); // Wrong role for a node.
         TestClock clock;
         MinJitter jitter;
@@ -642,7 +644,7 @@ void test_node_failures_deadline_radio_and_foreign_network() {
     }
 }
 void test_receiver_without_pairing_handler_drops_pairing_frames() {
-    MemoryBlob blob;
+    MemoryRecords blob;
     auto store = fixtures::mounted(blob, Role::Receiver);
     TestClock clock;
     FakeRadio radio;

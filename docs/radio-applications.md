@@ -23,7 +23,7 @@ with the radio in reset, and a receiver without bindings starts listening. Holdi
 for three seconds on a transmitter (at boot, when waking it from sleep, or in admin mode)
 or sending `CJ1 PAIR` starts pairing: its LED blinks fast for up to two minutes, then it
 restarts. PRG is a deep-sleep wake source for this reason. Both images share
-`partitions.csv` and the same snapshot format. Preserve the `cajui` NVS partition; never erase or restore older
+`partitions.csv` and the same [storage records](persistence.md). Preserve the `cajui` NVS partition; never erase or restore older
 counter/receipt state under an existing key. Keep the local recovery file private.
 Radio operation requires healthy storage, enrollment and profile 1; the transmitter also
 requires its own active binding. Otherwise the device boots in admin mode
@@ -34,7 +34,7 @@ console. `CJ1 ADMIN` restarts into admin mode once the radio is idle: after the
 transmitter's delivery cycle, or while the receiver is listening. There is no
 concurrent USB credential mutation while a frame is in flight. ESP-IDF component logs are disabled at startup because
 they are written from other tasks and can split a console reply. Only one `PersistentStore` owns
-its backing snapshot.
+its backing store.
 
 ## Transmitter
 
@@ -101,8 +101,8 @@ PUBACK is the broker's boundary, not proof that Central stored the sample. The c
 uses MQTT 3.1.1, where an ACL-denied publication is still acknowledged: a username
 without write permission on its namespace would silently discard samples. Transport
 is plain TCP, so Wi-Fi and broker credentials and samples are readable on the local
-network; use a trusted network until broker TLS is provisioned. Each removal rewrites
-the snapshot, doubling flash writes per sample compared with queueing alone.
+network; use a trusted network until broker TLS is provisioned. Each removal writes
+only the 14-byte queue head record.
 Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
 queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 

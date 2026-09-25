@@ -60,14 +60,14 @@ BoardEntropy entropy;
 constexpr uint8_t PairButton = 0; // PRG.
 constexpr uint32_t PairHoldMs = 3000, PairBlinkMs = 100;
 board::Sx1262Radio radio;
-cajui::NvsBlob blob;
+cajui::NvsRecords records;
 BoardClock clockSource;
 BoardJitter jitter;
 cajui::SendController sender(radio, clockSource, jitter);
 #if CAJUI_RUNTIME_ROLE == 2
 cajui::ReceiverController* receiver = nullptr;
 cajui::PersistentStore* receiverStore = nullptr;
-cajui::NvsBlob uplinkBlob("uplink", cajui::MinUplinkSize, cajui::UplinkBlobCapacity);
+cajui::RecordBlob uplinkBlob(records, "uplink", cajui::MinUplinkSize, cajui::UplinkBlobCapacity);
 board::MqttUplink uplink;
 cajui::Forwarder* forwarder = nullptr;
 uint32_t reportedForwards = 0, reportedRetries = 0;
@@ -87,7 +87,7 @@ bool applyUplink(const cajui::UplinkConfig& settings) {
 void startForwarding(cajui::PersistentStore& store) {
     static cajui::UplinkConfig settings;
     const auto loaded =
-        uplinkBlob.begin() ? cajui::loadUplink(uplinkBlob, settings) : cajui::ReadResult::Error;
+        records.begin() ? cajui::loadUplink(uplinkBlob, settings) : cajui::ReadResult::Error;
     if (loaded != cajui::ReadResult::Ok) {
         Serial.println(loaded == cajui::ReadResult::Missing ? "CJAPP UPLINK disabled"
                                                             : "CJAPP UPLINK config_error");
@@ -202,8 +202,8 @@ void setup() {
     rtc_gpio_deinit(gpio_num_t(PairButton));
     const board::BootRequest request = board::takeBootRequest();
     const bool requested = request == board::BootRequest::Admin;
-    static cajui::PersistentStore store(blob, cajui::Role(CAJUI_RUNTIME_ROLE), deviceId());
-    const bool mounted = blob.begin() && store.mount();
+    static cajui::PersistentStore store(records, cajui::Role(CAJUI_RUNTIME_ROLE), deviceId());
+    const bool mounted = records.begin() && store.mount();
     bool enrolled = mounted && store.network() && store.profile() == board::RadioProfile;
 #if CAJUI_RUNTIME_ROLE == 1
     cajui::Binding binding{};
@@ -214,7 +214,7 @@ void setup() {
 #else
     // A receiver runs without bindings so radio pairing can create the first one.
     enrolled = mounted && (!store.network() || store.profile() == board::RadioProfile);
-    cajui::AtomicBlob* settings = uplinkBlob.begin() ? &uplinkBlob : nullptr;
+    cajui::AtomicBlob* settings = records.begin() ? &uplinkBlob : nullptr;
 #endif
     // Without enrollment, or with unusable storage, administer over USB instead of halting.
 #if CAJUI_RUNTIME_ROLE == 1
