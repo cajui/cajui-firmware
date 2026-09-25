@@ -67,14 +67,18 @@ void head(Html& page, const char* title) {
     page.raw("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
              "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
     page.text(title);
-    page.raw("</title><style>body{font:16px system-ui,sans-serif;margin:0 auto;padding:16px;"
-             "max-width:560px;background:#faf9f5;color:#24382f}section{background:#fff;"
-             "border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:12px 0}"
-             "label{display:block;margin:8px 0 2px}input{box-sizing:border-box;width:100%%;"
-             "padding:10px;font-size:16px}button{margin-top:12px;padding:10px 16px;"
-             "font-size:16px}table{width:100%%;border-collapse:collapse}td,th{text-align:left;"
-             "padding:6px 4px;border-bottom:1px solid #eee;font-size:14px}.notice{background:"
-             "#fff4d6;padding:10px;border-radius:6px}small{color:#55665c}</style>");
+    page.raw(
+        "</title><style>body{font:16px system-ui,sans-serif;margin:0 auto;padding:16px;"
+        "max-width:560px;background:#faf9f5;color:#24382f}section{background:#fff;"
+        "border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:12px 0}"
+        "label{display:block;margin:8px 0 2px}input{box-sizing:border-box;width:100%%;"
+        "padding:10px;font-size:16px}button{margin-top:12px;padding:10px 16px;"
+        "font-size:16px}table{width:100%%;border-collapse:collapse}td,th{text-align:left;"
+        "padding:6px 4px;border-bottom:1px solid #eee;font-size:14px}.notice{background:"
+        "#fff4d6;padding:10px;border-radius:6px}small{color:#55665c}.spin{display:inline-block;"
+        "width:12px;height:12px;margin-right:6px;border:2px solid #cfd8d3;border-top-color:"
+        "#24382f;border-radius:50%%;animation:spin 1s linear infinite}@keyframes spin{to{"
+        "transform:rotate(360deg)}}</style>");
 }
 const char* stateName(Enrollment state) {
     switch (state) {
@@ -171,8 +175,9 @@ void brokerForm(Html& page, const SetupView& v) {
              "</form><p><small>The username is also the source ID of the samples. Plain MQTT: "
              "use a trusted network.</small></p></section>");
 }
-void transmitters(Html& page, const SetupView& v) {
-    page.raw("<section><h2>Transmitters</h2>");
+// Inner content of the transmitters section; also served alone for live updates.
+void transmitterList(Html& page, const SetupView& v) {
+    page.raw("<h2>Transmitters</h2>");
     if (!v.transmitterCount) {
         page.raw("<p>No transmitter enrolled.</p>");
     } else {
@@ -193,34 +198,54 @@ void transmitters(Html& page, const SetupView& v) {
     }
     const PairingView* pairing = v.pairing;
     if (!pairing) {
-        page.raw("<p><small>New transmitters are enrolled over USB.</small></p></section>");
+        page.raw("<p><small>New transmitters are enrolled over USB.</small></p>");
         return;
     }
     page.raw("<h3>Add a transmitter</h3>");
     if (!pairing->open) {
-        page.raw("<form method=\"post\" action=\"/pair/open\"><button>Search for transmitters "
-                 "(2 minutes)</button></form>");
+        page.raw("<form method=\"post\" action=\"/pair/open\" data-live-form><button>Search for "
+                 "transmitters (2 minutes)</button></form>");
     } else {
-        page.raw("<p>Searching, %u s left. Hold the PRG button of the transmitter for 3 seconds; "
-                 "its LED blinks fast while it asks to join.</p>",
+        // data-live keeps the page script refreshing this section while the window is open.
+        page.raw("<p data-live><span class=\"spin\"></span>Searching, %u s left. Hold the PRG "
+                 "button of the transmitter for 3 seconds; its LED blinks fast while it asks to "
+                 "join.</p>",
                  unsigned(pairing->remainingSeconds));
         if (!pairing->count) page.raw("<p><small>No transmitter asking to join yet.</small></p>");
         for (size_t i = 0; i < pairing->count && i < MaxPairingCandidates; ++i) {
-            page.raw("<form method=\"post\" action=\"/pair/add\"><p>%016" PRIx64
+            page.raw("<form method=\"post\" action=\"/pair/add\" data-live-form><p>%016" PRIx64
                      " <small>(%d dBm)</small> <input type=\"hidden\" name=\"node\" "
                      "value=\"%016" PRIx64 "\"><button>Add</button></p></form>",
                      pairing->nodes[i], int(pairing->rssi[i]), pairing->nodes[i]);
         }
         if (pairing->offered)
-            page.raw("<p>Waiting for %016" PRIx64 " to confirm&hellip;</p>", pairing->offered);
-        page.raw("<form method=\"post\" action=\"/pair/stop\"><button>Stop searching</button>"
-                 "</form>");
+            page.raw("<p><span class=\"spin\"></span>Waiting for %016" PRIx64
+                     " to confirm&hellip;</p>",
+                     pairing->offered);
+        page.raw("<form method=\"post\" action=\"/pair/stop\" data-live-form><button>Stop "
+                 "searching</button></form>");
     }
     if (pairing->paired)
         page.raw("<p class=\"notice\">Transmitter %016" PRIx64 " paired.</p>", pairing->paired);
     page.raw("<p><small>Add only a transmitter you just put in pairing mode, and keep it close. "
              "Pairing is not protected against an attacker in radio range during the search."
-             "</small></p></section>");
+             "</small></p>");
+}
+// Refreshes the transmitters section every second while it is live, and submits the pairing
+// forms in place. Without JavaScript the forms reload the page as before.
+constexpr char LiveScript[] =
+    "<script>(function(){var box=document.getElementById('transmitters');if(!box||!window.fetch)"
+    "return;function load(){fetch('/transmitters',{cache:'no-store'}).then(function(r){return "
+    "r.ok?r.text():null}).then(function(t){if(t!==null)box.innerHTML=t}).catch(function(){})}"
+    "box.addEventListener('submit',function(e){var f=e.target;if(!f.hasAttribute('data-live-"
+    "form'))return;e.preventDefault();var b=f.querySelector('button');if(b)b.disabled=true;"
+    "fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f))}).then(load,load)});"
+    "setInterval(function(){if(box.querySelector('[data-live]'))load()},1000)})();</script>";
+void transmitters(Html& page, const SetupView& v) {
+    page.raw("<section id=\"transmitters\">");
+    transmitterList(page, v);
+    page.raw("</section>");
+    if (v.pairing) page.raw("%s", LiveScript);
 }
 } // namespace
 
@@ -322,6 +347,12 @@ bool renderSetup(const SetupView& v, char* output, size_t capacity) {
     transmitters(page, v);
     page.raw("<form method=\"post\" action=\"/close\"><button>Close setup</button></form>"
              "</html>");
+    return page.ok();
+}
+bool renderTransmitters(const SetupView& v, char* output, size_t capacity) {
+    if (!output || !capacity) return false;
+    Html page(output, capacity);
+    transmitterList(page, v);
     return page.ok();
 }
 bool renderRevoke(uint64_t node, uint64_t generation, char* output, size_t capacity) {

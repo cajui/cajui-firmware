@@ -232,6 +232,34 @@ void test_pairing_section_states() {
     TEST_ASSERT_TRUE(contains(page, "Stop searching"));
     TEST_ASSERT_FALSE(contains(page, "No transmitter asking"));
 }
+void test_transmitters_section_refreshes_live_only_while_pairing() {
+    static char page[PageCapacity];
+    SetupView view{};
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "<section id=\"transmitters\">"));
+    TEST_ASSERT_FALSE(contains(page, "<script>")); // No pairing: nothing to refresh.
+    PairingView pairing{};
+    view.pairing = &pairing;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "fetch('/transmitters'"));
+    TEST_ASSERT_TRUE(contains(page, "action=\"/pair/open\" data-live-form"));
+    TEST_ASSERT_FALSE(contains(page, "data-live>")); // Closed window: no polling.
+    pairing.open = true;
+    pairing.count = 1;
+    pairing.nodes[0] = 2;
+    pairing.offered = 2;
+    static char fragment[PageCapacity];
+    TEST_ASSERT_TRUE(renderTransmitters(view, fragment, sizeof(fragment)));
+    const std::string html = fragment;
+    TEST_ASSERT_TRUE(contains(html, "<p data-live><span class=\"spin\"></span>Searching"));
+    TEST_ASSERT_TRUE(contains(html, "<span class=\"spin\"></span>Waiting for 0000000000000002"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/pair/add\" data-live-form"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/pair/stop\" data-live-form"));
+    TEST_ASSERT_FALSE(contains(html, "<section")); // Inner content only.
+    TEST_ASSERT_FALSE(contains(html, "<script>")); // The page script replaces this content.
+    TEST_ASSERT_FALSE(renderTransmitters(view, fragment, 20));
+    TEST_ASSERT_FALSE(renderTransmitters(view, nullptr, 0));
+}
 void test_confirmation_and_closed_pages() {
     static char page[PageCapacity];
     TEST_ASSERT_TRUE(renderRevoke(2, 10, page, sizeof(page)));
@@ -279,6 +307,7 @@ void runSetupTests() {
     RUN_TEST(test_setup_page_escapes_input_and_never_shows_passwords);
     RUN_TEST(test_setup_page_states_and_prefill);
     RUN_TEST(test_pairing_section_states);
+    RUN_TEST(test_transmitters_section_refreshes_live_only_while_pairing);
     RUN_TEST(test_confirmation_and_closed_pages);
     RUN_TEST(test_store_lists_enrollments_with_last_received_counter);
 }

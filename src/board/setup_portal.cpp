@@ -223,6 +223,17 @@ void SetupPortal::save() {
     saved_ = cajui::saveUplink(blob_, pending_) && apply_(pending_);
     Serial.printf("CJAPP SETUP saved ok=%u\n", unsigned(saved_));
 }
+void SetupPortal::fillPairing(cajui::PairingView& pairing) const {
+    pairing.open = pairing_->state() != cajui::HostState::Closed;
+    pairing.remainingSeconds = pairing_->remainingMs() / 1000;
+    pairing.count = pairing_->candidateCount();
+    for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
+        pairing.nodes[i] = pairing_->candidates()[i].node;
+        pairing.rssi[i] = pairing_->candidates()[i].rssi;
+    }
+    if (pairing_->state() == cajui::HostState::Offered) pairing.offered = pairing_->offeredNode();
+    pairing.paired = pairing_->pairedNode();
+}
 void SetupPortal::home() {
     touch();
     cajui::SetupView view{};
@@ -252,16 +263,7 @@ void SetupPortal::home() {
     }
     cajui::PairingView pairing{};
     if (pairing_) {
-        pairing.open = pairing_->state() != cajui::HostState::Closed;
-        pairing.remainingSeconds = pairing_->remainingMs() / 1000;
-        pairing.count = pairing_->candidateCount();
-        for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
-            pairing.nodes[i] = pairing_->candidates()[i].node;
-            pairing.rssi[i] = pairing_->candidates()[i].rssi;
-        }
-        if (pairing_->state() == cajui::HostState::Offered)
-            pairing.offered = pairing_->offeredNode();
-        pairing.paired = pairing_->pairedNode();
+        fillPairing(pairing);
         view.pairing = &pairing;
     }
     view.notice = notice_;
@@ -276,6 +278,22 @@ void SetupPortal::route() {
     if (routed_) return;
     routed_ = true;
     server_.on("/", HTTP_GET, [this] { home(); });
+    server_.on("/transmitters", HTTP_GET, [this] {
+        touch();
+        cajui::SetupView view{};
+        cajui::PairingView pairing{};
+        view.transmitters = transmitters_;
+        view.transmitterCount = store_.list(transmitters_, cajui::BindingCapacity);
+        if (pairing_) {
+            fillPairing(pairing);
+            view.pairing = &pairing;
+        }
+        if (!cajui::renderTransmitters(view, page_, sizeof(page_))) {
+            server_.send(500, "text/plain", "Page too large");
+            return;
+        }
+        server_.send(200, "text/html; charset=utf-8", page_);
+    });
     server_.on("/scan", HTTP_GET, [this] {
         scan();
         redirect(nullptr);

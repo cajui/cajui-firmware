@@ -124,7 +124,10 @@ Saved passwords are never shown; an empty password field keeps the saved one.
 
 The page also adds transmitters by [radio pairing](radio-pairing.md): "Search for
 transmitters" opens a two-minute window, requesting nodes are listed with their ID and
-signal strength, and "Add" sends the offer; the result appears on the page.
+signal strength, and "Add" sends the offer; the result appears on the page. With
+JavaScript, the transmitters section refreshes itself every second while the window is
+open (spinners while searching and while waiting for confirmation) and the pairing buttons
+act in place; without it, the forms reload the page.
 
 **TODO (security): the access point is open, without a password.** While it is open,
 anyone in range can use the page, and so can any client on the home network through the

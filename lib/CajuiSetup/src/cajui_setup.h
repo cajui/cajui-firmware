@@ -76,6 +76,8 @@ struct SetupView {
 };
 constexpr size_t PageCapacity = 12288;
 bool renderSetup(const SetupView&, char* output, size_t capacity);
+// The transmitters section alone (list and pairing), refreshed live by the setup page.
+bool renderTransmitters(const SetupView&, char* output, size_t capacity);
 bool renderRevoke(uint64_t node, uint64_t generation, char* output, size_t capacity);
 bool renderClosed(char* output, size_t capacity);
 } // namespace cajui

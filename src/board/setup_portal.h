@@ -61,6 +61,7 @@ private:
     void touch() { lastActivity_ = millis(); }
     void redirect(const char* notice);
     void home();
+    void fillPairing(cajui::PairingView&) const;
     void save();
     void scan();
     void discover();
