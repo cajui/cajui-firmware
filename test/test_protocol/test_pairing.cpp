@@ -348,8 +348,10 @@ void test_each_sample_keeps_the_link_measured_with_its_own_frame() {
     TEST_ASSERT_TRUE(fixtures::enroll(*rig.rx));
     TEST_ASSERT_TRUE(fixtures::enroll(*rig.tx));
     rig.rxRadio.rssi = -97;
+    TEST_ASSERT_EQUAL_UINT64(0, rig.controller.lastNode());
     EXPECT_RESULT(Result::Ok, sendSample(rig, 1));
     TEST_ASSERT_TRUE(rig.controller.acknowledgedData());
+    TEST_ASSERT_EQUAL_UINT64(2, rig.controller.lastNode());
     TEST_ASSERT_EQUAL_INT16(-97, rig.controller.lastLink().rssiDbm);
     QueuedSample queued{};
     TEST_ASSERT_TRUE(rig.rx->peek(queued));

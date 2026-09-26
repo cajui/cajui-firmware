@@ -141,6 +141,20 @@ only the 14-byte queue head record.
 Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
 queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 
+The same connection carries the [management channel](management-v1.md): a retained
+`online`/`offline` availability (the last will, plus an explicit `offline` before new
+broker settings or an update restart) and retained state for the receiver and each of its
+transmitters. State is built in RAM and queued to the client without waiting, only while
+the receiver is listening, so it never writes flash or delays an acknowledgement; its
+PUBACKs are kept apart from the forwarding queue's. A transmitter's `last_frame` covers
+frames accepted since the receiver started. A broker whose ACL lacks the management
+topics drops them (Mosquitto 2.0.22) or refuses the connection; on a refusal as not
+authorized a separate task reconnects without the will, and management publications stay
+off until the next restart. Grant the receiver's user the topics listed in the contract.
+Observed on a Heltec WiFi LoRa 32 V3 with Mosquitto 2.0.22: retained state for the receiver
+and its transmitter after connecting, receiver state again a minute later, and the will's
+`offline` about 90 seconds after the receiver was held in reset, then `online` on return.
+
 ## Receiver setup page
 
 Holding the PRG button (GPIO0) for three seconds opens an access point named

@@ -53,6 +53,8 @@ private:
     AppLock& lock_;
 };
 uint64_t deviceId();
+// Why the chip last started, as named by the management channel (docs/management-v1.md).
+const char* resetReasonName();
 // Drives a pin before and after enabling the output, so it never glitches.
 void output(uint8_t pin, uint8_t level);
 // GPIO holds released, radio in reset, rails off, serial console up, component logs off.

@@ -53,6 +53,20 @@ void output(uint8_t pin, uint8_t level) {
     pinMode(pin, OUTPUT);
     digitalWrite(pin, level);
 }
+const char* resetReasonName() {
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power_on";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_DEEPSLEEP: return "deep_sleep";
+    case ESP_RST_EXT: return "external";
+    default: return "other";
+    }
+}
 void startBoard() {
     gpio_deep_sleep_hold_dis();
     for (auto pin : {Vext, Led, RadioCs, RadioReset}) gpio_hold_dis(gpio_num_t(pin));

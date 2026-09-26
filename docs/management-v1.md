@@ -1,6 +1,8 @@
 # MQTT management channel v1
 
-Draft contract, not implemented yet. It lets a receiver report its own state and the
+Draft contract. `runtime_rx` implements availability and state; commands are not
+implemented yet, so the receiver does not subscribe to them and offers no
+`capabilities`. It lets a receiver report its own state and the
 state of its transmitters, and lets an authorized MQTT client ask it for an action. It
 sits next to the [telemetry contract](radio-applications.md#forwarding-to-mqtt), which it
 does not change: a consumer that reads only telemetry keeps working.
@@ -32,11 +34,12 @@ publishes a retained `offline` itself before it deliberately closes the connecti
 broker settings from the setup page, a restart for an update). A transmitter has no
 availability topic: its reachability is judged from its samples, as today.
 
-A broker may refuse a connection whose will topic its ACL does not allow (Mosquitto does).
-A receiver whose connection is refused as not authorized therefore reconnects without the
-will and without management publications until it restarts, so telemetry keeps flowing
-on a broker that has not been granted the management topics. Grant them before
-updating receivers anyway.
+Mosquitto 2.0.22 accepts a connection whose will topic its ACL denies and silently drops
+the will and the management publications, like any denied publication; other brokers may
+refuse the connection instead. A receiver whose connection is refused as not authorized
+therefore reconnects without the will and without management publications until it
+restarts, so telemetry keeps flowing either way. Grant the management topics before
+updating receivers.
 
 Retained topics under a previous `source_id` stay on the broker after the receiver moves
 to another user, which cannot clear them. A consumer treats a device that reappears

@@ -56,6 +56,8 @@ public:
     const Link& lastLink() const { return link_; }
     // True when the current or last ACK answered DATA, false for a pairing reply.
     bool acknowledgedData() const { return data_; }
+    // Node of the last DATA frame acknowledged (accepted or a repeated sample); 0 before one.
+    uint64_t lastNode() const { return node_; }
     // Power command sent in v2 ACKs; KeepPower until a policy sets one (docs/protocol-v1.md).
     void setPowerCommand(int8_t powerDbm) { power_ = powerDbm; }
 
@@ -68,6 +70,7 @@ private:
     ReceiverState state_ = ReceiverState::Stopped;
     Result result_ = Result::NotFound;
     Link link_{};
+    uint64_t node_ = 0;
     int8_t power_ = KeepPower;
     bool data_ = false;
     uint32_t startedAt_ = 0;
