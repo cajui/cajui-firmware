@@ -12,7 +12,9 @@ the right permissions can use the channel; Cajuí Central is one of them.
 
 ## Topics
 
-`<source_id>` is the receiver's MQTT username, as in telemetry. `<device_id>` is a device
+`<source_id>` is the receiver's MQTT username, as in telemetry, restricted to
+`[A-Za-z0-9._-]` (1–64 characters, starting with a letter or digit) because it is also a
+broker user name. `<device_id>` is a device
 ID as 16 lowercase hexadecimal digits: the receiver's own ID, or the node ID of one of
 its transmitters.
 
@@ -25,22 +27,39 @@ its transmitters.
 
 The receiver sets `offline` as its MQTT last will and publishes `online` right after
 connecting, before any state. These are the default payloads of Home Assistant's
-`availability_topic`. A transmitter has no availability topic: its reachability is
-judged from its samples, as today.
+`availability_topic`. A clean disconnect does not trigger the will, so the receiver
+publishes a retained `offline` itself before it deliberately closes the connection (new
+broker settings from the setup page, a restart for an update). A transmitter has no
+availability topic: its reachability is judged from its samples, as today.
+
+A broker may refuse a connection whose will topic its ACL does not allow (Mosquitto does).
+A receiver whose connection is refused as not authorized therefore reconnects without the
+will and without management publications until it restarts, so telemetry keeps flowing
+on a broker that has not been granted the management topics. Grant them before
+updating receivers anyway.
+
+Retained topics under a previous `source_id` stay on the broker after the receiver moves
+to another user, which cannot clear them. A consumer treats a device that reappears
+under a new source as moved; removing the old retained messages is the broker
+operator's task.
 
 The receiver connects with a clean session and subscribes to
 `manage/v1/<source_id>/+/commands` on every connection. Commands published while it is
 offline are therefore dropped by the broker, never executed late; a client that gets no
-result treats the command as not delivered.
+result treats the command as not delivered. A command delivered with the retain flag is
+ignored: broker ACLs cannot forbid retaining, and a retained command would run again
+after every reconnection.
 
 ## State
 
 A retained JSON object that describes one device. The receiver publishes it after
 connecting, whenever a discrete field changes, and at most once every 60 seconds for
 counters (`uptime_s`, `wifi`, `queue`, `forwarding`). Node state is published after each
-accepted DATA frame and when a binding is added or revoked. State lives in RAM: publishing
-it never writes flash, and a publication lost while offline is simply replaced by the
-next one.
+accepted DATA frame and when a binding is added or revoked. `pairing.remaining_s` is a counter too; opening or closing the window and a change in
+its requests are discrete changes. State lives in RAM and is published only while
+connected: publishing it never writes flash, and after each connection the receiver
+publishes its current state again. State publications never delay telemetry: their broker
+acknowledgements are kept apart from the forwarding queue's.
 
 Receiver:
 
@@ -86,13 +105,15 @@ Field rules:
 - `null` means unknown, never zero. A transmitter's `model`, `firmware` and `parameters`
   stay `null` until the radio protocol carries them.
 - `firmware.version` is `major.minor.patch`, or `0.0.0` for a local build. `slot` and
-  `state` are those of the `CJAPP FIRMWARE` boot line.
+  `state` use the values of the `CJAPP FIRMWARE` boot line, but `state` is current: a
+  `pending` image becomes `valid` once it is [confirmed](updates.md#rollback).
 - `reset_reason` is one of `power_on`, `software`, `panic`, `watchdog`, `brownout`,
   `deep_sleep`, `external` or `other`.
 - `pairing.requests` lists the nodes asking to join during an open window, each as
   `{"node_id": "...", "rssi_dbm": -70, "conflict": false}`; see
   [radio pairing](radio-pairing.md#model-and-security).
-- `binding` is `active` or `revoked`. A revoked transmitter keeps its retained state with
+- `binding` is `active` when the node has an active enrollment, `pending` when it has
+  only one prepared over USB and not yet activated, and `revoked` otherwise. A revoked transmitter keeps its retained state with
   `revoked` so that consumers learn about it; publishing an empty retained message later
   clears it.
 - `capabilities` lists the command families the firmware accepts. A consumer offers only
@@ -118,10 +139,10 @@ keys, wrong types and trailing data are rejected with `invalid`.
 
 | Type | Topic device | Params | Effect |
 | --- | --- | --- | --- |
-| `pairing.open` | receiver | none | Opens the two-minute pairing window, as the setup page's "Search for transmitters". |
-| `pairing.accept` | receiver | `node_id` | Sends the offer to a listed request, as the page's "Add". |
+| `pairing.open` | receiver | none | Opens the two-minute pairing window, as the setup page's "Search for transmitters". An already open window is left as it is, so a remote command never discards requests or an offer made on the page. |
+| `pairing.accept` | receiver | `node_id` | Sends the offer to a listed request, as the page's "Add". Answers `pending`, then `applied` when the node confirms. |
 | `pairing.close` | receiver | none | Closes the window. |
-| `node.revoke` | receiver | `node_id` | Revokes an enrolled transmitter, as the page's confirmed revoke. |
+| `node.revoke` | receiver | `node_id` | Revokes every enrollment of the transmitter, including a second one pending after re-pairing, as the page's confirmed revoke. |
 
 Reserved for later versions, rejected with `unsupported` until implemented:
 `parameters.set` on a transmitter (`interval_s`, `power_dbm`), relayed in the receiver's
@@ -129,9 +150,17 @@ ACK as the [version 2 power command](protocol-v1.md#version-2-power-command) is,
 `firmware.install` on the receiver, which downloads a signed `.cjfw` file. Both are
 specified with the protocol and update changes that carry them.
 
-The receiver executes commands only while it is listening in operation, under the same
-lock the setup page uses, so page and channel actions never interleave. A command that
-arrives in admin mode is not received at all, because admin mode has no MQTT client.
+The MQTT client's callback only copies a command into a bounded queue; the receiver's
+loop executes it while it is listening, under the same lock the setup page uses, so page
+and channel actions never interleave and the callback never waits for that lock. A
+command not executed within 5 seconds (the queue is full, or the receiver is
+transmitting or recovering) is rejected with `busy`. A command that arrives in admin mode
+is not received at all, because admin mode has no MQTT client.
+
+The result goes to the `results` topic of the command's `device_id`. A command addressed
+to a transmitter that version 1 does not support is rejected with `unsupported`; one
+addressed to a device ID that is neither the receiver nor one of its transmitters is
+rejected with `unknown_node`.
 
 ## Results
 
@@ -142,13 +171,23 @@ arrives in admin mode is not received at all, because admin mode has no MQTT cli
 | Status | Meaning |
 | --- | --- |
 | `applied` | Done. |
-| `pending` | Accepted; a later result with the same `command_id` reports the outcome (`pairing.accept` while the node confirms). |
+| `pending` | Accepted; a later result with the same `command_id` reports the outcome (`pairing.accept` while the node confirms). Every `pending` command gets exactly one later result, unless the receiver restarts first. |
 | `rejected` | Not executed; `reason` says why. |
 
-Reasons: `invalid` (malformed command), `unsupported` (type not implemented),
-`busy` (another pairing is in progress), `unknown_node`, `not_requested` (node not in
-the window's requests), `conflict` (pinned key conflict), `timeout` (node did not
-confirm), `storage` (the receiver could not persist the change).
+Reasons:
+
+| Reason | Meaning |
+| --- | --- |
+| `invalid` | Malformed command. |
+| `unsupported` | Type not implemented for that device. |
+| `busy` | Not executed within 5 seconds. |
+| `unknown_node` | Not the receiver nor one of its transmitters. |
+| `closed` | The pairing window is closed, or closed before the node confirmed (expiry or `pairing.close`). |
+| `not_requested` | The node is not among the window's requests. |
+| `conflict` | Two devices claimed the node ID during this window. |
+| `full` | No enrollment slot is left. |
+| `superseded` | A later `pairing.accept` replaced this offer before the node confirmed. |
+| `storage` | The receiver could not persist the change. |
 
 The receiver keeps the results of its last 8 commands in RAM and answers a repeated
 `command_id` with the stored result instead of executing it again, so a QoS 1 duplicate
