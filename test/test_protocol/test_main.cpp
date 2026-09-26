@@ -482,6 +482,7 @@ void runDeviceTests();
 void runFirmwareTests();
 void runManageTests();
 void runCommandTests();
+void runDiscoveryTests();
 int runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_roundtrip_multiple_metrics_and_zero);
@@ -512,6 +513,7 @@ int runTests() {
     runFirmwareTests();
     runManageTests();
     runCommandTests();
+    runDiscoveryTests();
     return UNITY_END();
 }
 #ifdef ARDUINO

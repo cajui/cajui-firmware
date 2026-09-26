@@ -16,6 +16,7 @@ constexpr UBaseType_t CommandDepth = 4;
 constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 2500;
 constexpr int QoS = 1, Retain = 0;
 constexpr uint32_t RestartStack = 4096;
+constexpr int BufferBytes = 2048;
 const char Online[] = "online", Offline[] = "offline";
 }
 MqttUplink::~MqttUplink() {
@@ -90,6 +91,9 @@ bool MqttUplink::restart(const cajui::UplinkConfig& config, uint64_t device) {
     settings.keepalive = KeepaliveSeconds;
     settings.reconnect_timeout_ms = ReconnectMs;
     settings.network_timeout_ms = NetworkTimeoutMs;
+    // The default 1024-byte buffer is shared by topic and payload; a Discovery
+    // configuration or a full sample needs more.
+    settings.buffer_size = BufferBytes;
     settings.user_context = this;
     if (!cajui::formatManageTopic(config.username, device, cajui::ManageTopic::Availability,
                                   availability_, sizeof(availability_)) ||

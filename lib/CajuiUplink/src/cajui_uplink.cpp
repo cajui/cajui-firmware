@@ -10,7 +10,6 @@ namespace cajui {
 namespace {
 constexpr uint8_t UplinkMagic[4] = {'C', 'J', 'U', 'P'};
 constexpr uint8_t UplinkVersion = 1;
-constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 7 days.
 constexpr int32_t MilliPerUnit = 1000;
 bool alnum(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -250,12 +249,16 @@ void Forwarder::poll(bool quiet) {
         int id = 0;
         while (publisher_.acknowledged(id)) {
             if (id != message_) continue; // A late PUBACK from an abandoned attempt.
-            const Result result = store_.forwarded(node_, generation_, counter_);
+            const Result result =
+                store_.forwarded(inflight_.node, inflight_.generation, inflight_.counter);
             if (result == Result::StorageError) {
                 state_ = ForwardState::Failed;
                 return;
             }
-            if (result == Result::Ok) ++forwarded_;
+            if (result == Result::Ok) {
+                ++forwarded_;
+                if (observer_) observer_->sampleForwarded(inflight_);
+            }
             state_ = ForwardState::Idle;
             return;
         }
@@ -285,9 +288,7 @@ void Forwarder::poll(bool quiet) {
         retryLater(now);
         return;
     }
-    node_ = sample.node;
-    generation_ = sample.generation;
-    counter_ = sample.counter;
+    inflight_ = sample;
     message_ = id;
     sentAt_ = now;
     state_ = ForwardState::Waiting;

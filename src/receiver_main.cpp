@@ -13,6 +13,7 @@
 #include "cajui_application.h"
 #include "cajui_command.h"
 #include "cajui_device.h"
+#include "cajui_discovery.h"
 #include "cajui_manage.h"
 #include "cajui_nvs.h"
 #include "cajui_pairing.h"
@@ -61,6 +62,7 @@ private:
     SetupPortal portal_{store_, uplink_, uplinkBlob_, *this, lock_, entropy_};
     std::unique_ptr<cajui::Forwarder> forwarder_;
     std::unique_ptr<cajui::StateReporter> reporter_;
+    std::unique_ptr<cajui::DiscoveryReporter> discovery_;
     cajui::CommandRunner commandRunner_{pairing_, store_, clock_};
     // Command results wait in a small outbox: one command can produce up to three (a
     // superseded or closed accept plus its own), and each publication can wait for the
@@ -147,6 +149,8 @@ void ReceiverApp::startForwarding() {
     if (uplink_.begin(settings, store_.device())) {
         forwarder_.reset(new cajui::Forwarder(uplink_, clock_, store_, settings.username));
         reporter_.reset(new cajui::StateReporter(uplink_, *this, clock_, settings.username));
+        discovery_.reset(new cajui::DiscoveryReporter(uplink_, store_.device(), settings.username));
+        forwarder_->setObserver(discovery_.get());
         Serial.printf("CJAPP UPLINK started host=%s port=%u source=%s\n", settings.host,
                       unsigned(settings.port), settings.username);
     } else {
@@ -161,6 +165,7 @@ bool ReceiverApp::applyUplink(const cajui::UplinkConfig& settings) {
         Locked held(lock_);
         if (forwarder_) forwarder_->pause();
         if (reporter_) reporter_->pause();
+        if (discovery_) discovery_->pause();
     }
     const bool started = uplink_.startMqtt(settings, store_.device());
     Locked held(lock_);
@@ -168,9 +173,14 @@ bool ReceiverApp::applyUplink(const cajui::UplinkConfig& settings) {
         reporter_->setSource(settings.username);
     else if (started)
         reporter_.reset(new cajui::StateReporter(uplink_, *this, clock_, settings.username));
+    if (discovery_)
+        discovery_->setSource(settings.username);
+    else if (started)
+        discovery_.reset(new cajui::DiscoveryReporter(uplink_, store_.device(), settings.username));
     if (forwarder_) return forwarder_->setSource(settings.username) && started;
     if (!started) return false;
     forwarder_.reset(new cajui::Forwarder(uplink_, clock_, store_, settings.username));
+    forwarder_->setObserver(discovery_.get());
     return forwarder_->state() != cajui::ForwardState::Failed;
 }
 void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
@@ -425,6 +435,8 @@ void ReceiverApp::loop() {
                 published = true;
             }
         }
+        // A few Discovery configurations after each connection, then only new entities.
+        if (discovery_ && listening && !published) published = discovery_->poll();
         if (reporter_ && listening && !published) reporter_->poll();
     }
     if (failure) return fault(failure);

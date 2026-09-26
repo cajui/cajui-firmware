@@ -39,6 +39,7 @@ bool saveUplink(AtomicBlob&, const UplinkConfig&);
 // Cajuí Central MQTT telemetry contract, version 1:
 // topic telemetry/v1/<source_id>/<device_id>/samples, QoS 1, retain false.
 constexpr size_t TopicCapacity = 128, PayloadCapacity = 1536;
+constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 7 days.
 bool formatTopic(const char* source, uint64_t device, char* output, size_t capacity);
 // sample_id is "<generation>.<counter>": stable across retries and unique per acquisition
 // for a credential. measured_at is omitted because the receiver does not know it. When the
@@ -57,6 +58,12 @@ public:
     virtual bool acknowledged(int& id) = 0;
 };
 enum class ForwardState { Idle, Waiting, Failed };
+// Told about each sample the broker acknowledged (Home Assistant Discovery learns from it).
+class SampleObserver {
+public:
+    virtual ~SampleObserver() = default;
+    virtual void sampleForwarded(const QueuedSample&) = 0;
+};
 // Publishes the queue front and removes it only after the broker acknowledged that
 // exact publication. A lost PUBACK republishes the same sample_id; Central deduplicates.
 // PUBACK is a broker boundary: it does not prove that Central stored the sample.
@@ -78,6 +85,7 @@ public:
     ForwardState state() const { return state_; }
     uint32_t forwarded() const { return forwarded_; }
     uint32_t retries() const { return retries_; }
+    void setObserver(SampleObserver* observer) { observer_ = observer; }
 
 private:
     Publisher& publisher_;
@@ -87,7 +95,8 @@ private:
     char topic_[TopicCapacity]{};
     char payload_[PayloadCapacity]{};
     ForwardState state_ = ForwardState::Idle;
-    uint64_t node_ = 0, generation_ = 0, counter_ = 0;
+    QueuedSample inflight_{};
+    SampleObserver* observer_ = nullptr;
     int message_ = 0;
     uint32_t sentAt_ = 0, retryAt_ = 0, forwarded_ = 0, retries_ = 0;
     bool delayed_ = false, paused_ = false;

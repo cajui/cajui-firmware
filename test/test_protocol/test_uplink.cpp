@@ -292,6 +292,27 @@ struct ForwardRig {
                       cajui::receive(fixtures::binding(), fixtures::data(counter), *store, ack));
     }
 };
+class CountingObserver final : public SampleObserver {
+public:
+    std::deque<uint64_t> counters;
+    void sampleForwarded(const QueuedSample& sample) override {
+        counters.push_back(sample.counter);
+    }
+};
+void test_forwarder_tells_its_observer_about_acknowledged_samples_only() {
+    ForwardRig rig;
+    CountingObserver observer;
+    rig.forwarder.setObserver(&observer);
+    rig.receive(1);
+    rig.forwarder.poll(true);
+    rig.publisher.acks.push_back(99);
+    rig.forwarder.poll(true);
+    TEST_ASSERT_TRUE(observer.counters.empty());
+    rig.publisher.acks.push_back(1);
+    rig.forwarder.poll(true);
+    TEST_ASSERT_EQUAL_size_t(1, observer.counters.size());
+    TEST_ASSERT_EQUAL_UINT64(1, observer.counters.front());
+}
 void test_forwarder_removes_only_after_matching_puback() {
     ForwardRig rig;
     rig.forwarder.poll(true);
@@ -539,6 +560,7 @@ void runUplinkTests() {
     RUN_TEST(test_radio_link_travels_as_readings_of_a_radio_sensor);
     RUN_TEST(test_invalid_samples_or_small_buffers_are_rejected);
     RUN_TEST(test_forwarder_removes_only_after_matching_puback);
+    RUN_TEST(test_forwarder_tells_its_observer_about_acknowledged_samples_only);
     RUN_TEST(test_forwarder_republishes_the_same_sample_after_loss);
     RUN_TEST(test_paused_forwarder_publishes_nothing_until_resumed);
     RUN_TEST(test_forwarder_stops_on_storage_failure_and_handles_changed_front);
