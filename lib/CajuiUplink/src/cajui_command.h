@@ -78,7 +78,7 @@ private:
     // The accept waiting for its node to confirm, if any.
     Entry* pending_ = nullptr;
     uint64_t pendingNode_ = 0;
-    Entry* find(const char* id);
+    Entry* find(uint64_t device, const char* id);
     Entry& remember(uint64_t device, const char* id, CommandStatus, CommandReason);
     void finish(Entry&, CommandStatus, CommandReason, ResultSink&);
     void run(uint64_t device, const Command&, ResultSink&);

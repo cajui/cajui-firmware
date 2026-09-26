@@ -6,7 +6,7 @@
 namespace cajui {
 namespace {
 using Text = TextBuffer;
-constexpr size_t NodeIdDigits = 16, TypeCapacity = 16;
+constexpr size_t NodeIdDigits = 16, TypeCapacity = 32, KeyCapacity = 32, MaxDepth = 4;
 // "version" is a small integer: more digits than this cannot be 1 and are refused.
 constexpr size_t MaxIntegerDigits = 9;
 constexpr uint32_t DecimalBase = 10;
@@ -83,19 +83,53 @@ public:
         space();
         return at_ == size_;
     }
+    // Skips any value of the reserved commands' params without interpreting it: a string
+    // without escapes, a number, true/false/null, or a bounded nest of objects and arrays.
+    bool skip(size_t depth = 0) {
+        space();
+        if (at_ >= size_ || depth > MaxDepth) return false;
+        const char c = data_[at_];
+        if (c == '"') {
+            char ignored[CommandPayloadCapacity + 1];
+            return string(ignored, sizeof(ignored));
+        }
+        if (c == '{' || c == '[') {
+            const char close = c == '{' ? '}' : ']';
+            ++at_;
+            if (take(close)) return true;
+            do {
+                if (c == '{') {
+                    char key[KeyCapacity]{};
+                    if (!string(key, sizeof(key)) || !take(':')) return false;
+                }
+                if (!skip(depth + 1)) return false;
+            } while (take(','));
+            return take(close);
+        }
+        const size_t start = at_;
+        while (at_ < size_ && std::strchr("-+.eE0123456789truefalsn", data_[at_])) ++at_;
+        return at_ > start;
+    }
 
 private:
     const char* data_;
     size_t size_, at_ = 0;
 };
-bool parseParams(Reader& in, bool& hasNode, char* node, size_t capacity) {
+// Implemented commands take at most node_id. Other keys are only skipped here: a reserved
+// type with its own params must still be answered unsupported, not invalid.
+bool parseParams(Reader& in, bool& hasNode, bool& other, char* node, size_t capacity) {
     if (!in.take('{')) return false;
     if (in.take('}')) return true;
     do {
-        char key[16]{};
+        char key[KeyCapacity]{};
         if (!in.string(key, sizeof(key)) || !in.take(':')) return false;
-        if (std::strcmp(key, "node_id") != 0 || hasNode || !in.string(node, capacity)) return false;
-        hasNode = true;
+        if (std::strcmp(key, "node_id") == 0 && !hasNode) {
+            hasNode = true;
+            if (!in.string(node, capacity)) return false;
+        } else {
+            other = true;
+            if (!in.skip()) return false;
+        }
     } while (in.take(','));
     return in.take('}');
 }
@@ -135,13 +169,14 @@ ParseResult parseCommand(const char* payload, size_t size, Command& command) {
     bool type = false;
     bool params = false;
     bool hasNode = false;
+    bool otherParams = false;
     bool ok = true;
     char typeName[TypeCapacity]{};
     char node[NodeIdDigits + 2]{};
     if (!in.take('{')) return ParseResult::Unreadable;
     // Keep reading after a bad field so that a readable command_id can still be answered.
     do {
-        char key[16]{};
+        char key[KeyCapacity]{};
         if (!in.string(key, sizeof(key)) || !in.take(':')) {
             ok = false;
             break;
@@ -158,7 +193,7 @@ ParseResult parseCommand(const char* payload, size_t size, Command& command) {
             type = in.string(typeName, sizeof(typeName));
             ok = ok && type;
         } else if (std::strcmp(key, "params") == 0 && !params) {
-            params = parseParams(in, hasNode, node, sizeof(node));
+            params = parseParams(in, hasNode, otherParams, node, sizeof(node));
             ok = ok && params;
         } else {
             ok = false;
@@ -180,7 +215,7 @@ ParseResult parseCommand(const char* payload, size_t size, Command& command) {
         command.type = CommandType::NodeRevoke;
     else
         return ParseResult::Unsupported;
-    if (needsNode != hasNode || (hasNode && !parseNode(node, command.node)))
+    if (otherParams || needsNode != hasNode || (hasNode && !parseNode(node, command.node)))
         return ParseResult::Invalid;
     return ParseResult::Ok;
 }
@@ -226,9 +261,9 @@ bool formatResult(const char* id, CommandStatus status, CommandReason reason, ch
 CommandRunner::CommandRunner(PairingHost& pairing, PersistentStore& store, Clock& clock)
     : pairing_(pairing), store_(store), clock_(clock) {}
 
-CommandRunner::Entry* CommandRunner::find(const char* id) {
+CommandRunner::Entry* CommandRunner::find(uint64_t device, const char* id) {
     for (auto& entry : entries_)
-        if (entry.id[0] && std::strcmp(entry.id, id) == 0) return &entry;
+        if (entry.id[0] && entry.device == device && std::strcmp(entry.id, id) == 0) return &entry;
     return nullptr;
 }
 CommandRunner::Entry& CommandRunner::remember(uint64_t device, const char* id, CommandStatus status,
@@ -257,7 +292,7 @@ void CommandRunner::execute(uint64_t device, const char* payload, size_t size, u
     Command command{};
     const ParseResult parsed = parseCommand(payload, size, command);
     if (parsed == ParseResult::Unreadable) return;
-    if (Entry* seen = find(command.id)) {
+    if (Entry* seen = find(device, command.id)) {
         sink.result(seen->device, seen->id, seen->status, seen->reason);
         return;
     }

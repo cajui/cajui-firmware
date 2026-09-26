@@ -62,25 +62,47 @@ private:
     std::unique_ptr<cajui::Forwarder> forwarder_;
     std::unique_ptr<cajui::StateReporter> reporter_;
     cajui::CommandRunner commandRunner_{pairing_, store_, clock_};
-    // Publishes command results; counts them so a pass waits for the client lock once.
+    // Command results wait in a small outbox: one command can produce up to three (a
+    // superseded or closed accept plus its own), and each publication can wait for the
+    // client's lock, so the loop publishes at most one per pass.
     class Results final : public cajui::ResultSink {
     public:
         explicit Results(MqttUplink& uplink) : uplink_(uplink) {}
         void result(uint64_t device, const char* id, cajui::CommandStatus status,
                     cajui::CommandReason reason) override {
-            char payload[cajui::ResultCapacity]{};
+            Pending& slot = outbox_[(head_ + count_) % Capacity];
             size_t size = 0;
-            ++sent;
-            if (!cajui::formatResult(id, status, reason, payload, sizeof(payload), size) ||
-                !uplink_.publishResult(device, payload))
+            if (count_ == Capacity || !cajui::formatResult(id, status, reason, slot.payload,
+                                                           sizeof(slot.payload), size)) {
                 Serial.printf("CJAPP COMMAND result_dropped id=%s\n", id);
-            else
-                Serial.printf("CJAPP COMMAND id=%s status=%u reason=%u\n", id, unsigned(status),
-                              unsigned(reason));
+                return;
+            }
+            slot.device = device;
+            slot.generation = generation;
+            ++count_;
+            Serial.printf("CJAPP COMMAND id=%s status=%u reason=%u\n", id, unsigned(status),
+                          unsigned(reason));
         }
-        unsigned sent = 0;
+        bool empty() const { return count_ == 0; }
+        // Publishes the oldest result; a refused one waits for a later pass.
+        void flush() {
+            const Pending& next = outbox_[head_];
+            if (!uplink_.publishResult(next.device, next.payload, next.generation) &&
+                next.generation == uplink_.generation() && uplink_.ready())
+                return;
+            head_ = (head_ + 1) % Capacity;
+            --count_;
+        }
+        uint32_t generation = 0; // Of the command being run.
 
     private:
+        static constexpr size_t Capacity = 4;
+        struct Pending {
+            uint64_t device = 0;
+            uint32_t generation = 0;
+            char payload[cajui::ResultCapacity]{};
+        } outbox_[Capacity]{};
+        size_t head_ = 0, count_ = 0;
         MqttUplink& uplink_;
     } results_{uplink_};
     void runCommands();
@@ -212,12 +234,16 @@ bool ReceiverApp::nodeStatus(uint64_t node, cajui::NodeStatus& status) {
 // Called under the lock while listening: revocation writes flash. One command per pass
 // keeps the loop's work bounded; a pending accept is resolved as the pairing progresses.
 void ReceiverApp::runCommands() {
+    // Earlier results go out first, so new commands never pile up behind a full outbox.
+    if (!results_.empty()) return;
     MqttUplink::Incoming incoming{};
     if (uplink_.nextCommand(incoming)) {
         incoming.payload[incoming.size] = 0;
+        results_.generation = incoming.generation;
         commandRunner_.execute(incoming.device, incoming.payload, incoming.size,
                                incoming.receivedAt, results_);
     }
+    results_.generation = uplink_.generation();
     commandRunner_.poll(results_);
 }
 // Called under the lock right after an acknowledged DATA frame.
@@ -392,9 +418,14 @@ void ReceiverApp::loop() {
         // State lives in RAM and goes to the client's outbox, never flash. Each enqueue can
         // wait for the client's lock up to its network timeout: at most one per loop pass,
         // so a pass that published a sample leaves state for the next one.
-        results_.sent = 0;
-        if (forwarder_ && listening && !published) runCommands();
-        if (reporter_ && listening && !published && !results_.sent) reporter_->poll();
+        if (forwarder_ && listening && !published) {
+            runCommands();
+            if (!results_.empty()) {
+                results_.flush(); // This pass's one wait for the client lock.
+                published = true;
+            }
+        }
+        if (reporter_ && listening && !published) reporter_->poll();
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);

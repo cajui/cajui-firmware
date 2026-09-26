@@ -75,6 +75,7 @@ bool MqttUplink::startMqtt(const cajui::UplinkConfig& config, uint64_t device) {
 }
 bool MqttUplink::restart(const cajui::UplinkConfig& config, uint64_t device) {
     stopMqtt();
+    generation_.fetch_add(1);
     if (&config != &settings_) settings_ = config;
     device_ = device;
     char clientId[sizeof("cajui-rx-") + 16]{};
@@ -178,6 +179,7 @@ void MqttUplink::receive(const esp_mqtt_event_t& event) {
     Incoming incoming{};
     if (!cajui::parseCommandTopic(topic, settings_.username, incoming.device)) return;
     incoming.receivedAt = millis();
+    incoming.generation = generation_.load();
     incoming.size = size_t(event.data_len);
     std::memcpy(incoming.payload, event.data, incoming.size);
     xQueueSend(commands_, &incoming, 0);
@@ -185,15 +187,16 @@ void MqttUplink::receive(const esp_mqtt_event_t& event) {
 bool MqttUplink::nextCommand(Incoming& incoming) {
     return commands_ && xQueueReceive(commands_, &incoming, 0) == pdTRUE;
 }
-bool MqttUplink::publishResult(uint64_t device, const char* payload) {
+bool MqttUplink::publishResult(uint64_t device, const char* payload, uint32_t generation) {
+    // settings_ changes only under the mutex, while the client is replaced.
+    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return false;
     char topic[cajui::TopicCapacity]{};
-    if (!cajui::formatManageTopic(settings_.username, device, cajui::ManageTopic::Results, topic,
-                                  sizeof(topic)) ||
-        !mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE)
-        return false;
-    const int id = client_ && online_.load() && managed_.load()
-                       ? esp_mqtt_client_enqueue(client_, topic, payload, 0, QoS, 0, true)
-                       : -1;
+    const int id =
+        generation == generation_.load() && client_ && online_.load() && managed_.load() &&
+                cajui::formatManageTopic(settings_.username, device, cajui::ManageTopic::Results,
+                                         topic, sizeof(topic))
+            ? esp_mqtt_client_enqueue(client_, topic, payload, 0, QoS, 0, true)
+            : -1;
     rememberStateId(id);
     xSemaphoreGive(mutex_);
     return id > 0;

@@ -46,6 +46,17 @@ void test_commands_parse_strictly() {
         ParseResult::Unsupported,
         parse(R"({"version":1,"command_id":"x","type":"parameters.set","params":{}})", c));
     TEST_ASSERT_EQUAL_STRING("x", c.id);
+    // Reserved types with their own params are unsupported, not invalid.
+    EXPECT_RESULT(
+        ParseResult::Unsupported,
+        parse(
+            R"({"version":1,"command_id":"x","type":"parameters.set","params":{"interval_s":60,"power_dbm":-9}})",
+            c));
+    EXPECT_RESULT(
+        ParseResult::Unsupported,
+        parse(
+            R"({"version":1,"command_id":"x","type":"firmware.install","params":{"url":"http://c/f.cjfw","size":1.5e6,"ok":true,"hash":null,"parts":[{"a":[1,2]}]}})",
+            c));
 }
 void test_bad_commands_are_invalid_or_unreadable() {
     const char* invalid[] = {
@@ -69,7 +80,9 @@ void test_bad_commands_are_invalid_or_unreadable() {
                                                                                     // one.
         R"({"version":1,"command_id":"x","type":"pairing.open","params":[]})",
         R"({"version":1,"command_id":"x","type":"pairing.open","params":{})",
-        R"({"version":1,"command_id":"x","type":"a-type-name-too-long","params":{}})",
+        R"({"version":1,"command_id":"x","type":"a-type-name-longer-than-any-command","params":{}})",
+        R"({"version":1,"command_id":"x","type":"pairing.open","params":{"interval_s":60}})",
+        R"({"version":1,"command_id":"x","type":"pairing.open","params":{"deep":[[[[[[1]]]]]]}})",
     };
     size_t index = 0;
     for (const char* payload : invalid) {

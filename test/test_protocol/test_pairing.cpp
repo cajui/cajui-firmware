@@ -1227,6 +1227,9 @@ void test_commands_are_rejected_by_device_age_and_shape() {
     EXPECT_OUTCOME(
         CommandStatus::Rejected, CommandReason::Invalid,
         rig.send(R"({"version":2,"command_id":"old","type":"pairing.open","params":{}})"));
+    // The same command_id for another device is another command.
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::UnknownNode,
+                   rig.send(command("old", "pairing.open"), 77));
     const std::string unreadable = R"({"version":1,"type":"pairing.open","params":{}})";
     rig.runner.execute(rig.receiver(), unreadable.data(), unreadable.size(), rig.pair.clock.time,
                        rig.sink);

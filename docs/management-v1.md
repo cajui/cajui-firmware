@@ -157,8 +157,10 @@ specified with the protocol and update changes that carry them.
 The MQTT client's callback only copies a command into a bounded queue; the receiver's
 loop executes it while it is listening, under the same lock the setup page uses, so page
 and channel actions never interleave and the callback never waits for that lock. A
-command not executed within 5 seconds (the queue is full, or the receiver is
-transmitting or recovering) is rejected with `busy`. A command that arrives in admin mode
+command not executed within 5 seconds (the receiver was transmitting or recovering) is
+rejected with `busy`. A command that arrives while that queue is full is dropped without a
+result, since answering would mean publishing from the client's task; its sender treats it
+as not delivered. A command that arrives in admin mode
 is not received at all, because admin mode has no MQTT client.
 
 The result goes to the `results` topic of the command's `device_id`. A command addressed

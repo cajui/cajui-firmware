@@ -50,13 +50,17 @@ public:
     struct Incoming {
         uint64_t device;
         uint32_t receivedAt;
+        uint32_t generation; // Of the client that received it; see publishResult.
         size_t size;
         char payload[cajui::CommandPayloadCapacity + 1];
     };
     // Pops one received command without waiting; false when none is queued.
     bool nextCommand(Incoming&);
-    // Queues a non-retained QoS 1 result; false when not accepted.
-    bool publishResult(uint64_t device, const char* payload);
+    // Queues a non-retained QoS 1 result; false when not accepted. A result for a command
+    // received by an earlier client (other settings) is dropped, never sent under the new
+    // identity.
+    bool publishResult(uint64_t device, const char* payload, uint32_t generation);
+    uint32_t generation() const { return generation_.load(); }
     static bool wifiConnected();
 
 private:
@@ -66,7 +70,7 @@ private:
     SemaphoreHandle_t mutex_ = nullptr;
     TaskHandle_t restarter_ = nullptr;
     std::atomic<bool> online_{false}, managed_{true};
-    std::atomic<uint32_t> session_{0};
+    std::atomic<uint32_t> session_{0}, generation_{0};
     // Message IDs of management publications, whose PUBACKs must not reach the forwarder.
     std::atomic<int> stateIds_[StateIds]{};
     std::atomic<size_t> nextStateId_{0};
