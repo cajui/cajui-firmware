@@ -7,6 +7,9 @@ namespace cajui {
 namespace {
 using Text = TextBuffer;
 constexpr size_t NodeIdDigits = 16, TypeCapacity = 16;
+// "version" is a small integer: more digits than this cannot be 1 and are refused.
+constexpr size_t MaxIntegerDigits = 9;
+constexpr uint32_t DecimalBase = 10;
 
 bool idChar(char c, bool first) {
     const bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -68,8 +71,9 @@ public:
         space();
         const size_t start = at_;
         uint32_t result = 0;
-        while (at_ < size_ && data_[at_] >= '0' && data_[at_] <= '9' && at_ - start < 9)
-            result = result * 10 + uint32_t(data_[at_++] - '0');
+        while (at_ < size_ && data_[at_] >= '0' && data_[at_] <= '9' &&
+               at_ - start < MaxIntegerDigits)
+            result = result * DecimalBase + uint32_t(data_[at_++] - '0');
         value = result;
         // JSON forbids leading zeros; a longer number is refused rather than truncated.
         return at_ > start && !(data_[start] == '0' && at_ - start > 1) &&
@@ -126,8 +130,14 @@ ParseResult parseCommand(const char* payload, size_t size, Command& command) {
     command = Command{};
     if (!payload || size > CommandPayloadCapacity) return ParseResult::Unreadable;
     Reader in(payload, size);
-    bool version = false, id = false, type = false, params = false, hasNode = false, ok = true;
-    char typeName[TypeCapacity]{}, node[NodeIdDigits + 2]{};
+    bool version = false;
+    bool id = false;
+    bool type = false;
+    bool params = false;
+    bool hasNode = false;
+    bool ok = true;
+    char typeName[TypeCapacity]{};
+    char node[NodeIdDigits + 2]{};
     if (!in.take('{')) return ParseResult::Unreadable;
     // Keep reading after a bad field so that a readable command_id can still be answered.
     do {
@@ -177,9 +187,12 @@ ParseResult parseCommand(const char* payload, size_t size, Command& command) {
 
 bool parseCommandTopic(const char* topic, const char* source, uint64_t& device) {
     if (!topic || !source) return false;
-    static const char Prefix[] = "manage/v1/", Suffix[] = "/commands";
-    const size_t prefix = sizeof(Prefix) - 1, suffix = sizeof(Suffix) - 1;
-    const size_t length = std::strlen(topic), sourceLength = std::strlen(source);
+    static const char Prefix[] = "manage/v1/";
+    static const char Suffix[] = "/commands";
+    const size_t prefix = sizeof(Prefix) - 1;
+    const size_t suffix = sizeof(Suffix) - 1;
+    const size_t length = std::strlen(topic);
+    const size_t sourceLength = std::strlen(source);
     if (length != prefix + sourceLength + 1 + NodeIdDigits + suffix ||
         std::strncmp(topic, Prefix, prefix) != 0 ||
         std::strncmp(topic + prefix, source, sourceLength) != 0 ||

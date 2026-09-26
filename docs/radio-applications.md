@@ -151,6 +151,16 @@ frames accepted since the receiver started. A broker whose ACL lacks the managem
 topics drops them (Mosquitto 2.0.22) or refuses the connection; on a refusal as not
 authorized a separate task reconnects without the will, and management publications stay
 off until the next restart. Grant the receiver's user the topics listed in the contract.
+The receiver also subscribes to its `commands` topic and runs `pairing.open`,
+`pairing.accept`, `pairing.close` and `node.revoke` with the same effect as the setup
+page's buttons, one per loop pass, under the same lock and only while listening. The MQTT
+task only copies a command into a four-entry queue; retained and oversized commands are
+dropped there. Results go to the `results` topic; `CJAPP COMMAND id=<id> status=<n>
+reason=<n>` logs each one. Observed on the bench receiver with Mosquitto 2.0.22: opening
+and closing pairing, a rejected accept (`not_requested`), revoking an unknown node
+(`unknown_node`), a repeated `command_id` answered from memory, a transmitter command
+(`unsupported`), an invalid version (`invalid`), and a retained command ignored after a
+restart. Accepting and revoking a real transmitter need its button and were not exercised.
 Observed on a Heltec WiFi LoRa 32 V3 with Mosquitto 2.0.22: retained state for the receiver
 and its transmitter after connecting, receiver state again a minute later, and the will's
 `offline` about 90 seconds after the receiver was held in reset, then `online` on return.

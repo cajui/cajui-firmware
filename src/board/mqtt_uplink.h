@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include "cajui_command.h"
 #include "cajui_manage.h"
 #include "cajui_uplink.h"
 #include <freertos/FreeRTOS.h>
@@ -45,12 +46,23 @@ public:
     bool ready() override { return online_.load() && managed_.load(); }
     uint32_t session() override { return session_.load(); }
     bool publishRetained(const char* topic, const char* payload, size_t size) override;
+    // A command received on this receiver's commands topic, copied out of the client's task.
+    struct Incoming {
+        uint64_t device;
+        uint32_t receivedAt;
+        size_t size;
+        char payload[cajui::CommandPayloadCapacity + 1];
+    };
+    // Pops one received command without waiting; false when none is queued.
+    bool nextCommand(Incoming&);
+    // Queues a non-retained QoS 1 result; false when not accepted.
+    bool publishResult(uint64_t device, const char* payload);
     static bool wifiConnected();
 
 private:
     static constexpr size_t StateIds = 8;
     esp_mqtt_client_handle_t client_ = nullptr;
-    QueueHandle_t acks_ = nullptr;
+    QueueHandle_t acks_ = nullptr, commands_ = nullptr;
     SemaphoreHandle_t mutex_ = nullptr;
     TaskHandle_t restarter_ = nullptr;
     std::atomic<bool> online_{false}, managed_{true};
@@ -61,11 +73,12 @@ private:
     // Kept for the restart without the will; wiped on destruction.
     cajui::UplinkConfig settings_{};
     uint64_t device_ = 0;
-    char availability_[cajui::TopicCapacity]{};
+    char availability_[cajui::TopicCapacity]{}, commandFilter_[cajui::TopicCapacity]{};
     void stopMqtt();
     bool restart(const cajui::UplinkConfig&, uint64_t device);
     int enqueueRetained(const char* topic, const char* payload);
     void rememberStateId(int id);
+    void receive(const esp_mqtt_event_t&);
     bool takeStateId(int id);
     static void restartTask(void* self);
     static void onEvent(void* self, esp_event_base_t, int32_t event, void* data);

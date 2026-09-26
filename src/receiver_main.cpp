@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include "cajui_application.h"
+#include "cajui_command.h"
 #include "cajui_device.h"
 #include "cajui_manage.h"
 #include "cajui_nvs.h"
@@ -60,6 +61,29 @@ private:
     SetupPortal portal_{store_, uplink_, uplinkBlob_, *this, lock_, entropy_};
     std::unique_ptr<cajui::Forwarder> forwarder_;
     std::unique_ptr<cajui::StateReporter> reporter_;
+    cajui::CommandRunner commandRunner_{pairing_, store_, clock_};
+    // Publishes command results; counts them so a pass waits for the client lock once.
+    class Results final : public cajui::ResultSink {
+    public:
+        explicit Results(MqttUplink& uplink) : uplink_(uplink) {}
+        void result(uint64_t device, const char* id, cajui::CommandStatus status,
+                    cajui::CommandReason reason) override {
+            char payload[cajui::ResultCapacity]{};
+            size_t size = 0;
+            ++sent;
+            if (!cajui::formatResult(id, status, reason, payload, sizeof(payload), size) ||
+                !uplink_.publishResult(device, payload))
+                Serial.printf("CJAPP COMMAND result_dropped id=%s\n", id);
+            else
+                Serial.printf("CJAPP COMMAND id=%s status=%u reason=%u\n", id, unsigned(status),
+                              unsigned(reason));
+        }
+        unsigned sent = 0;
+
+    private:
+        MqttUplink& uplink_;
+    } results_{uplink_};
+    void runCommands();
     // The last frame accepted from each node since this start, for its management state.
     struct LastFrame {
         uint64_t node = 0, counter = 0;
@@ -147,6 +171,7 @@ void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
     status.pairingRemainingS = pairing_.remainingMs() / 1000;
     status.requests = pairing_.candidates();
     status.requestCount = pairing_.candidateCount();
+    status.commands = true;
 }
 size_t ReceiverApp::nodes(uint64_t* output, size_t capacity) {
     cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
@@ -183,6 +208,17 @@ bool ReceiverApp::nodeStatus(uint64_t node, cajui::NodeStatus& status) {
         status.receiverUptimeS = frame.uptimeS;
     }
     return true;
+}
+// Called under the lock while listening: revocation writes flash. One command per pass
+// keeps the loop's work bounded; a pending accept is resolved as the pairing progresses.
+void ReceiverApp::runCommands() {
+    MqttUplink::Incoming incoming{};
+    if (uplink_.nextCommand(incoming)) {
+        incoming.payload[incoming.size] = 0;
+        commandRunner_.execute(incoming.device, incoming.payload, incoming.size,
+                               incoming.receivedAt, results_);
+    }
+    commandRunner_.poll(results_);
 }
 // Called under the lock right after an acknowledged DATA frame.
 void ReceiverApp::recordFrame() {
@@ -356,7 +392,9 @@ void ReceiverApp::loop() {
         // State lives in RAM and goes to the client's outbox, never flash. Each enqueue can
         // wait for the client's lock up to its network timeout: at most one per loop pass,
         // so a pass that published a sample leaves state for the next one.
-        if (reporter_ && listening && !published) reporter_->poll();
+        results_.sent = 0;
+        if (forwarder_ && listening && !published) runCommands();
+        if (reporter_ && listening && !published && !results_.sent) reporter_->poll();
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);

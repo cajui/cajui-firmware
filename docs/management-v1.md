@@ -1,8 +1,7 @@
 # MQTT management channel v1
 
-Draft contract. `runtime_rx` implements availability and state; commands are not
-implemented yet, so the receiver does not subscribe to them and offers no
-`capabilities`. It lets a receiver report its own state and the
+Draft contract, implemented by `runtime_rx`: availability, state, and the `pairing.*` and
+`node.revoke` commands (`capabilities: ["pairing", "revoke"]`). It lets a receiver report its own state and the
 state of its transmitters, and lets an authorized MQTT client ask it for an action. It
 sits next to the [telemetry contract](radio-applications.md#forwarding-to-mqtt), which it
 does not change: a consumer that reads only telemetry keeps working.
@@ -51,7 +50,9 @@ The receiver connects with a clean session and subscribes to
 offline are therefore dropped by the broker, never executed late; a client that gets no
 result treats the command as not delivered. A command delivered with the retain flag is
 ignored: broker ACLs cannot forbid retaining, and a retained command would run again
-after every reconnection.
+after every reconnection. MQTT sets that flag only on the copy a new subscription receives,
+so a command published with retain while the receiver is connected still runs once, live;
+its later redeliveries are ignored. Publishers must not retain commands.
 
 ## State
 
@@ -191,8 +192,10 @@ Reasons:
 | `full` | No enrollment slot is left. |
 | `superseded` | A later `pairing.accept` replaced this offer before the node confirmed. |
 | `storage` | The receiver could not persist the change. |
+| `failed` | The receiver could not complete the action for another reason (for example, no randomness for new keys). |
 
-The receiver keeps the results of its last 8 commands in RAM and answers a repeated
+The receiver runs at most one command per loop pass. It keeps the results of its last 8
+commands in RAM and answers a repeated
 `command_id` with the stored result instead of executing it again, so a QoS 1 duplicate
 is harmless. A command whose `command_id` cannot be read gets no result.
 
