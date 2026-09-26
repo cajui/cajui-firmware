@@ -71,7 +71,7 @@ contracts and link here.
 
 [Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
 [Persistent storage](docs/persistence.md) · [Radio applications](docs/radio-applications.md) ·
-[Firmware updates](docs/updates.md)
+[Firmware updates](docs/updates.md) · [MQTT management channel (draft)](docs/management-v1.md)
 
 ## Run tests
 
