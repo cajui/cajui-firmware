@@ -18,6 +18,9 @@ struct DiscoveryItem {
     Entity entity = Entity::Temperature;
     uint32_t intervalS = 0; // The transmitter's expected interval, for expire_after.
 };
+// Home Assistant accepts only [A-Za-z0-9_-] in a topic's node level: a source with '.' or
+// ':' (valid for telemetry) cannot be announced.
+bool validDiscoverySource(const char* source);
 bool formatDiscoveryTopic(const char* source, const DiscoveryItem&, char* output, size_t capacity);
 bool formatDiscovery(const char* source, uint64_t receiver, const DiscoveryItem&, char* output,
                      size_t capacity, size_t& size);
@@ -38,8 +41,10 @@ public:
     bool poll();
 
 private:
+    static constexpr uint8_t RefusalBackoffPasses = 50;
     struct Node {
         uint64_t node = 0;
+        uint32_t seen = 0; // Order of the last sample, to reuse the stalest slot.
         uint16_t sensor = 0;
         uint32_t intervalS = 0;
         uint8_t known = 0, published = 0; // Bits of Entity::Temperature..Snr.
@@ -51,7 +56,8 @@ private:
     char payload_[DiscoveryCapacity]{};
     Node nodes_[BindingCapacity]{};
     uint8_t receiverPublished_ = 0;
-    uint32_t session_ = 0;
+    uint32_t session_ = 0, seen_ = 0;
+    uint8_t backoff_ = 0;
     bool valid_ = false;
     bool publish(const DiscoveryItem&);
 };

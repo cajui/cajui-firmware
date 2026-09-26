@@ -10,7 +10,6 @@ namespace cajui {
 namespace {
 constexpr uint8_t UplinkMagic[4] = {'C', 'J', 'U', 'P'};
 constexpr uint8_t UplinkVersion = 1;
-constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 7 days.
 constexpr int32_t MilliPerUnit = 1000;
 bool alnum(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');

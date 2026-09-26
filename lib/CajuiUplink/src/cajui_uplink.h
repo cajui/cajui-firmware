@@ -39,6 +39,7 @@ bool saveUplink(AtomicBlob&, const UplinkConfig&);
 // Cajuí Central MQTT telemetry contract, version 1:
 // topic telemetry/v1/<source_id>/<device_id>/samples, QoS 1, retain false.
 constexpr size_t TopicCapacity = 128, PayloadCapacity = 1536;
+constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 7 days.
 bool formatTopic(const char* source, uint64_t device, char* output, size_t capacity);
 // sample_id is "<generation>.<counter>": stable across retries and unique per acquisition
 // for a credential. measured_at is omitted because the receiver does not know it. When the

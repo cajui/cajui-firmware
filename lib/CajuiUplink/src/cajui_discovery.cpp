@@ -43,10 +43,16 @@ bool radio(Entity entity) {
 }
 } // namespace
 
+bool validDiscoverySource(const char* source) {
+    if (!source || !validIdentity(source)) return false;
+    for (; *source; ++source)
+        if (*source == '.' || *source == ':') return false;
+    return true;
+}
 bool formatDiscoveryTopic(const char* source, const DiscoveryItem& item, char* output,
                           size_t capacity) {
     const Kind* k = kind(item.entity);
-    if (!source || !validIdentity(source) || !k || !output || !capacity) return false;
+    if (!validDiscoverySource(source) || !k || !output || !capacity) return false;
     Text text(output, capacity);
     text.format("homeassistant/sensor/%s/%016" PRIx64 "_%s", source, item.device, k->object);
     if (!onReceiver(item.entity) && !radio(item.entity)) text.format("_%u", unsigned(item.sensor));
@@ -59,9 +65,12 @@ bool formatDiscovery(const char* source, uint64_t receiver, const DiscoveryItem&
     size = 0;
     const Kind* k = kind(item.entity);
     const bool own = onReceiver(item.entity);
-    if (!source || !validIdentity(source) || !k || !output || !capacity ||
+    if (!validDiscoverySource(source) || !k || !output || !capacity ||
         (!own && item.intervalS == 0) || (own && item.device != receiver))
         return false;
+    // Telemetry clamps the interval the same way; the product cannot overflow.
+    const uint32_t interval =
+        item.intervalS > MaxExpectedInterval ? MaxExpectedInterval : item.intervalS;
     Text text(output, capacity);
     text.format("{\"name\":\"%s\",\"uniq_id\":\"cajui_%016" PRIx64 "_%s", k->name, item.device,
                 k->object);
@@ -71,7 +80,7 @@ bool formatDiscovery(const char* source, uint64_t receiver, const DiscoveryItem&
         text.format(",\"stat_t\":\"manage/v1/%s/%016" PRIx64 "/state\"", source, item.device);
     else
         text.format(",\"stat_t\":\"telemetry/v1/%s/%016" PRIx64 "/samples\",\"exp_aft\":%" PRIu32,
-                    source, item.device, item.intervalS * ExpiryIntervals);
+                    source, item.device, interval * ExpiryIntervals);
     if (k->deviceClass) text.format(",\"dev_cla\":\"%s\"", k->deviceClass);
     if (k->unit) text.format(",\"unit_of_meas\":\"%s\"", k->unit);
     text.format(",\"stat_cla\":\"measurement\"");
@@ -118,7 +127,7 @@ DiscoveryReporter::DiscoveryReporter(StatePublisher& publisher, uint64_t receive
     setSource(source);
 }
 bool DiscoveryReporter::setSource(const char* source) {
-    if (!source || !validIdentity(source)) {
+    if (!validDiscoverySource(source)) {
         valid_ = false;
         return false;
     }
@@ -129,14 +138,21 @@ bool DiscoveryReporter::setSource(const char* source) {
     return true;
 }
 void DiscoveryReporter::sampleForwarded(const QueuedSample& sample) {
+    // Its own slot, else a free one, else the one seen longest ago: revoked and re-paired
+    // transmitters must not keep new ones from being announced.
     Node* slot = nullptr;
     for (auto& n : nodes_)
         if (n.node == sample.node) slot = &n;
     for (auto& n : nodes_)
         if (!slot && n.node == 0) slot = &n;
-    if (!slot) return; // More nodes than bindings cannot happen; nothing to learn then.
+    if (!slot) {
+        slot = &nodes_[0];
+        for (auto& n : nodes_)
+            if (n.seen < slot->seen) slot = &n;
+    }
     if (slot->node != sample.node) *slot = Node{};
     slot->node = sample.node;
+    slot->seen = ++seen_;
     if (slot->intervalS != sample.data.nextSeconds) slot->published = 0;
     slot->intervalS = sample.data.nextSeconds;
     for (size_t i = 0; i < sample.data.count && i < MaxReadings; ++i) {
@@ -158,8 +174,14 @@ bool DiscoveryReporter::publish(const DiscoveryItem& item) {
            formatDiscovery(source_, receiver_, item, payload_, sizeof(payload_), size) &&
            publisher_.publishRetained(topic_, payload_, size);
 }
+// A refusal still counted as this pass's wait for the client; a run of them backs off so the
+// state reporter keeps its turns.
 bool DiscoveryReporter::poll() {
     if (!valid_ || !publisher_.ready()) return false;
+    if (backoff_) {
+        --backoff_;
+        return false;
+    }
     const uint32_t session = publisher_.session();
     if (session != session_) {
         session_ = session;
@@ -172,7 +194,10 @@ bool DiscoveryReporter::poll() {
         item.device = receiver_;
         item.entity = Entity(unsigned(Entity::WifiRssi) + i);
         // A refused publication is retried on a later pass.
-        if (publish(item)) receiverPublished_ |= uint8_t(1u << i);
+        if (publish(item))
+            receiverPublished_ |= uint8_t(1u << i);
+        else
+            backoff_ = RefusalBackoffPasses;
         return true;
     }
     for (auto& n : nodes_) {
@@ -185,7 +210,10 @@ bool DiscoveryReporter::poll() {
             item.sensor = n.sensor;
             item.entity = Entity(i);
             item.intervalS = n.intervalS;
-            if (publish(item)) n.published |= uint8_t(1u << i);
+            if (publish(item))
+                n.published |= uint8_t(1u << i);
+            else
+                backoff_ = RefusalBackoffPasses;
             return true;
         }
     }

@@ -48,6 +48,11 @@ void test_discovery_topics_sit_under_the_source() {
                     topic(item(Node, Entity::Temperature, 65535, 300), longest.c_str()).c_str()));
     TEST_ASSERT_EQUAL_STRING("<rejected>",
                              topic(item(Node, Entity::Humidity), "bad source").c_str());
+    // Valid for telemetry, illegal in Home Assistant's node level.
+    TEST_ASSERT_EQUAL_STRING("<rejected>", topic(item(Node, Entity::Humidity), "site.rx1").c_str());
+    TEST_ASSERT_EQUAL_STRING("<rejected>", topic(item(Node, Entity::Humidity), "site:rx1").c_str());
+    TEST_ASSERT_FALSE(validDiscoverySource(nullptr));
+    TEST_ASSERT_TRUE(validDiscoverySource("rx_1-a"));
     TEST_ASSERT_EQUAL_STRING("<rejected>", topic(item(Node, Entity(99))).c_str());
     char small[8]{};
     TEST_ASSERT_FALSE(formatDiscoveryTopic("r", item(Node, Entity::Snr), small, sizeof(small)));
@@ -71,6 +76,9 @@ void test_transmitter_measurement_configuration() {
         std::strstr(snr.c_str(), "'equalto', 'radio') | selectattr('metric', 'equalto', 'snr')"));
     TEST_ASSERT_NOT_NULL(std::strstr(snr.c_str(), "\"exp_aft\":180,"));
     TEST_ASSERT_NULL(std::strstr(snr.c_str(), "dev_cla"));
+    // A huge interval is clamped as telemetry does, never wrapped.
+    TEST_ASSERT_NOT_NULL(std::strstr(payload(item(Node, Entity::Snr, 0, 1431655766)).c_str(),
+                                     "\"exp_aft\":1814400,"));
     TEST_ASSERT_NOT_NULL(std::strstr(snr.c_str(), "\"ent_cat\":\"diagnostic\""));
     TEST_ASSERT_NOT_NULL(std::strstr(payload(item(Node, Entity::Humidity, 2, 300)).c_str(),
                                      "\"uniq_id\":\"cajui_000048ca433c776c_humidity_2\""));
@@ -170,19 +178,29 @@ void test_reporter_retries_refusals_and_follows_the_source() {
     publisher.refuse = true;
     TEST_ASSERT_TRUE(reporter.poll()); // It waited for the client even though refused.
     publisher.refuse = false;
+    // Then it steps aside for a while so the state reporter keeps its turns.
+    for (int i = 0; i < 50; ++i) TEST_ASSERT_FALSE(reporter.poll());
     TEST_ASSERT_EQUAL_INT(3, drain(reporter));
     reporter.pause();
     TEST_ASSERT_FALSE(reporter.poll());
     TEST_ASSERT_FALSE(reporter.setSource("bad source"));
+    TEST_ASSERT_FALSE(reporter.setSource("site.rx1"));
     TEST_ASSERT_FALSE(reporter.poll());
     TEST_ASSERT_TRUE(reporter.setSource("receiver-2"));
     publisher.topics.clear();
     TEST_ASSERT_EQUAL_INT(3, drain(reporter));
     TEST_ASSERT_NOT_NULL(std::strstr(publisher.topics.front().c_str(), "/receiver-2/"));
-    // More transmitters than bindings are ignored rather than evicting known ones.
-    for (uint64_t node = 1; node <= BindingCapacity + 2; ++node)
+    // Beyond the slots, the transmitter seen longest ago gives way to a new one.
+    for (uint64_t node = 1; node <= BindingCapacity; ++node)
         reporter.sampleForwarded(sample(node, 300, false));
     TEST_ASSERT_EQUAL_INT(int(BindingCapacity) * 2, drain(reporter));
+    reporter.sampleForwarded(sample(1, 300, false)); // Node 1 is recent again.
+    reporter.sampleForwarded(sample(BindingCapacity + 1, 300, false));
+    publisher.topics.clear();
+    TEST_ASSERT_EQUAL_INT(2, drain(reporter));
+    TEST_ASSERT_NOT_NULL(std::strstr(publisher.topics.front().c_str(), "0000000000000011_"));
+    reporter.sampleForwarded(sample(1, 300, false)); // Still known: nothing new.
+    TEST_ASSERT_EQUAL_INT(0, drain(reporter));
 }
 } // namespace
 

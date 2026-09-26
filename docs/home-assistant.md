@@ -27,14 +27,21 @@ Configurations are retained on `homeassistant/sensor/<source_id>/<object_id>/con
 `<object_id>` built from the device ID and the entity, for example
 `000048ca433c776c_temperature_1`. The receiver publishes them after each connection and
 when a transmitter's interval changes. Removing a transmitter does not remove its
-configurations; delete them in Home Assistant or clear the retained topics.
+configurations; delete them in Home Assistant or clear the retained topics. The same
+applies when a transmitter moves to another receiver or a receiver's broker user changes:
+the configurations left under the old source share the entities' unique IDs, and Home
+Assistant keeps whichever it reads first, so clear the old source's retained topics.
+
+The source must use only letters, digits, `_` and `-`: Home Assistant rejects other
+characters in this level, so a receiver whose broker user contains `.` or `:` publishes
+no configurations (telemetry and state are unaffected).
 
 Placing the source in Discovery's node level lets a broker confine each receiver to its
 own configurations. For a receiver user `<u>`, next to the grants of the
 [management channel](management-v1.md#permissions-and-trust):
 
 ```text
-topic write homeassistant/+/<u>/+/config
+topic write homeassistant/sensor/<u>/+/config
 ```
 
 Home Assistant's account needs `read` on `homeassistant/#`, `telemetry/v1/+/+/samples`,
