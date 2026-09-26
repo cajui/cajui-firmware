@@ -23,6 +23,10 @@ private:
     esp_ota_handle_t handle_ = 0;
     bool open_ = false;
 };
+// Label of the running slot, or null when unknown.
+const char* firmwareSlot();
+// Current update state of the running image: flashed, pending, valid or other.
+const char* firmwareState();
 // Logs version, running slot and whether a previous update was rolled back.
 void reportFirmware();
 // A new image stays on probation after an update: any restart before this call (a crash,

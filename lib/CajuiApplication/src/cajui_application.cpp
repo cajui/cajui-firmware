@@ -117,6 +117,7 @@ void ReceiverController::poll() {
     }
     if (result_ != Result::Ok && result_ != Result::Duplicate) return;
     if (result_ == Result::Duplicate && !duplicates_.allow(node, clock_.nowMs())) return;
+    node_ = node;
     startedAt_ = clock_.nowMs();
     if (!radio_.startTransmit(ack_)) {
         fail();

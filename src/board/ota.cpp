@@ -44,18 +44,25 @@ size_t OtaSink::capacity() {
     const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
     return next ? next->size : 0;
 }
-void reportFirmware() {
+const char* firmwareSlot() {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    return running ? running->label : nullptr;
+}
+const char* firmwareState() {
     const esp_partition_t* running = esp_ota_get_running_partition();
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
     const bool known = running && esp_ota_get_state_partition(running, &state) == ESP_OK;
+    // An image written over USB has no update state: "flashed".
+    return !known || state == ESP_OTA_IMG_UNDEFINED ? "flashed"
+           : state == ESP_OTA_IMG_PENDING_VERIFY    ? "pending"
+           : state == ESP_OTA_IMG_VALID             ? "valid"
+                                                    : "other";
+}
+void reportFirmware() {
+    const char* slot = firmwareSlot();
     const esp_partition_t* invalid = esp_ota_get_last_invalid_partition();
     Serial.printf("CJAPP FIRMWARE version=%u slot=%s state=%s rolled_back=%u\n",
-                  unsigned(FirmwareVersion), running ? running->label : "unknown",
-                  // An image written over USB has no update state: "flashed".
-                  !known || state == ESP_OTA_IMG_UNDEFINED ? "flashed"
-                  : state == ESP_OTA_IMG_PENDING_VERIFY    ? "pending"
-                  : state == ESP_OTA_IMG_VALID             ? "valid"
-                                                           : "other",
+                  unsigned(FirmwareVersion), slot ? slot : "unknown", firmwareState(),
                   unsigned(invalid != nullptr));
 }
 bool confirmFirmware() {

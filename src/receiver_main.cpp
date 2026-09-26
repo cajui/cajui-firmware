@@ -3,12 +3,16 @@
 // Receiver image: listens for enrolled transmitters, queues their samples durably, forwards
 // them to MQTT and serves the setup page. See docs/radio-applications.md.
 #include <Arduino.h>
+#include <WiFi.h>
 #include <esp_random.h>
+#include <esp_timer.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <memory>
 #include "cajui_application.h"
 #include "cajui_device.h"
+#include "cajui_manage.h"
 #include "cajui_nvs.h"
 #include "cajui_pairing.h"
 #include "cajui_provisioning.h"
@@ -22,15 +26,22 @@
 
 namespace {
 using namespace board;
-constexpr uint32_t ConfirmAfterMs = 60000, UpdateRestartDelayMs = 1500;
+constexpr uint32_t ConfirmAfterMs = 60000, UpdateRestartDelayMs = 1500, BindingCheckMs = 1000;
+constexpr char Model[] = "heltec-wifi-lora-32-v3";
+uint32_t uptimeSeconds() {
+    return uint32_t(esp_timer_get_time() / 1000000);
+}
 
-class ReceiverApp final : public ReceiverControl {
+class ReceiverApp final : public ReceiverControl, public cajui::StateSource {
 public:
     ReceiverApp() : store_(records_, cajui::Role::Receiver, deviceId()) {}
     void setup();
     void loop();
     bool applyUplink(const cajui::UplinkConfig&) override;
     void restartForUpdate() override { updateRestart_.store(true); }
+    void receiverStatus(cajui::ReceiverStatus&) override;
+    size_t nodes(uint64_t* output, size_t capacity) override;
+    bool nodeStatus(uint64_t node, cajui::NodeStatus&) override;
 
 private:
     BoardClock clock_;
@@ -48,6 +59,22 @@ private:
     cajui::PairingHost pairing_{store_, entropy_, clock_};
     SetupPortal portal_{store_, uplink_, uplinkBlob_, *this, lock_, entropy_};
     std::unique_ptr<cajui::Forwarder> forwarder_;
+    std::unique_ptr<cajui::StateReporter> reporter_;
+    // The last frame accepted from each node since this start, for its management state.
+    struct LastFrame {
+        uint64_t node = 0, counter = 0;
+        cajui::Link link{};
+        uint32_t uptimeS = 0;
+    } frames_[cajui::BindingCapacity]{};
+    cajui::EnrollmentInfo enrollments_[cajui::BindingCapacity]{};
+    size_t enrollmentCount_ = 0;
+    uint32_t bindingsCheckedAt_ = 0;
+    int8_t power_ = cajui::DefaultPowerDbm;
+    // Reading the update state maps flash: read at start and after a confirmation only.
+    const char* slot_ = nullptr;
+    const char* firmwareState_ = nullptr;
+    uint32_t offlineAt_ = 0;
+    bool offlineAnnounced_ = false;
     std::unique_ptr<cajui::Provisioning> commands_;
     std::unique_ptr<Console> console_;
     bool adminMode_ = false, running_ = false, restartPending_ = false, healthy_ = false,
@@ -57,6 +84,8 @@ private:
     bool reportedOnline_ = false;
     void startForwarding();
     void reportForwarding();
+    void recordFrame();
+    void checkBindings();
     void fault(const char* reason);
 };
 
@@ -71,6 +100,7 @@ void ReceiverApp::startForwarding() {
     }
     if (uplink_.begin(settings, store_.device())) {
         forwarder_.reset(new cajui::Forwarder(uplink_, clock_, store_, settings.username));
+        reporter_.reset(new cajui::StateReporter(uplink_, *this, clock_, settings.username));
         Serial.printf("CJAPP UPLINK started host=%s port=%u source=%s\n", settings.host,
                       unsigned(settings.port), settings.username);
     } else {
@@ -84,13 +114,123 @@ bool ReceiverApp::applyUplink(const cajui::UplinkConfig& settings) {
     {
         Locked held(lock_);
         if (forwarder_) forwarder_->pause();
+        if (reporter_) reporter_->pause();
     }
     const bool started = uplink_.startMqtt(settings, store_.device());
     Locked held(lock_);
+    if (reporter_)
+        reporter_->setSource(settings.username);
+    else if (started)
+        reporter_.reset(new cajui::StateReporter(uplink_, *this, clock_, settings.username));
     if (forwarder_) return forwarder_->setSource(settings.username) && started;
     if (!started) return false;
     forwarder_.reset(new cajui::Forwarder(uplink_, clock_, store_, settings.username));
     return forwarder_->state() != cajui::ForwardState::Failed;
+}
+void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
+    status.device = store_.device();
+    status.model = Model;
+    status.firmwareVersion = FirmwareVersion;
+    status.slot = slot_;
+    status.firmwareState = firmwareState_;
+    status.profile = store_.profile();
+    status.powerDbm = power_;
+    status.uptimeS = uptimeSeconds();
+    status.resetReason = resetReasonName();
+    status.wifiKnown = MqttUplink::wifiConnected();
+    status.wifiRssiDbm = status.wifiKnown ? int16_t(WiFi.RSSI()) : int16_t(0);
+    status.queued = store_.queued();
+    status.queueCapacity = cajui::QueueCapacity;
+    status.published = forwarder_ ? forwarder_->forwarded() : 0;
+    status.retries = forwarder_ ? forwarder_->retries() : 0;
+    status.pairingOpen = pairing_.state() != cajui::HostState::Closed;
+    status.pairingRemainingS = pairing_.remainingMs() / 1000;
+    status.requests = pairing_.candidates();
+    status.requestCount = pairing_.candidateCount();
+}
+size_t ReceiverApp::nodes(uint64_t* output, size_t capacity) {
+    cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
+    const size_t listed = store_.list(list, cajui::BindingCapacity);
+    size_t count = 0;
+    for (size_t i = 0; i < listed; ++i) {
+        bool seen = false;
+        for (size_t j = 0; j < count && !seen; ++j) seen = output[j] == list[i].node;
+        if (!seen && count < capacity) output[count++] = list[i].node;
+    }
+    return count;
+}
+bool ReceiverApp::nodeStatus(uint64_t node, cajui::NodeStatus& status) {
+    cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
+    const size_t listed = store_.list(list, cajui::BindingCapacity);
+    bool found = false, active = false, prepared = false;
+    for (size_t i = 0; i < listed; ++i) {
+        if (list[i].node != node) continue;
+        found = true;
+        active = active || list[i].state == cajui::Enrollment::Active;
+        prepared = prepared || list[i].state == cajui::Enrollment::Prepared;
+    }
+    if (!found) return false;
+    status.node = node;
+    status.receiver = store_.device();
+    status.binding = active     ? cajui::NodeBinding::Active
+                     : prepared ? cajui::NodeBinding::Pending
+                                : cajui::NodeBinding::Revoked;
+    for (const auto& frame : frames_) {
+        if (frame.node != node) continue;
+        status.frameKnown = true;
+        status.counter = frame.counter;
+        status.link = frame.link;
+        status.receiverUptimeS = frame.uptimeS;
+    }
+    return true;
+}
+// Called under the lock right after an acknowledged DATA frame.
+void ReceiverApp::recordFrame() {
+    const uint64_t node = controller_.lastNode();
+    cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
+    const size_t count = store_.list(list, cajui::BindingCapacity);
+    uint64_t counter = 0;
+    // A re-paired node's old generation is revoked by its first frame under the new one, so
+    // the active enrollment with the highest counter is the one that just received.
+    for (size_t i = 0; i < count; ++i)
+        if (list[i].node == node && list[i].state == cajui::Enrollment::Active &&
+            list[i].received > counter)
+            counter = list[i].received;
+    // Its own slot, else a free one, else one of a node whose slot was retired since.
+    uint64_t listed[cajui::BindingCapacity]{};
+    const size_t known = nodes(listed, cajui::BindingCapacity);
+    LastFrame* slot = nullptr;
+    for (auto& frame : frames_)
+        if (frame.node == node) slot = &frame;
+    for (auto& frame : frames_)
+        if (!slot && frame.node == 0) slot = &frame;
+    for (auto& frame : frames_)
+        if (!slot && std::find(listed, listed + known, frame.node) == listed + known) slot = &frame;
+    if (!slot) return; // Unreachable: the node holds one of the BindingCapacity slots.
+    slot->node = node;
+    slot->counter = counter;
+    slot->link = controller_.lastLink();
+    slot->uptimeS = uptimeSeconds();
+    if (reporter_) reporter_->nodeChanged(node);
+}
+// Pairing, the setup page and the USB console change bindings; compare once a second.
+void ReceiverApp::checkBindings() {
+    if (uint32_t(millis() - bindingsCheckedAt_) < BindingCheckMs) return;
+    bindingsCheckedAt_ = millis();
+    cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
+    const size_t count = store_.list(list, cajui::BindingCapacity);
+    bool changed = count != enrollmentCount_;
+    for (size_t i = 0; i < count && !changed; ++i)
+        changed = list[i].node != enrollments_[i].node ||
+                  list[i].generation != enrollments_[i].generation ||
+                  list[i].state != enrollments_[i].state;
+    if (!changed) return;
+    if (reporter_) {
+        for (size_t i = 0; i < enrollmentCount_; ++i) reporter_->nodeChanged(enrollments_[i].node);
+        for (size_t i = 0; i < count; ++i) reporter_->nodeChanged(list[i].node);
+    }
+    std::copy(list, list + count, enrollments_);
+    enrollmentCount_ = count;
 }
 void ReceiverApp::reportForwarding() {
     if (uplink_.connected() != reportedOnline_) {
@@ -125,6 +265,8 @@ void ReceiverApp::fault(const char* reason) {
 void ReceiverApp::setup() {
     startBoard();
     reportFirmware();
+    slot_ = firmwareSlot();
+    firmwareState_ = firmwareState();
     const bool ready = lock_.begin() && uplink_.prepare();
     const cajui::BootRequest request = takeBootRequest();
     const bool opened = records_.begin();
@@ -142,14 +284,16 @@ void ReceiverApp::setup() {
         return;
     }
     if (!ready) return fault("STARTUP");
-    int8_t power = cajui::DefaultPowerDbm;
-    if (cajui::loadPower(radioBlob_, power) == cajui::ReadResult::Error)
+    if (cajui::loadPower(radioBlob_, power_) == cajui::ReadResult::Error) {
         Serial.println("CJAPP POWER config_error"); // The bench default applies.
-    if (!radio_.begin(power)) return fault("RADIO_INIT");
+        power_ = cajui::DefaultPowerDbm;
+    }
+    if (!radio_.begin(power_)) return fault("RADIO_INIT");
     controller_.setPairing(&pairing_);
     if (!controller_.start()) return fault("RECEIVE_START");
     listening_.store(true);
-    Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power));
+    Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power_));
+    enrollmentCount_ = store_.list(enrollments_, cajui::BindingCapacity);
     startForwarding();
     portal_.setPairing(&pairing_);
     setupRunning_ = portal_.start(listening_);
@@ -175,7 +319,7 @@ void ReceiverApp::loop() {
         return;
     }
     const char* failure = nullptr;
-    bool listening = false;
+    bool listening = false, published = false;
     {
         Locked held(lock_);
         const auto before = controller_.state();
@@ -192,6 +336,7 @@ void ReceiverApp::loop() {
             else
                 Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=unknown snr=unknown\n",
                               unsigned(controller_.lastResult()), unsigned(store_.queued()));
+            recordFrame();
         }
         listening = controller_.state() == cajui::ReceiverState::Listening;
         listening_.store(listening);
@@ -199,18 +344,33 @@ void ReceiverApp::loop() {
             failure = "RECEIVER";
         } else if (forwarder_) {
             // Only while listening: forwarding writes flash and must not delay an ACK.
+            const auto before = forwarder_->state();
             forwarder_->poll(listening);
+            published = before != cajui::ForwardState::Waiting &&
+                        forwarder_->state() == cajui::ForwardState::Waiting;
             reportForwarding();
             if (forwarder_->state() == cajui::ForwardState::Failed) failure = "FORWARDER";
         }
         pairing_.poll();
+        checkBindings();
+        // State lives in RAM and goes to the client's outbox, never flash. Each enqueue can
+        // wait for the client's lock up to its network timeout: at most one per loop pass,
+        // so a pass that published a sample leaves state for the next one.
+        if (reporter_ && listening && !published) reporter_->poll();
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);
-    // Give the page a moment to deliver its response before restarting into the update.
+    // Give the page a moment to deliver its response, and the client time to send
+    // "offline", before restarting into the update. Waiting across passes keeps each
+    // pass's blocking within the loop watchdog.
     if (updateRestart_.load() && listening) {
-        delay(UpdateRestartDelayMs);
-        restartInto(cajui::BootRequest::None);
+        if (!offlineAnnounced_) {
+            offlineAnnounced_ = true;
+            offlineAt_ = millis();
+            uplink_.announceOffline();
+        } else if (uint32_t(millis() - offlineAt_) >= UpdateRestartDelayMs) {
+            restartInto(cajui::BootRequest::None);
+        }
     }
     // A minute of healthy operation confirms a freshly updated image; until then any
     // restart returns to the previous one.
@@ -220,6 +380,10 @@ void ReceiverApp::loop() {
         uint32_t(millis() - confirmAttemptAt_) >= ConfirmAfterMs) {
         confirmAttemptAt_ = millis();
         confirmed_ = confirmFirmware();
+        if (confirmed_) {
+            Locked held(lock_); // The reporter reads it under the lock.
+            firmwareState_ = firmwareState();
+        }
     }
     if (!healthy_ && uint32_t(millis() - startedAt_) >= cajui::HealthyRunMs) {
         healthy_ = true;
