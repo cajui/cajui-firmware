@@ -70,6 +70,11 @@ private:
     size_t enrollmentCount_ = 0;
     uint32_t bindingsCheckedAt_ = 0;
     int8_t power_ = cajui::DefaultPowerDbm;
+    // Reading the update state maps flash: read at start and after a confirmation only.
+    const char* slot_ = nullptr;
+    const char* firmwareState_ = nullptr;
+    uint32_t offlineAt_ = 0;
+    bool offlineAnnounced_ = false;
     std::unique_ptr<cajui::Provisioning> commands_;
     std::unique_ptr<Console> console_;
     bool adminMode_ = false, running_ = false, restartPending_ = false, healthy_ = false,
@@ -109,6 +114,7 @@ bool ReceiverApp::applyUplink(const cajui::UplinkConfig& settings) {
     {
         Locked held(lock_);
         if (forwarder_) forwarder_->pause();
+        if (reporter_) reporter_->pause();
     }
     const bool started = uplink_.startMqtt(settings, store_.device());
     Locked held(lock_);
@@ -125,8 +131,8 @@ void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
     status.device = store_.device();
     status.model = Model;
     status.firmwareVersion = FirmwareVersion;
-    status.slot = firmwareSlot();
-    status.firmwareState = firmwareState();
+    status.slot = slot_;
+    status.firmwareState = firmwareState_;
     status.profile = store_.profile();
     status.powerDbm = power_;
     status.uptimeS = uptimeSeconds();
@@ -259,6 +265,8 @@ void ReceiverApp::fault(const char* reason) {
 void ReceiverApp::setup() {
     startBoard();
     reportFirmware();
+    slot_ = firmwareSlot();
+    firmwareState_ = firmwareState();
     const bool ready = lock_.begin() && uplink_.prepare();
     const cajui::BootRequest request = takeBootRequest();
     const bool opened = records_.begin();
@@ -311,7 +319,7 @@ void ReceiverApp::loop() {
         return;
     }
     const char* failure = nullptr;
-    bool listening = false;
+    bool listening = false, published = false;
     {
         Locked held(lock_);
         const auto before = controller_.state();
@@ -336,22 +344,33 @@ void ReceiverApp::loop() {
             failure = "RECEIVER";
         } else if (forwarder_) {
             // Only while listening: forwarding writes flash and must not delay an ACK.
+            const auto before = forwarder_->state();
             forwarder_->poll(listening);
+            published = before != cajui::ForwardState::Waiting &&
+                        forwarder_->state() == cajui::ForwardState::Waiting;
             reportForwarding();
             if (forwarder_->state() == cajui::ForwardState::Failed) failure = "FORWARDER";
         }
         pairing_.poll();
         checkBindings();
-        // State lives in RAM and goes to the client's outbox: no flash write, no wait.
-        if (reporter_ && listening) reporter_->poll();
+        // State lives in RAM and goes to the client's outbox, never flash. Each enqueue can
+        // wait for the client's lock up to its network timeout: at most one per loop pass,
+        // so a pass that published a sample leaves state for the next one.
+        if (reporter_ && listening && !published) reporter_->poll();
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);
-    // Give the page a moment to deliver its response before restarting into the update.
+    // Give the page a moment to deliver its response, and the client time to send
+    // "offline", before restarting into the update. Waiting across passes keeps each
+    // pass's blocking within the loop watchdog.
     if (updateRestart_.load() && listening) {
-        uplink_.announceOffline();
-        delay(UpdateRestartDelayMs);
-        restartInto(cajui::BootRequest::None);
+        if (!offlineAnnounced_) {
+            offlineAnnounced_ = true;
+            offlineAt_ = millis();
+            uplink_.announceOffline();
+        } else if (uint32_t(millis() - offlineAt_) >= UpdateRestartDelayMs) {
+            restartInto(cajui::BootRequest::None);
+        }
     }
     // A minute of healthy operation confirms a freshly updated image; until then any
     // restart returns to the previous one.
@@ -361,6 +380,10 @@ void ReceiverApp::loop() {
         uint32_t(millis() - confirmAttemptAt_) >= ConfirmAfterMs) {
         confirmAttemptAt_ = millis();
         confirmed_ = confirmFirmware();
+        if (confirmed_) {
+            Locked held(lock_); // The reporter reads it under the lock.
+            firmwareState_ = firmwareState();
+        }
     }
     if (!healthy_ && uint32_t(millis() - startedAt_) >= cajui::HealthyRunMs) {
         healthy_ = true;

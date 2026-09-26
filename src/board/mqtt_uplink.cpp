@@ -60,7 +60,9 @@ bool MqttUplink::startMqtt(const cajui::UplinkConfig& config, uint64_t device) {
     if (!cajui::validUplink(config) || !prepare()) return false;
     // Stopping a client can wait for its network task; only this task waits here.
     xSemaphoreTake(mutex_, portMAX_DELAY);
-    // New settings deserve a new attempt with the will.
+    // The old connection says "offline" only if it was allowed management publications;
+    // new settings then deserve a new attempt with the will.
+    stopMqtt();
     managed_.store(true);
     const bool started = restart(config, device);
     xSemaphoreGive(mutex_);

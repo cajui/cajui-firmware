@@ -75,17 +75,20 @@ public:
 
 // Decides when to publish state. The receiver's state goes out after each connection, as
 // soon as a discrete field changes (firmware, radio, pairing), and otherwise every
-// CounterIntervalMs, since its counters (uptime first) always move. A node's state goes out after
-// each connection and whenever nodeChanged() reports it. One publication per poll keeps the loop's
-// work bounded; a refused one is retried after RetryMs.
+// CounterIntervalMs, since its counters (uptime first) always move. A node's state goes out
+// after each connection and whenever nodeChanged() reports it. Discrete changes are looked
+// for at most every CheckMs, so the status is not rebuilt on every loop pass. One
+// publication per poll keeps the loop's work bounded; a refused one is retried after RetryMs.
 class StateReporter final {
 public:
-    static constexpr uint32_t CounterIntervalMs = 60000, RetryMs = 1000;
+    static constexpr uint32_t CounterIntervalMs = 60000, RetryMs = 1000, CheckMs = 250;
     StateReporter(StatePublisher&, StateSource&, Clock&, const char* source);
     StateReporter(const StateReporter&) = delete;
     StateReporter& operator=(const StateReporter&) = delete;
     // A new broker identity: everything is published again under it.
     bool setSource(const char* source);
+    // Publishes nothing until setSource, while the broker connection is being replaced.
+    void pause() { valid_ = false; }
     void nodeChanged(uint64_t node);
     void poll();
 
@@ -107,8 +110,8 @@ private:
     char name_[UsernameCapacity + 1]{};
     char topic_[TopicCapacity]{};
     char payload_[StateCapacity]{};
-    uint32_t session_ = 0, receiverAt_ = 0, retryAt_ = 0;
-    bool valid_ = false, receiverDue_ = false, delayed_ = false;
+    uint32_t session_ = 0, receiverAt_ = 0, retryAt_ = 0, checkedAt_ = 0;
+    bool valid_ = false, receiverDue_ = false, delayed_ = false, checked_ = false;
     Discrete discrete_{};
     uint64_t dirty_[BindingCapacity]{};
     size_t dirtyCount_ = 0;
@@ -116,5 +119,6 @@ private:
     void markAll();
     bool publishReceiver(const ReceiverStatus&);
     bool publishNode(uint64_t node);
+    void publishDirtyNode(uint32_t now);
 };
 } // namespace cajui

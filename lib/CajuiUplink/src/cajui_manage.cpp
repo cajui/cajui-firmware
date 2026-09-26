@@ -179,6 +179,13 @@ void StateReporter::poll() {
     const uint32_t now = clock_.nowMs();
     if (delayed_ && int32_t(now - retryAt_) < 0) return;
     delayed_ = false;
+    if (!receiverDue_ && checked_ && uint32_t(now - checkedAt_) < CheckMs &&
+        uint32_t(now - receiverAt_) < CounterIntervalMs) {
+        publishDirtyNode(now);
+        return;
+    }
+    checked_ = true;
+    checkedAt_ = now;
     ReceiverStatus status{};
     source_.receiverStatus(status);
     Discrete current{};
@@ -206,6 +213,9 @@ void StateReporter::poll() {
         receiverAt_ = now;
         return;
     }
+    publishDirtyNode(now);
+}
+void StateReporter::publishDirtyNode(uint32_t now) {
     if (!dirtyCount_) return;
     if (!publishNode(dirty_[0])) {
         delayed_ = true;

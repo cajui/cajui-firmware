@@ -219,9 +219,13 @@ public:
 class FakeSource final : public StateSource {
 public:
     ReceiverStatus receiver = sampleReceiver();
+    int reads = 0;
     std::vector<uint64_t> known = {0xa1, 0xa2};
     uint64_t missing = 0;
-    void receiverStatus(ReceiverStatus& out) override { out = receiver; }
+    void receiverStatus(ReceiverStatus& out) override {
+        ++reads;
+        out = receiver;
+    }
     size_t nodes(uint64_t* output, size_t capacity) override {
         size_t count = 0;
         for (uint64_t node : known)
@@ -303,24 +307,54 @@ void test_reporter_republishes_counters_once_a_minute_and_changes_at_once() {
     for (const auto& change : changes) {
         SCENARIO(index++);
         change.apply(rig.source.receiver, requests);
-        rig.clock.time += 10;
+        rig.clock.time += StateReporter::CheckMs;
         rig.reporter.poll();
         TEST_ASSERT_EQUAL_STRING(ReceiverTopic, rig.publisher.take().c_str());
         rig.reporter.poll();
         TEST_ASSERT_EQUAL_STRING("<none>", rig.publisher.take().c_str());
     }
     rig.source.receiver.pairingRemainingS = 3; // Counter: waits for the minute.
+    rig.clock.time += StateReporter::CheckMs;
     rig.reporter.poll();
     TEST_ASSERT_EQUAL_STRING("<none>", rig.publisher.take().c_str());
     Candidate conflicted = requests[0];
     conflicted.conflict = true;
     rig.source.receiver.requests = &conflicted;
+    rig.clock.time += StateReporter::CheckMs;
     rig.reporter.poll();
     TEST_ASSERT_EQUAL_STRING(ReceiverTopic, rig.publisher.take().c_str());
     const Candidate other[] = {request(0xb2, -60, false)};
     rig.source.receiver.requests = other;
+    rig.clock.time += StateReporter::CheckMs;
     rig.reporter.poll();
     TEST_ASSERT_EQUAL_STRING(ReceiverTopic, rig.publisher.take().c_str());
+}
+void test_reporter_reads_the_status_at_most_every_check_interval_and_pauses() {
+    ReportRig rig;
+    rig.publisher.connect();
+    rig.polls(5);
+    rig.publisher.clear();
+    const int reads = rig.source.reads;
+    rig.source.receiver.pairingOpen = true;
+    rig.clock.time += StateReporter::CheckMs - 1;
+    rig.polls(50);
+    TEST_ASSERT_EQUAL_INT(reads, rig.source.reads); // No rebuild on every loop pass.
+    TEST_ASSERT_TRUE(rig.publisher.topics.empty());
+    rig.reporter.nodeChanged(0xa1); // Nodes do not wait for the check.
+    rig.reporter.poll();
+    TEST_ASSERT_EQUAL_STRING("manage/v1/receiver-1/00000000000000a1/state",
+                             rig.publisher.take().c_str());
+    rig.clock.time += 1;
+    rig.reporter.poll();
+    TEST_ASSERT_EQUAL_STRING(ReceiverTopic, rig.publisher.take().c_str());
+    rig.reporter.pause(); // The connection is being replaced: nothing, not even on a new session.
+    rig.publisher.connect();
+    rig.clock.time += StateReporter::CounterIntervalMs;
+    rig.polls(5);
+    TEST_ASSERT_TRUE(rig.publisher.topics.empty());
+    TEST_ASSERT_TRUE(rig.reporter.setSource("receiver-1"));
+    rig.polls(5);
+    TEST_ASSERT_EQUAL_size_t(3, rig.publisher.topics.size());
 }
 void test_reporter_publishes_changed_nodes_once_and_bounds_its_list() {
     ReportRig rig;
@@ -414,6 +448,7 @@ void runManageTests() {
     RUN_TEST(test_invalid_node_states_are_rejected);
     RUN_TEST(test_reporter_publishes_everything_after_each_connection);
     RUN_TEST(test_reporter_republishes_counters_once_a_minute_and_changes_at_once);
+    RUN_TEST(test_reporter_reads_the_status_at_most_every_check_interval_and_pauses);
     RUN_TEST(test_reporter_publishes_changed_nodes_once_and_bounds_its_list);
     RUN_TEST(test_reporter_retries_a_refused_publication_later);
     RUN_TEST(test_reporter_switches_source_and_stops_without_a_valid_one);
