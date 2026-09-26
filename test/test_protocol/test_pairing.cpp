@@ -4,6 +4,7 @@
 #include <deque>
 #include <string>
 #include "assertions.h"
+#include "cajui_command.h"
 #include "cajui_pairing.h"
 #include "storage_support.h"
 
@@ -1070,12 +1071,195 @@ void test_receiver_without_pairing_handler_drops_pairing_frames() {
     controller.poll();
     EXPECT_RESULT(ReceiverState::Failed, controller.state());
 }
+// --- Commands of the management channel -------------------------------------------------
+struct Outcome {
+    uint64_t device;
+    std::string id;
+    CommandStatus status;
+    CommandReason reason;
+};
+class RecordingSink final : public ResultSink {
+public:
+    std::deque<Outcome> results;
+    void result(uint64_t device, const char* id, CommandStatus status,
+                CommandReason reason) override {
+        results.push_back(Outcome{device, id, status, reason});
+    }
+    Outcome take() {
+        TEST_ASSERT_FALSE(results.empty());
+        Outcome o = results.front();
+        results.pop_front();
+        return o;
+    }
+};
+std::string command(const char* id, const char* type, uint64_t node = 0) {
+    char params[48] = "{}";
+    if (node)
+        std::snprintf(params, sizeof(params), "{\"node_id\":\"%016llx\"}",
+                      (unsigned long long)node);
+    return std::string("{\"version\":1,\"command_id\":\"") + id + "\",\"type\":\"" + type +
+           "\",\"params\":" + params + "}";
+}
+struct CommandRig {
+    PairRig pair;
+    RecordingSink sink;
+    CommandRunner runner{pair.host, *pair.rx, pair.clock};
+    uint64_t receiver() const { return pair.rx->device(); }
+    Outcome send(const std::string& payload, uint64_t device = 0) {
+        runner.execute(device ? device : receiver(), payload.data(), payload.size(),
+                       pair.clock.time, sink);
+        return sink.take();
+    }
+};
+#define EXPECT_OUTCOME(status_, reason_, outcome)                                                  \
+    do {                                                                                           \
+        const Outcome o_ = (outcome);                                                              \
+        EXPECT_RESULT(status_, o_.status);                                                         \
+        EXPECT_RESULT(reason_, o_.reason);                                                         \
+    } while (0)
+
+void test_remote_pairing_reports_pending_then_applied() {
+    CommandRig rig;
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::Closed,
+                   rig.send(command("early", "pairing.accept", 2)));
+    const Outcome opened = rig.send(command("open-1", "pairing.open"));
+    TEST_ASSERT_EQUAL_UINT64(rig.receiver(), opened.device);
+    TEST_ASSERT_EQUAL_STRING("open-1", opened.id.c_str());
+    EXPECT_RESULT(CommandStatus::Applied, opened.status);
+    TEST_ASSERT_TRUE(rig.pair.client.start());
+    rig.pair.run(1);
+    // Opening again keeps the request already listed.
+    EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
+                   rig.send(command("open-2", "pairing.open")));
+    TEST_ASSERT_EQUAL_size_t(1, rig.pair.host.candidateCount());
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::NotRequested,
+                   rig.send(command("other", "pairing.accept", 9)));
+    EXPECT_OUTCOME(CommandStatus::Pending, CommandReason::None,
+                   rig.send(command("add", "pairing.accept", 2)));
+    // A QoS 1 duplicate gets the stored answer, without a second offer.
+    EXPECT_OUTCOME(CommandStatus::Pending, CommandReason::None,
+                   rig.send(command("add", "pairing.accept", 2)));
+    rig.runner.poll(rig.sink);
+    TEST_ASSERT_TRUE(rig.sink.results.empty());
+    rig.pair.run(40);
+    rig.runner.poll(rig.sink);
+    const Outcome done = rig.sink.take();
+    TEST_ASSERT_EQUAL_STRING("add", done.id.c_str());
+    EXPECT_RESULT(CommandStatus::Applied, done.status);
+    Binding atReceiver{};
+    TEST_ASSERT_TRUE(rig.pair.rx->binding(2, atReceiver));
+    rig.runner.poll(rig.sink); // Exactly one later result.
+    TEST_ASSERT_TRUE(rig.sink.results.empty());
+    EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
+                   rig.send(command("add", "pairing.accept", 2)));
+}
+void test_pending_accepts_end_closed_or_superseded() {
+    CommandRig rig;
+    rig.send(command("open", "pairing.open"));
+    TEST_ASSERT_TRUE(rig.pair.client.start());
+    rig.pair.run(1);
+    EXPECT_RESULT(CommandStatus::Pending, rig.send(command("first", "pairing.accept", 2)).status);
+    const Outcome second = rig.send(command("second", "pairing.accept", 2));
+    // The earlier offer was replaced: its command ends before the new one is pending.
+    TEST_ASSERT_EQUAL_STRING("first", second.id.c_str());
+    EXPECT_RESULT(CommandReason::Superseded, second.reason);
+    EXPECT_RESULT(CommandStatus::Pending, rig.sink.take().status);
+    EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
+                   rig.send(command("close", "pairing.close")));
+    const Outcome closed = rig.sink.take();
+    TEST_ASSERT_EQUAL_STRING("second", closed.id.c_str());
+    EXPECT_RESULT(CommandReason::Closed, closed.reason);
+    // The window can also close by itself.
+    CommandRig expiring;
+    expiring.send(command("open", "pairing.open"));
+    TEST_ASSERT_TRUE(expiring.pair.client.start());
+    expiring.pair.run(1);
+    EXPECT_RESULT(CommandStatus::Pending,
+                  expiring.send(command("third", "pairing.accept", 2)).status);
+    expiring.pair.clock.time += PairingWindowMs;
+    expiring.runner.poll(expiring.sink);
+    EXPECT_RESULT(CommandReason::Closed, expiring.sink.take().reason);
+}
+void test_offer_replaced_from_the_setup_page_or_dropped_on_conflict() {
+    CommandRig rig;
+    rig.send(command("open", "pairing.open"));
+    TEST_ASSERT_TRUE(rig.pair.client.start());
+    rig.pair.run(1);
+    EXPECT_RESULT(CommandStatus::Pending, rig.send(command("remote", "pairing.accept", 2)).status);
+    rig.pair.host.close(); // The page stops the window and opens a new one.
+    rig.pair.host.open();
+    rig.runner.poll(rig.sink);
+    EXPECT_RESULT(CommandReason::Superseded, rig.sink.take().reason);
+}
+void test_revoke_removes_every_enrollment_of_a_node() {
+    CommandRig rig;
+    TEST_ASSERT_TRUE(fixtures::enroll(*rig.pair.rx));
+    TEST_ASSERT_TRUE(fixtures::enroll(*rig.pair.rx, 3, 11, 2));
+    EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
+                   rig.send(command("revoke", "node.revoke", 2)));
+    EnrollmentInfo info{};
+    TEST_ASSERT_TRUE(rig.pair.rx->info(2, 10, info));
+    EXPECT_RESULT(Enrollment::Revoked, info.state);
+    TEST_ASSERT_TRUE(rig.pair.rx->info(3, 11, info));
+    EXPECT_RESULT(Enrollment::Active, info.state);
+    EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
+                   rig.send(command("again", "node.revoke", 2)));
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::UnknownNode,
+                   rig.send(command("missing", "node.revoke", 9)));
+    rig.pair.rxBlob.failBefore = true;
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::Storage,
+                   rig.send(command("broken", "node.revoke", 3)));
+}
+void test_commands_are_rejected_by_device_age_and_shape() {
+    CommandRig rig;
+    TEST_ASSERT_TRUE(fixtures::enroll(*rig.pair.rx));
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::Unsupported,
+                   rig.send(command("to-node", "pairing.open"), 2));
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::UnknownNode,
+                   rig.send(command("to-nobody", "pairing.open"), 77));
+    const std::string late = command("late", "pairing.open");
+    rig.runner.execute(rig.receiver(), late.data(), late.size(),
+                       rig.pair.clock.time - CommandDeadlineMs - 1, rig.sink);
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::Busy, rig.sink.take());
+    EXPECT_RESULT(HostState::Closed, rig.pair.host.state());
+    EXPECT_OUTCOME(CommandStatus::Rejected, CommandReason::Unsupported,
+                   rig.send(command("future", "parameters.set")));
+    EXPECT_OUTCOME(
+        CommandStatus::Rejected, CommandReason::Invalid,
+        rig.send(R"({"version":2,"command_id":"old","type":"pairing.open","params":{}})"));
+    const std::string unreadable = R"({"version":1,"type":"pairing.open","params":{}})";
+    rig.runner.execute(rig.receiver(), unreadable.data(), unreadable.size(), rig.pair.clock.time,
+                       rig.sink);
+    TEST_ASSERT_TRUE(rig.sink.results.empty());
+}
+void test_a_pending_accept_survives_many_later_commands() {
+    CommandRig rig;
+    rig.send(command("open", "pairing.open"));
+    TEST_ASSERT_TRUE(rig.pair.client.start());
+    rig.pair.run(1);
+    EXPECT_RESULT(CommandStatus::Pending, rig.send(command("keep", "pairing.accept", 2)).status);
+    for (int i = 0; i < int(CommandRunner::Remembered) * 2; ++i) {
+        const std::string id = "noise-" + std::to_string(i);
+        rig.send(command(id.c_str(), "pairing.open"));
+    }
+    rig.pair.run(40);
+    rig.runner.poll(rig.sink);
+    const Outcome done = rig.sink.take();
+    TEST_ASSERT_EQUAL_STRING("keep", done.id.c_str());
+    EXPECT_RESULT(CommandStatus::Applied, done.status);
+}
 } // namespace
 
 void runPairingTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_x25519_and_hkdf_match_rfc_vectors);
     RUN_TEST(test_pairing_frames_round_trip_and_reject_tampering);
+    RUN_TEST(test_remote_pairing_reports_pending_then_applied);
+    RUN_TEST(test_pending_accepts_end_closed_or_superseded);
+    RUN_TEST(test_offer_replaced_from_the_setup_page_or_dropped_on_conflict);
+    RUN_TEST(test_revoke_removes_every_enrollment_of_a_node);
+    RUN_TEST(test_commands_are_rejected_by_device_age_and_shape);
+    RUN_TEST(test_a_pending_accept_survives_many_later_commands);
     RUN_TEST(test_radio_pairing_creates_matching_active_bindings);
     RUN_TEST(test_pairing_again_rotates_the_generation_on_both_sides);
     RUN_TEST(test_each_sample_keeps_the_link_measured_with_its_own_frame);
