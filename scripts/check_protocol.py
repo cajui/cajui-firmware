@@ -72,6 +72,7 @@ GATED_FILES = (
     "lib/CajuiProvisioning/src/cajui_provisioning.cpp",
     "lib/CajuiUplink/src/cajui_uplink.cpp",
     "lib/CajuiUplink/src/cajui_manage.cpp",
+    "lib/CajuiUplink/src/cajui_command.cpp",
     "lib/CajuiSetup/src/cajui_setup.cpp",
     "lib/CajuiPairing/src/cajui_pairing.cpp",
     "lib/CajuiDevice/src/cajui_device.cpp",

@@ -99,8 +99,7 @@ bool formatReceiverState(const char* source, const ReceiverStatus& status, char*
                     i ? "," : "", request.node, int(request.rssi),
                     request.conflict ? "true" : "false");
     }
-    // Commands are not implemented yet, so no command family is offered.
-    text.format("]},\"capabilities\":[]}");
+    text.format("]},\"capabilities\":[%s]}", status.commands ? "\"pairing\",\"revoke\"" : "");
     if (!text.ok()) return false;
     size = text.size();
     return true;

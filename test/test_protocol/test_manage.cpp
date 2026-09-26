@@ -105,6 +105,12 @@ void test_receiver_state_matches_the_contract() {
         "\"capabilities\":[]}",
         receiverJson(status).c_str());
 }
+void test_receiver_state_lists_the_command_families_it_runs() {
+    auto status = sampleReceiver();
+    status.commands = true;
+    TEST_ASSERT_NOT_NULL(
+        std::strstr(receiverJson(status).c_str(), "\"capabilities\":[\"pairing\",\"revoke\"]}"));
+}
 void test_unknown_receiver_values_are_null_never_zero() {
     ReceiverStatus status{};
     status.pairingRemainingS = 50; // A closed window reports no remaining time.
@@ -442,6 +448,7 @@ void runManageTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_management_topics_follow_the_contract);
     RUN_TEST(test_receiver_state_matches_the_contract);
+    RUN_TEST(test_receiver_state_lists_the_command_families_it_runs);
     RUN_TEST(test_unknown_receiver_values_are_null_never_zero);
     RUN_TEST(test_invalid_receiver_states_are_rejected);
     RUN_TEST(test_node_state_matches_the_contract);

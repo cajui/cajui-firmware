@@ -32,6 +32,8 @@ struct ReceiverStatus {
     uint32_t pairingRemainingS = 0;
     const Candidate* requests = nullptr;
     size_t requestCount = 0;
+    // The receiver runs pairing and revocation commands (cajui_command.h).
+    bool commands = false;
 };
 // What the receiver knows about one transmitter: its binding and the last frame it
 // accepted since starting. The transmitter's own model, firmware and parameters are not
