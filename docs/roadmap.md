@@ -18,8 +18,8 @@ Next milestones:
    Idempotent forwarding with PUBACK-gated queue removal is implemented.
 4. Authenticating radio pairing with a per-device label code, and a per-device password
    for the setup access point. Radio pairing itself and the setup page are implemented.
-5. The [MQTT management channel](management-v1.md): receiver and transmitter state first,
-   then pairing and revocation commands.
+5. The [MQTT management channel](management-v1.md) and [Home Assistant Discovery](home-assistant.md)
+   are implemented; the radio protocol still has to carry transmitter parameters.
 6. Static analysis of `src/` with the Arduino headers; clang-tidy now covers `lib/` and
    `test/` only.
 

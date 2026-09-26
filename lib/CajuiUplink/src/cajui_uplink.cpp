@@ -250,12 +250,16 @@ void Forwarder::poll(bool quiet) {
         int id = 0;
         while (publisher_.acknowledged(id)) {
             if (id != message_) continue; // A late PUBACK from an abandoned attempt.
-            const Result result = store_.forwarded(node_, generation_, counter_);
+            const Result result =
+                store_.forwarded(inflight_.node, inflight_.generation, inflight_.counter);
             if (result == Result::StorageError) {
                 state_ = ForwardState::Failed;
                 return;
             }
-            if (result == Result::Ok) ++forwarded_;
+            if (result == Result::Ok) {
+                ++forwarded_;
+                if (observer_) observer_->sampleForwarded(inflight_);
+            }
             state_ = ForwardState::Idle;
             return;
         }
@@ -285,9 +289,7 @@ void Forwarder::poll(bool quiet) {
         retryLater(now);
         return;
     }
-    node_ = sample.node;
-    generation_ = sample.generation;
-    counter_ = sample.counter;
+    inflight_ = sample;
     message_ = id;
     sentAt_ = now;
     state_ = ForwardState::Waiting;
