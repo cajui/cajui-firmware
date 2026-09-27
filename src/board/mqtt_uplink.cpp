@@ -18,6 +18,9 @@ constexpr UBaseType_t OutboxDepth = 4;
 constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 2500;
 constexpr int QoS = 1, Retain = 0;
 constexpr uint32_t RestartStack = 4096, SenderStack = 6144;
+// Above the client's own task (priority 5), so the client cannot send a sample and deliver
+// its PUBACK between the sender's enqueue and its bookkeeping. The sender mostly waits.
+constexpr UBaseType_t SenderPriority = 6;
 constexpr int BufferBytes = 2048;
 const char Online[] = "online", Offline[] = "offline";
 }
@@ -30,7 +33,7 @@ bool MqttUplink::prepare() {
     if (!commands_) commands_ = xQueueCreate(CommandDepth, sizeof(Incoming));
     if (!outbox_) outbox_ = xQueueCreate(OutboxDepth, sizeof(Outgoing));
     if (!sender_ && outbox_)
-        xTaskCreate(senderTask, "cajui-mqtt-tx", SenderStack, this, tskIDLE_PRIORITY + 1, &sender_);
+        xTaskCreate(senderTask, "cajui-mqtt-tx", SenderStack, this, SenderPriority, &sender_);
     // Replacing the client can wait for its network task, which neither the radio loop nor
     // the client's own event handler may do.
     if (!restarter_)
@@ -264,13 +267,18 @@ void MqttUplink::send() {
     Outgoing& item = sending_;
     xSemaphoreTake(mutex_, portMAX_DELAY);
     const bool current = client_ && item.generation == generation_.load();
-    const bool managed = online_.load() && managed_.load();
+    // Not online_: the client's own outbox keeps an entry across a reconnection, and a
+    // command result staged while connected must still go out.
+    const bool managed = managed_.load();
     int id = -1;
     if (current && item.kind == Kind::Sample) {
         id = esp_mqtt_client_enqueue(client_, item.topic, item.payload, int(item.size), QoS, Retain,
                                      true);
         if (id > 0) {
+            // Clear first: a reused slot must never pair an old message ID with the new
+            // local ID, or a late PUBACK would acknowledge the wrong sample.
             const size_t slot = nextMapping_.fetch_add(1) % Mappings;
+            messageIds_[slot].store(0);
             localIds_[slot].store(item.local);
             messageIds_[slot].store(id);
         }

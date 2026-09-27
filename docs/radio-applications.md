@@ -129,8 +129,9 @@ PUBACK from an abandoned attempt is ignored. The radio loop only copies each pub
 into a four-entry outbox; a separate task hands it to the ESP-IDF client, whose lock can be
 held for a network operation up to its 2.5-second timeout. The loop therefore never waits
 for the network, and the receiver answers a frame within the node's 1.5-second ACK window
-even when the broker is slow or unreachable. Forwarding runs only while the receiver is
-listening, never during an ACK transmission. A storage failure
+even when the broker is slow or unreachable. A sample the sender cannot hand over (the
+client was replaced meanwhile) is republished after the 15-second PUBACK timeout. Forwarding
+runs only while the receiver is listening, never during an ACK transmission. A storage failure
 stops the radio and restarts the receiver after the fault delay described above. Without stored settings the receiver logs `CJAPP UPLINK disabled`
 and keeps queueing as before.
 

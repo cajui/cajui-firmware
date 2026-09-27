@@ -426,7 +426,8 @@ void ReceiverApp::loop() {
         pairing_.poll();
         checkBindings();
         // State lives in RAM and is copied to the uplink's outbox, never flash; the loop never
-        // waits for the network. One publication per pass keeps that outbox from filling.
+        // waits for the network. One publication per pass shares the small outbox among the
+        // producers; each of them retries what it refuses.
         if (forwarder_ && listening && !published) {
             runCommands();
             if (!results_.empty()) {
