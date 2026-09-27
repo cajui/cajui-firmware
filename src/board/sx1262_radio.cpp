@@ -10,6 +10,7 @@ namespace {
 constexpr float FrequencyMHz = 915.2, BandwidthKHz = 125, TcxoVoltage = 1.8;
 constexpr uint8_t SpreadingFactor = 7, CodingRate = 5, SyncWord = 0x12;
 constexpr uint16_t PreambleSymbols = 8;
+constexpr float TenthsPerDb = 10;
 // The service task wakes at least this often to feed the task watchdog, so if the task
 // itself stops running (blocked on the radio lock, for example) the device restarts. A stuck
 // BUSY line is bounded by RadioLib's SPI timeout and ends as a driver fault instead.
@@ -220,7 +221,7 @@ void Sx1262Radio::handleInterrupt() {
                     // Packet RSSI and SNR of this frame, read before RX is restarted.
                     links_[slot].known = true;
                     links_[slot].rssiDbm = int16_t(lroundf(radio_.getRSSI()));
-                    links_[slot].snrTenthsDb = int16_t(lroundf(radio_.getSNR() * 10));
+                    links_[slot].snrTenthsDb = int16_t(lroundf(radio_.getSNR() * TenthsPerDb));
                     ++inboxCount_;
                 }
             } else if (result != RADIOLIB_ERR_CRC_MISMATCH) {

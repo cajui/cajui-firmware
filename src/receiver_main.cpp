@@ -30,8 +30,11 @@ namespace {
 using namespace board;
 constexpr uint32_t ConfirmAfterMs = 60000, UpdateRestartDelayMs = 1500, BindingCheckMs = 1000;
 constexpr char Model[] = "heltec-wifi-lora-32-v3";
+constexpr int64_t MicrosPerSecond = 1000000;
+constexpr uint32_t MsPerSecond = 1000;
+constexpr int TenthsPerDb = 10;
 uint32_t uptimeSeconds() {
-    return uint32_t(esp_timer_get_time() / 1000000);
+    return uint32_t(esp_timer_get_time() / MicrosPerSecond);
 }
 
 class ReceiverApp final : public ReceiverControl, public cajui::StateSource {
@@ -203,7 +206,7 @@ void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
     status.published = forwarder_ ? forwarder_->forwarded() : 0;
     status.retries = forwarder_ ? forwarder_->retries() : 0;
     status.pairingOpen = pairing_.state() != cajui::HostState::Closed;
-    status.pairingRemainingS = pairing_.remainingMs() / 1000;
+    status.pairingRemainingS = pairing_.remainingMs() / MsPerSecond;
     status.requests = pairing_.candidates();
     status.requestCount = pairing_.candidateCount();
     status.commands = true;
@@ -222,7 +225,9 @@ size_t ReceiverApp::nodes(uint64_t* output, size_t capacity) {
 bool ReceiverApp::nodeStatus(uint64_t node, cajui::NodeStatus& status) {
     cajui::EnrollmentInfo list[cajui::BindingCapacity]{};
     const size_t listed = store_.list(list, cajui::BindingCapacity);
-    bool found = false, active = false, prepared = false;
+    bool found = false;
+    bool active = false;
+    bool prepared = false;
     for (size_t i = 0; i < listed; ++i) {
         if (list[i].node != node) continue;
         found = true;
@@ -332,7 +337,7 @@ void ReceiverApp::fault(const char* reason) {
     const uint32_t faults = recordFault();
     const uint32_t delay = cajui::retryDelayMs(faults);
     Serial.printf("CJAPP STOP %s faults=%u restart_s=%u\n", reason, unsigned(faults),
-                  unsigned(delay / 1000));
+                  unsigned(delay / MsPerSecond));
     radio_.sleep();
     output(board::RadioReset, LOW);
     output(board::Vext, HIGH);
@@ -400,7 +405,8 @@ void ReceiverApp::loop() {
         return;
     }
     const char* failure = nullptr;
-    bool listening = false, published = false;
+    bool listening = false;
+    bool published = false;
     {
         Locked held(lock_);
         const auto before = controller_.state();
@@ -413,7 +419,8 @@ void ReceiverApp::loop() {
                 Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=%d snr=%s%d.%d\n",
                               unsigned(controller_.lastResult()), unsigned(store_.queued()),
                               int(link.rssiDbm), link.snrTenthsDb < 0 ? "-" : "",
-                              std::abs(link.snrTenthsDb) / 10, std::abs(link.snrTenthsDb) % 10);
+                              std::abs(link.snrTenthsDb) / TenthsPerDb,
+                              std::abs(link.snrTenthsDb) % TenthsPerDb);
             else
                 Serial.printf("CJAPP ACCEPT result=%u queued=%u rssi=unknown snr=unknown\n",
                               unsigned(controller_.lastResult()), unsigned(store_.queued()));

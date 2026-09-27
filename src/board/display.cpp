@@ -10,6 +10,8 @@ namespace {
 constexpr uint8_t OledAddress = 0x3c;
 constexpr int Height = 64, Margin = 1, TextX = 66, LineHeight = 12;
 constexpr int QrMaxVersion = 3; // 29 modules plus margin, two pixels each, fits 64 rows.
+// Power-up and reset timing of the display on the shared Vext rail.
+constexpr uint32_t PowerUpMs = 50, ResetPulseMs = 20;
 SSD1306Wire oled(OledAddress, OledSda, OledScl);
 bool powered = false, drawn = false;
 // esp_qrcode_generate only reports the symbol through this callback.
@@ -20,13 +22,14 @@ void drawQr(esp_qrcode_handle_t code) {
     const int side = (size + 2 * Margin) * scale;
     // Dark modules stay unlit on a lit square: phone cameras expect dark-on-light codes.
     oled.setColor(WHITE);
-    oled.fillRect(0, (Height - side) / 2, side, side);
+    oled.fillRect(0, int16_t((Height - side) / 2), int16_t(side), int16_t(side));
     oled.setColor(BLACK);
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x)
             if (esp_qrcode_get_module(code, x, y))
-                oled.fillRect((x + Margin) * scale, (Height - side) / 2 + (y + Margin) * scale,
-                              scale, scale);
+                oled.fillRect(int16_t((x + Margin) * scale),
+                              int16_t((Height - side) / 2 + (y + Margin) * scale), int16_t(scale),
+                              int16_t(scale));
     oled.setColor(WHITE);
     drawn = true;
 }
@@ -35,12 +38,12 @@ bool showSetup(const char* ssid, const char* qrText, const char* address) {
     digitalWrite(Vext, LOW);
     pinMode(Vext, OUTPUT);
     digitalWrite(Vext, LOW);
-    delay(50);
+    delay(PowerUpMs);
     pinMode(OledReset, OUTPUT);
     digitalWrite(OledReset, LOW);
-    delay(20);
+    delay(ResetPulseMs);
     digitalWrite(OledReset, HIGH);
-    delay(20);
+    delay(ResetPulseMs);
     if (!oled.init()) return false;
     powered = true;
     oled.clear();
