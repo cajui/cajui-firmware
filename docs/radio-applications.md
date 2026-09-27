@@ -98,8 +98,9 @@ a replayed frame from making the receiver transmit on demand.
 ACK TX has a three-second watchdog; a completion that is polled late still counts. With an
 active enrollment, 30 minutes without any packet (valid or not) re-arms reception and logs
 `CJAPP RADIO silent rearm`; a failure there is a radio fault. The radio service task wakes at
-least once a second and is under the task watchdog, so a radio call that hangs restarts the
-device.
+least once a second and is under the task watchdog, so if it stops running (blocked on the
+radio lock, for example) the device restarts; a stuck BUSY line ends in a driver fault
+through RadioLib's SPI timeout.
 Driver or storage failures latch the controller and stop the radio. The receiver then
 logs `CJAPP STOP <reason> faults=<n> restart_s=<s>`, keeps the USB console available and
 restarts after 10 seconds, doubling with each consecutive fault up to 15 minutes; ten
