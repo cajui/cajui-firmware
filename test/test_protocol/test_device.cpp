@@ -163,6 +163,14 @@ void test_only_an_ack_confirms_and_driver_errors_are_faults() {
         TEST_ASSERT_EQUAL(c.fault, outcome.fault);
     }
 }
+void test_radio_silence_needs_an_enrollment_and_the_full_period() {
+    TEST_ASSERT_FALSE(radioSilent(RadioSilenceMs * 2, 0, false)); // Nothing to hear.
+    TEST_ASSERT_FALSE(radioSilent(RadioSilenceMs - 1, 0, true));
+    TEST_ASSERT_TRUE(radioSilent(RadioSilenceMs, 0, true));
+    // The millisecond clock wraps; elapsed time still counts correctly.
+    TEST_ASSERT_TRUE(radioSilent(RadioSilenceMs - 10, UINT32_MAX - 9, true));
+    TEST_ASSERT_FALSE(radioSilent(5, UINT32_MAX - 9, true));
+}
 } // namespace
 
 void runDeviceTests() {
@@ -173,4 +181,5 @@ void runDeviceTests() {
     RUN_TEST(test_power_record_round_trips_and_fails_closed);
     RUN_TEST(test_power_follows_commands_within_the_ceiling_and_falls_back);
     RUN_TEST(test_only_an_ack_confirms_and_driver_errors_are_faults);
+    RUN_TEST(test_radio_silence_needs_an_enrollment_and_the_full_period);
 }

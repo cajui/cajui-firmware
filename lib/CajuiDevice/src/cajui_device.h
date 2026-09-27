@@ -62,4 +62,11 @@ struct CycleOutcome {
     bool fault = false;
 };
 CycleOutcome afterDelivery(Completion);
+
+// A receiver's radio can stop reporting packets without any driver error. With an active
+// enrollment, no packet at all (valid or not) for RadioSilenceMs since the last activity or
+// recovery re-arms reception; a failure there is a radio fault. Six missed 5-minute samples:
+// a transmitter with a longer interval only causes a harmless re-arm.
+constexpr uint32_t RadioSilenceMs = 30UL * 60 * 1000;
+bool radioSilent(uint32_t nowMs, uint32_t lastActivityMs, bool activeEnrollment);
 } // namespace cajui

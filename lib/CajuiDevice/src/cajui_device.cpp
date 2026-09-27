@@ -103,6 +103,9 @@ uint32_t retryDelayMs(uint32_t consecutiveFaults) {
     for (uint32_t fault = 1; fault < consecutiveFaults && delay < MaxRetryMs; ++fault) delay *= 2;
     return delay < MaxRetryMs ? delay : MaxRetryMs;
 }
+bool radioSilent(uint32_t nowMs, uint32_t lastActivityMs, bool activeEnrollment) {
+    return activeEnrollment && uint32_t(nowMs - lastActivityMs) >= RadioSilenceMs;
+}
 CycleOutcome afterDelivery(Completion completion) {
     CycleOutcome outcome{};
     switch (completion) {

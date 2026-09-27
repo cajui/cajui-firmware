@@ -2,6 +2,7 @@
 #ifdef CAJUI_RUNTIME_ROLE
 #include "sx1262_radio.h"
 #include <SPI.h>
+#include <esp_task_wdt.h>
 
 namespace board {
 namespace {
@@ -9,6 +10,9 @@ namespace {
 constexpr float FrequencyMHz = 915.2, BandwidthKHz = 125, TcxoVoltage = 1.8;
 constexpr uint8_t SpreadingFactor = 7, CodingRate = 5, SyncWord = 0x12;
 constexpr uint16_t PreambleSymbols = 8;
+// The service task wakes at least this often to feed the task watchdog, so a radio call that
+// hangs (a BUSY line stuck high, for example) restarts the device instead of silencing it.
+constexpr uint32_t ServiceWakeMs = 1000;
 class Lock {
 public:
     explicit Lock(SemaphoreHandle_t mutex) : mutex_(mutex) {
@@ -54,8 +58,11 @@ void IRAM_ATTR Sx1262Radio::interrupt() {
 }
 void Sx1262Radio::service(void* argument) {
     auto& self = *static_cast<Sx1262Radio*>(argument);
+    esp_task_wdt_add(nullptr); // Fails harmlessly if the watchdog is not running.
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const bool notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ServiceWakeMs)) != 0;
+        esp_task_wdt_reset();
+        if (!notified) continue;
         Lock lock(self.mutex_);
         self.handleInterrupt();
     }
@@ -200,6 +207,7 @@ void Sx1262Radio::handleInterrupt() {
             fail();
             return;
         }
+        packets_.fetch_add(1);
         cajui::Frame frame{};
         frame.size = radio_.getPacketLength();
         if (frame.size && frame.size <= cajui::MaxFrame) {
