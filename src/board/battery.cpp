@@ -2,6 +2,7 @@
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
 #include "battery.h"
 #include <Arduino.h>
+#include <cmath>
 
 namespace board {
 namespace {
@@ -29,7 +30,7 @@ uint16_t readBatteryMv() {
     pinMode(BatteryControl, ANALOG);
     const float millivolts = float(sum) / Samples * Divider;
     if (millivolts < MinCellMv || millivolts > MaxCellMv) return 0;
-    return uint16_t(millivolts + 0.5f);
+    return uint16_t(lroundf(millivolts));
 }
 } // namespace board
 #endif

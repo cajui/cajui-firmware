@@ -14,7 +14,10 @@
 
 namespace board {
 namespace {
-constexpr uint32_t WifiTimeoutMs = 20000, CloseDelayMs = 1000;
+constexpr uint32_t WifiTimeoutMs = 20000, CloseDelayMs = 1000, MsPerSecond = 1000;
+constexpr int HttpOk = 200, HttpFound = 302, HttpSeeOther = 303, HttpForbidden = 403,
+              HttpNotFound = 404, HttpServerError = 500;
+constexpr uint64_t IdSuffixMask = 0xffff; // Last two bytes of the device ID name the host.
 // Right after the station gets an address, scans fail and mDNS queries return nothing.
 constexpr uint32_t SettleMs = 3000, DiscoveryRetryMs = 2000;
 constexpr int DiscoveryAttempts = 2;
@@ -242,7 +245,7 @@ void SetupPortal::startMdns() {
         return;
     }
     char name[sizeof("cajui-rx-") + 4]{};
-    std::snprintf(name, sizeof(name), "cajui-rx-%04x", unsigned(store_.device() & 0xffff));
+    std::snprintf(name, sizeof(name), "cajui-rx-%04x", unsigned(store_.device() & IdSuffixMask));
     mdns_ = MDNS.begin(name);
 }
 void SetupPortal::scan() {
@@ -326,17 +329,18 @@ void SetupPortal::discoveryTask(void* self) {
 // origin with the session token. Anything else is refused without touching state.
 bool SetupPortal::authorize(bool post) {
     if (server_.client().localIP() != WiFi.softAPIP()) {
-        server_.send(404, "text/plain", "Not found");
+        server_.send(HttpNotFound, "text/plain", "Not found");
         return false;
     }
     if (!cajui::allowedHost(server_.hostHeader().c_str(), address_)) {
         server_.sendHeader("Location", String("http://") + address_ + "/");
-        server_.send(302);
+        server_.send(HttpFound);
         return false;
     }
     if (post && (!cajui::allowedOrigin(server_.header("Origin").c_str(), address_) ||
                  !session_.validToken(server_.arg("token").c_str()))) {
-        server_.send(403, "text/plain", "This setup page expired. Reload it and try again.");
+        server_.send(HttpForbidden, "text/plain",
+                     "This setup page expired. Reload it and try again.");
         return false;
     }
     session_.touch(millis());
@@ -347,7 +351,7 @@ void SetupPortal::redirect(cajui::Notice notice) {
     if (notice != cajui::Notice::None)
         std::snprintf(location, sizeof(location), "/?n=%u", unsigned(notice));
     server_.sendHeader("Location", location);
-    server_.send(303);
+    server_.send(HttpSeeOther);
 }
 bool SetupPortal::save() {
     if (!cajui::validUplink(pending_)) return false;
@@ -359,7 +363,7 @@ bool SetupPortal::save() {
 }
 void SetupPortal::fillPairing(cajui::PairingView& pairing) const {
     pairing.open = pairing_->state() != cajui::HostState::Closed;
-    pairing.remainingSeconds = pairing_->remainingMs() / 1000;
+    pairing.remainingSeconds = pairing_->remainingMs() / MsPerSecond;
     pairing.count = pairing_->candidateCount();
     for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
         pairing.nodes[i] = pairing_->candidates()[i].node;
@@ -394,7 +398,7 @@ void SetupPortal::home() {
     view.brokerCount = view.searching ? 0 : brokerCount_.load();
     const String host = server_.arg("host");
     const long port = server_.arg("port").toInt();
-    if (host.length() && host.length() <= cajui::HostCapacity && port > 0 && port <= 65535) {
+    if (host.length() && host.length() <= cajui::HostCapacity && port > 0 && port <= UINT16_MAX) {
         view.prefillHost = host.c_str();
         view.prefillPort = uint16_t(port);
     }
@@ -415,10 +419,10 @@ void SetupPortal::home() {
     }
     // Sent without the lock: a slow client must not hold up the radio loop.
     if (!rendered) {
-        server_.send(500, "text/plain", "Page too large");
+        server_.send(HttpServerError, "text/plain", "Page too large");
         return;
     }
-    server_.send(200, "text/html; charset=utf-8", page_);
+    server_.send(HttpOk, "text/html; charset=utf-8", page_);
 }
 void SetupPortal::transmitters() {
     cajui::SetupView view{};
@@ -435,10 +439,10 @@ void SetupPortal::transmitters() {
         rendered = cajui::renderTransmitters(view, page_, sizeof(page_));
     }
     if (!rendered) {
-        server_.send(500, "text/plain", "Page too large");
+        server_.send(HttpServerError, "text/plain", "Page too large");
         return;
     }
-    server_.send(200, "text/html; charset=utf-8", page_);
+    server_.send(HttpOk, "text/html; charset=utf-8", page_);
 }
 // Streams an uploaded update into the free application slot. Runs before the request's
 // handler, so authorization is checked here without responding; the handler responds.
@@ -493,7 +497,7 @@ void SetupPortal::uploaded() {
     switch (status) {
     case cajui::UpdateStatus::Installed:
         cajui::renderUpdated(version, page_, sizeof(page_));
-        server_.send(200, "text/html; charset=utf-8", page_);
+        server_.send(HttpOk, "text/html; charset=utf-8", page_);
         return;
     case cajui::UpdateStatus::BadHeader:
     case cajui::UpdateStatus::WrongRole: return redirect(cajui::Notice::UpdateWrongFile);
@@ -558,13 +562,14 @@ void SetupPortal::route() {
     });
     server_.on("/revoke", HTTP_POST, [this] {
         if (!authorize(true)) return;
-        uint64_t node = 0, generation = 0;
+        uint64_t node = 0;
+        uint64_t generation = 0;
         if (!parseId(server_.arg("node"), node) || !parseId(server_.arg("generation"), generation))
             return redirect(cajui::Notice::UnknownTransmitter);
         if (server_.arg("confirm") != "1") {
             if (!cajui::renderRevoke(node, generation, session_.token(), page_, sizeof(page_)))
                 return redirect(cajui::Notice::UnknownTransmitter);
-            server_.send(200, "text/html; charset=utf-8", page_);
+            server_.send(HttpOk, "text/html; charset=utf-8", page_);
             return;
         }
         const auto result = whileRadioIdle([&] { return store_.revoke(node, generation); });
@@ -609,18 +614,18 @@ void SetupPortal::route() {
     server_.on("/close", HTTP_POST, [this] {
         if (!authorize(true)) return;
         cajui::renderClosed(page_, sizeof(page_));
-        server_.send(200, "text/html; charset=utf-8", page_);
+        server_.send(HttpOk, "text/html; charset=utf-8", page_);
         closing_ = true;
         closeAt_ = millis() + CloseDelayMs;
     });
     // Phones probe fixed URLs to detect captive portals; redirecting them opens this page.
     server_.onNotFound([this] {
         if (server_.client().localIP() != WiFi.softAPIP()) { // Nothing on the home network.
-            server_.send(404, "text/plain", "Not found");
+            server_.send(HttpNotFound, "text/plain", "Not found");
             return;
         }
         server_.sendHeader("Location", String("http://") + address_ + "/");
-        server_.send(302);
+        server_.send(HttpFound);
     });
 }
 } // namespace board

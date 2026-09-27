@@ -14,6 +14,7 @@
 namespace board {
 namespace {
 constexpr uint32_t SerialBaud = 115200;
+constexpr size_t MacBytes = 6;
 // The magic guards against the random contents RTC memory has after power-on.
 constexpr uint32_t FaultMagic = 0x46415554; // "FAUT"
 RTC_NOINIT_ATTR uint32_t faultMagic;
@@ -42,7 +43,7 @@ void AppLock::give() {
     if (mutex_) xSemaphoreGive(mutex_);
 }
 uint64_t deviceId() {
-    uint8_t mac[6]{};
+    uint8_t mac[MacBytes]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;
     uint64_t id = 0;
     for (auto byte : mac) id = (id << 8) | byte;

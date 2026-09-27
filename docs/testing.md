@@ -76,3 +76,21 @@ A fixed pre-refactor wire fixture checks compatibility in addition to round trip
 Coverage includes the send and receive controllers and measurement normalization.
 It excludes the board application, SX1262 adapter, FreeRTOS scheduling and sensor
 driver. Those need physical tests; compile success is not timing validation.
+
+## Board lint and fuzzing
+
+`python3 scripts/lint_board.py` runs the same clang-tidy checks over `src/`, which only
+compiles against the Arduino-ESP32 and ESP-IDF headers: it takes each image's compile
+database from PlatformIO, swaps the Xtensa GCC for clang with the toolchain's include
+directories, and reports only diagnostics in `src/`. CI runs it after the ESP32 build.
+
+`sh scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
+for the given time (default 60 s): `test/fuzz/fuzz_frames.cpp` feeds untrusted bytes to the
+radio frame parsing that runs before authentication (`untrustedType`, `untrustedDataNode`,
+the header and length checks of `open`, and the pairing parsers; the decrypted payload is
+never reached, since the fuzzer cannot forge a GCM tag), and `test/fuzz/fuzz_commands.cpp` to
+the MQTT command parser and topic check. A crashing input is kept under `.pio/fuzz/` and
+uploaded by CI. It needs a clang
+with libFuzzer (Apple's has none) and OpenSSL; CI runs it on Linux. The corpus is kept under
+`.pio/fuzz/` and not committed.
+

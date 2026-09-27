@@ -29,7 +29,8 @@ namespace {
 constexpr uint32_t BatteryMagic = 0x42415454; // "BATT"
 RTC_NOINIT_ATTR uint32_t batteryMagic;
 RTC_NOINIT_ATTR uint8_t batteryModeRtc;
-constexpr uint32_t CpuMhz = 80;
+constexpr uint32_t CpuMhz = 80, MsPerSecond = 1000;
+constexpr uint64_t MicrosPerMs = 1000;
 using namespace board;
 constexpr uint32_t SampleSeconds = 300, SensorWarmupMs = 2200;
 constexpr uint8_t PairButton = 0; // PRG.
@@ -42,7 +43,7 @@ public:
     void loop();
 
 private:
-    enum class Mode { Admin, Pairing, Sending };
+    enum class Mode : uint8_t { Admin, Pairing, Sending };
     BoardClock clock_;
     BoardJitter jitter_;
     BoardEntropy entropy_{false}; // Wi-Fi never runs on the transmitter.
@@ -129,7 +130,7 @@ void TransmitterApp::sleepFor(uint32_t ms) {
     rtc_gpio_pullup_en(gpio_num_t(PairButton));
     rtc_gpio_pulldown_dis(gpio_num_t(PairButton));
     esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
-    esp_sleep_enable_timer_wakeup(uint64_t(ms) * 1000);
+    esp_sleep_enable_timer_wakeup(uint64_t(ms) * MicrosPerMs);
     Serial.println("CJAPP SLEEP");
     Serial.flush();
     esp_deep_sleep_start();
@@ -141,7 +142,7 @@ void TransmitterApp::fault(const char* reason) {
     const uint32_t faults = recordFault();
     const uint32_t delay = cajui::retryDelayMs(faults);
     Serial.printf("CJAPP STOP %s faults=%u retry_s=%u\n", reason, unsigned(faults),
-                  unsigned(delay / 1000));
+                  unsigned(delay / MsPerSecond));
     sleepFor(delay);
 }
 void TransmitterApp::sample(cajui::Binding& binding) {
@@ -157,7 +158,7 @@ void TransmitterApp::sample(cajui::Binding& binding) {
         // Nothing is sent: the radio is the largest draw. Measure again after the long sleep.
         Serial.printf("CJAPP BATTERY critical mv=%u sleep_s=%u\n", unsigned(batteryMv),
                       unsigned(cajui::LowBatterySeconds));
-        sleepFor(cajui::LowBatterySeconds * 1000);
+        sleepFor(cajui::LowBatterySeconds * MsPerSecond);
     }
     intervalS_ = battery == cajui::BatteryMode::Low ? cajui::LowBatterySeconds : SampleSeconds;
     output(board::Vext, LOW);

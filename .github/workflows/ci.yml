@@ -40,3 +40,18 @@ jobs:
         run: pio test -e protocol_esp32 --without-uploading --without-testing
       - name: Compile experimental radio applications (no upload)
         run: pio run -e runtime_tx -e runtime_rx
+      - run: python -m pip install --require-hashes -r .github/requirements/lint.txt
+      - name: clang-tidy over src/ with the ESP32 build flags
+        run: python scripts/lint_board.py
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: sudo apt-get update && sudo apt-get install -y clang libssl-dev
+      - name: Fuzz frame and command parsers (libFuzzer, 60 s each)
+        run: sh scripts/fuzz.sh 60
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: .pio/fuzz/crash-*
