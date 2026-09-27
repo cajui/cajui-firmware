@@ -263,6 +263,15 @@ bool PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKe
     for (size_t i = 0; i < count_; ++i) {
         Candidate& listed = candidates_[i];
         if (listed.node != node) continue;
+        // A node that already joined and asks again, after a revocation or a reset, starts
+        // a new attempt: list it afresh. No offer or click is pending for it, so there is
+        // nothing to redirect; accepting still needs the operator and the node's button.
+        if (listed.joined && (listed.nonce != nonce || listed.publicKey != publicKey)) {
+            listed = Candidate{};
+            listed.node = node;
+            listed.nonce = nonce;
+            listed.publicKey = publicKey;
+        }
         // Never replace a pinned key: one injected frame would otherwise redirect the
         // operator's click to an attacker while the list still shows the victim's ID.
         if (listed.nonce != nonce || listed.publicKey != publicKey) listed.conflict = true;

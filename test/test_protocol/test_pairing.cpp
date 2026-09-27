@@ -306,6 +306,22 @@ void test_radio_pairing_creates_matching_active_bindings() {
     TEST_ASSERT_TRUE(rig.host.candidates()[0].joined);
     Candidate waiting[MaxCandidates]{};
     TEST_ASSERT_EQUAL_size_t(0, rig.host.waiting(waiting, MaxCandidates));
+    // Asking again in the same window, e.g. after a revocation, is a new attempt: it is
+    // listed afresh instead of conflicting with the key pinned by the finished pairing.
+    CountingEntropy entropy;
+    KeyPair again{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, again));
+    Frame request{}, reply{};
+    TEST_ASSERT_TRUE(buildRequest(2, 77, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -45, reply));
+    TEST_ASSERT_EQUAL_size_t(1, rig.host.waiting(waiting, MaxCandidates));
+    TEST_ASSERT_FALSE(waiting[0].conflict);
+    TEST_ASSERT_EQUAL_UINT64(77, waiting[0].nonce);
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // A second different request for the listed attempt still conflicts, as before.
+    TEST_ASSERT_TRUE(buildRequest(2, 78, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -45, reply));
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].conflict);
     TEST_ASSERT_EQUAL_UINT64(1, rig.client.receiver());
     Binding atNode{}, atReceiver{};
     TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));

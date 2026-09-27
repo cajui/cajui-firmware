@@ -91,7 +91,11 @@ of a new credential generation, exactly as a USB enrollment would store it.
 
 A node that completed the exchange leaves the list shown on the page and in the
 management state, but stays pinned until the window closes, so no other device can
-request its ID with another key in the meantime.
+request its ID with another key in the meantime. If that node asks again in the same
+window, for example after being revoked, its new attempt is listed afresh rather than
+as a conflict: no offer is pending for it, and adding it still needs the operator and
+the node's button. Like any request, it is not authenticated against an active
+attacker in range (see the security notes above).
 
 Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
 stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each
