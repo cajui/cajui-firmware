@@ -14,5 +14,7 @@ for target in frames commands; do
   clang++ -std=c++11 -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all \
     $includes $sources "test/fuzz/fuzz_$target.cpp" -lcrypto -o "$out/fuzz_$target"
   mkdir -p "$out/corpus_$target"
-  "$out/fuzz_$target" -max_total_time="$seconds" -max_len=600 "$out/corpus_$target"
+  # A crashing input is written to .pio/fuzz/ so CI can keep it for reproduction.
+  "$out/fuzz_$target" -max_total_time="$seconds" -max_len=600 -artifact_prefix="$out/" \
+    "$out/corpus_$target"
 done

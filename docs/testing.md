@@ -85,9 +85,12 @@ database from PlatformIO, swaps the Xtensa GCC for clang with the toolchain's in
 directories, and reports only diagnostics in `src/`. CI runs it after the ESP32 build.
 
 `sh scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
-for the given time (default 60 s): `test/fuzz/fuzz_frames.cpp` feeds untrusted bytes to every
-radio frame parser (`untrustedType`, `untrustedDataNode`, `open` and the pairing parsers), and
-`test/fuzz/fuzz_commands.cpp` to the MQTT command parser and topic check. It needs a clang
+for the given time (default 60 s): `test/fuzz/fuzz_frames.cpp` feeds untrusted bytes to the
+radio frame parsing that runs before authentication (`untrustedType`, `untrustedDataNode`,
+the header and length checks of `open`, and the pairing parsers; the decrypted payload is
+never reached, since the fuzzer cannot forge a GCM tag), and `test/fuzz/fuzz_commands.cpp` to
+the MQTT command parser and topic check. A crashing input is kept under `.pio/fuzz/` and
+uploaded by CI. It needs a clang
 with libFuzzer (Apple's has none) and OpenSSL; CI runs it on Linux. The corpus is kept under
 `.pio/fuzz/` and not committed.
 
