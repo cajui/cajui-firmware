@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include "cajui_runtime.h"
 #include "cajui_storage.h"
 
 // Board-independent decisions of the radio images, kept out of the Arduino entry points
@@ -50,4 +51,15 @@ struct PowerState {
 // next restart instead of being held back by an old command.
 int8_t currentPower(const PowerState*, int8_t configured);
 PowerState nextPower(const PowerState& now, int8_t configured, bool acknowledged, int8_t command);
+
+// What a transmitter does after a delivery cycle. Only an authenticated ACK proves that the
+// radio, the keys and the receiver work, so only an ACK confirms a freshly installed image
+// (an unconfirmed image returns to the previous one at the next restart, including the wake
+// from deep sleep). No answer is not a device fault: the receiver may be off. A driver
+// error, a radio watchdog or missing randomness is a fault and backs off.
+struct CycleOutcome {
+    bool confirm = false;
+    bool fault = false;
+};
+CycleOutcome afterDelivery(Completion);
 } // namespace cajui

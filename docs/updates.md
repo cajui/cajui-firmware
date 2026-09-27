@@ -68,7 +68,11 @@ Numeric versions are `major*10000 + minor*100 + patch` (`CAJUI_FIRMWARE_VERSION`
 
 A new image boots on probation. The receiver confirms it after one minute of healthy
 operation, and only if its setup page started, since the page is its only update channel
-without a cable; the transmitter confirms after its first complete delivery cycle. A
+without a cable; the transmitter confirms only after an authenticated ACK, the one proof
+that its radio, keys and receiver work. Transmitter images are installed over USB, which
+leaves them flashed rather than on probation, so this matters only for a future
+over-the-air path. Any radio or randomness failure during a delivery cycle counts as a
+fault and backs off, and never confirms. A
 confirmation that fails is retried every minute. A restart before that, from a crash, the watchdog or a fault, makes the
 bootloader return to the previous image. An image that boots into admin mode is not
 confirmed either, so the next restart returns to the previous one. Boot logs show

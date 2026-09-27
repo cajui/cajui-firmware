@@ -145,6 +145,24 @@ void test_power_follows_commands_within_the_ceiling_and_falls_back() {
     TEST_ASSERT_TRUE(validPower(MinPowerDbm) && validPower(MaxPowerDbm));
     TEST_ASSERT_FALSE(validPower(MinPowerDbm - 1) || validPower(MaxPowerDbm + 1));
 }
+void test_only_an_ack_confirms_and_driver_errors_are_faults() {
+    const struct {
+        Completion completion;
+        bool confirm, fault;
+    } cases[] = {
+        {Completion::Acknowledged, true, false}, {Completion::AttemptsExhausted, false, false},
+        {Completion::Deadline, false, false},    {Completion::Cancelled, false, false},
+        {Completion::RadioError, false, true},   {Completion::RadioTimeout, false, true},
+        {Completion::RandomError, false, true},  {Completion::None, false, true},
+    };
+    size_t index = 0;
+    for (const auto& c : cases) {
+        SCENARIO(index++);
+        const CycleOutcome outcome = afterDelivery(c.completion);
+        TEST_ASSERT_EQUAL(c.confirm, outcome.confirm);
+        TEST_ASSERT_EQUAL(c.fault, outcome.fault);
+    }
+}
 } // namespace
 
 void runDeviceTests() {
@@ -154,4 +172,5 @@ void runDeviceTests() {
     RUN_TEST(test_fault_retry_delay_doubles_up_to_a_bound);
     RUN_TEST(test_power_record_round_trips_and_fails_closed);
     RUN_TEST(test_power_follows_commands_within_the_ceiling_and_falls_back);
+    RUN_TEST(test_only_an_ack_confirms_and_driver_errors_are_faults);
 }
