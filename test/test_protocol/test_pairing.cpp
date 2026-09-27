@@ -80,8 +80,14 @@ public:
     bool sendOk = true, receiveError = false;
     int16_t rssi = -42;
     bool listen() override { return true; }
-    bool startChannelCheck() override { return false; }
-    ChannelStatus channelStatus() override { return ChannelStatus::Error; }
+    ChannelStatus channel = ChannelStatus::Clear;
+    bool checkOk = true;
+    int checks = 0;
+    bool startChannelCheck() override {
+        ++checks;
+        return checkOk;
+    }
+    ChannelStatus channelStatus() override { return channel; }
     bool startTransmit(const Frame& frame) override {
         if (!sendOk) return false;
         sent.push_back(frame);
@@ -578,6 +584,8 @@ void test_node_edge_cases() {
         rig.client.poll(); // Idle: nothing happens.
         EXPECT_RESULT(ClientState::Idle, rig.client.state());
         TEST_ASSERT_TRUE(rig.client.start());
+        EXPECT_RESULT(ClientState::Checking, rig.client.state());
+        rig.client.poll(); // Channel clear: transmitting.
         rig.client.poll();
         EXPECT_RESULT(ClientState::Listening, rig.client.state());
         CountingEntropy entropy;
@@ -817,7 +825,8 @@ void test_previous_node_still_gets_done_after_another_add() {
     }
     rig.toNode();
     rig.client.poll();
-    rig.client.poll(); // Confirm transmitted.
+    rig.client.poll();
+    rig.client.poll(); // Confirm transmitted after the channel check.
     rig.toReceiver();  // Receiver stores and answers JOIN_DONE...
     Frame done = rig.rxRadio.sent.front();
     rig.rxRadio.sent.clear(); // ...which is lost.
@@ -839,7 +848,8 @@ void test_previous_node_still_gets_done_after_another_add() {
     TEST_ASSERT_EQUAL_size_t(1, rig.rxRadio.sent.size());
     TEST_ASSERT_TRUE(sameFrame(done, rig.rxRadio.sent.front()));
     rig.toNode();
-    rig.client.poll();
+    rig.client.poll(); // The resent confirmation completes...
+    rig.client.poll(); // ...and JOIN_DONE is read.
     EXPECT_RESULT(ClientState::Paired, rig.client.state());
     EXPECT_RESULT(HostState::Offered, rig.host.state()); // Node 9's offer is intact.
     Binding binding{};
@@ -860,7 +870,8 @@ void test_repeated_confirmations_get_done_only_within_bounds() {
         }
         rig.toNode();
         rig.client.poll();
-        rig.client.poll(); // Confirm transmitted.
+        rig.client.poll();
+        rig.client.poll(); // Confirm transmitted after the channel check.
         Frame confirm = rig.txRadio.sent.front();
         rig.toReceiver();
         TEST_ASSERT_EQUAL_size_t(1, rig.rxRadio.sent.size());
@@ -927,6 +938,8 @@ void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     EXPECT_RESULT(ClientState::Listening, lossy.client.state()); // Consumed and ignored.
     lossy.txRadio.inbox.push_back(genuine);
     lossy.client.poll();
+    EXPECT_RESULT(ClientState::Checking, lossy.client.state()); // About to confirm.
+    lossy.client.poll();
     EXPECT_RESULT(ClientState::Sending, lossy.client.state()); // Confirming.
     lossy.client.poll();
     // Drop the receiver's first JOIN_DONE: the node confirms again and gets it again.
@@ -941,8 +954,48 @@ void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     TEST_ASSERT_EQUAL_size_t(1, lossy.rxRadio.sent.size());
     TEST_ASSERT_TRUE(sameFrame(done, lossy.rxRadio.sent.front()));
     lossy.toNode();
-    lossy.client.poll();
+    lossy.client.poll(); // The resent confirmation completes...
+    lossy.client.poll(); // ...and JOIN_DONE is read.
     EXPECT_RESULT(ClientState::Paired, lossy.client.state());
+}
+void test_busy_channel_while_confirming_resumes_the_confirmation() {
+    PairRig rig;
+    TEST_ASSERT_TRUE(rig.client.start());
+    rig.host.open();
+    rig.run(1); // The request is heard.
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // The next request gets the offer.
+    bool offered = false;
+    for (int i = 0; i < 40 && !offered; ++i) {
+        rig.client.poll();
+        rig.toReceiver();
+        rig.toNode();
+        offered = !rig.txRadio.inbox.empty();
+        if (!offered) rig.clock.time += 100;
+    }
+    TEST_ASSERT_TRUE(offered);
+    for (int i = 0; i < 5 && rig.client.state() != ClientState::Checking; ++i)
+        rig.client.poll(); // Finish the request, then read the offer.
+    EXPECT_RESULT(ClientState::Checking, rig.client.state()); // Before the confirmation.
+    rig.txRadio.sent.clear();
+    rig.txRadio.channel = ChannelStatus::Busy;
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Waiting, rig.client.state());
+    TEST_ASSERT_TRUE(rig.txRadio.sent.empty());
+    rig.txRadio.channel = ChannelStatus::Clear;
+    rig.clock.time += PairingClient::RetryMaxMs;
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Checking, rig.client.state());
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Sending, rig.client.state());
+    TEST_ASSERT_EQUAL_size_t(1, rig.txRadio.sent.size());
+    EXPECT_RESULT(uint8_t(PairingType::Confirm), untrustedType(rig.txRadio.sent.front()));
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::AwaitingDone, rig.client.state()); // Not back to requesting.
+    rig.toReceiver();
+    rig.toNode();
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Paired, rig.client.state());
 }
 void test_node_gives_up_without_storing_anything() {
     PairRig rig;
@@ -979,14 +1032,51 @@ void test_node_failures_deadline_radio_and_foreign_network() {
     }
     {
         PairRig rig;
-        rig.txRadio.sendOk = false;
+        rig.txRadio.checkOk = false;
         TEST_ASSERT_FALSE(rig.client.start());
         EXPECT_RESULT(ClientState::Failed, rig.client.state());
     }
     {
         PairRig rig;
+        rig.txRadio.sendOk = false;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Failed, rig.client.state());
+    }
+    for (const ChannelStatus channel : {ChannelStatus::Error, ChannelStatus::Pending}) {
+        PairRig rig;
+        rig.txRadio.channel = channel;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
+        if (channel == ChannelStatus::Pending) {
+            EXPECT_RESULT(ClientState::Checking, rig.client.state());
+            rig.clock.time += PairingClient::TransmitTimeoutMs; // The check never ended.
+            rig.client.poll();
+        }
+        EXPECT_RESULT(ClientState::Failed, rig.client.state());
+    }
+    {
+        // A busy channel waits a random delay and checks again; nothing is sent meanwhile.
+        PairRig rig;
+        rig.txRadio.channel = ChannelStatus::Busy;
+        TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Waiting, rig.client.state());
+        TEST_ASSERT_TRUE(rig.txRadio.sent.empty());
+        rig.txRadio.channel = ChannelStatus::Clear;
+        rig.clock.time += PairingClient::RetryMaxMs;
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Checking, rig.client.state());
+        TEST_ASSERT_EQUAL_INT(2, rig.txRadio.checks);
+        rig.client.poll();
+        EXPECT_RESULT(ClientState::Sending, rig.client.state());
+        TEST_ASSERT_EQUAL_size_t(1, rig.txRadio.sent.size());
+    }
+    {
+        PairRig rig;
         rig.txRadio.tx = TransmitStatus::Pending;
         TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
         rig.clock.time += PairingClient::TransmitTimeoutMs;
         rig.client.poll();
         EXPECT_RESULT(ClientState::Failed, rig.client.state());
@@ -996,11 +1086,13 @@ void test_node_failures_deadline_radio_and_foreign_network() {
         rig.txRadio.tx = TransmitStatus::Error;
         TEST_ASSERT_TRUE(rig.client.start());
         rig.client.poll();
+        rig.client.poll();
         EXPECT_RESULT(ClientState::Failed, rig.client.state());
     }
     {
         PairRig rig;
         TEST_ASSERT_TRUE(rig.client.start());
+        rig.client.poll();
         rig.client.poll();
         rig.txRadio.receiveError = true;
         rig.client.poll();
@@ -1011,10 +1103,12 @@ void test_node_failures_deadline_radio_and_foreign_network() {
         rig.jitter.ok = false; // Falls back to the maximum retry delay.
         TEST_ASSERT_TRUE(rig.client.start());
         rig.client.poll();
+        rig.client.poll();
         rig.clock.time += PairingClient::ListenMs;
         rig.client.poll();
         EXPECT_RESULT(ClientState::Waiting, rig.client.state());
         rig.clock.time += PairingClient::RetryMaxMs;
+        rig.client.poll();
         rig.client.poll();
         EXPECT_RESULT(ClientState::Sending, rig.client.state());
     }
@@ -1279,6 +1373,7 @@ void runPairingTests() {
     RUN_TEST(test_repeated_confirmations_get_done_only_within_bounds);
     RUN_TEST(test_full_storage_is_refused_before_any_exchange);
     RUN_TEST(test_node_ignores_forged_offers_and_resends_confirm_until_done);
+    RUN_TEST(test_busy_channel_while_confirming_resumes_the_confirmation);
     RUN_TEST(test_node_gives_up_without_storing_anything);
     RUN_TEST(test_node_failures_deadline_radio_and_foreign_network);
     RUN_TEST(test_receiver_without_pairing_handler_drops_pairing_frames);
