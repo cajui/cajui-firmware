@@ -246,7 +246,9 @@ polling to arm RX; task/SPI latency still requires measurement on hardware.
 
 Incoming packets are bounded to `MaxFrame`. RX is stopped before querying length and
 reading the FIFO to prevent length changes during a read. Oversized/empty/CRC-failed
-packets are discarded. Up to four received frames are buffered until read; further arrivals are dropped and rely on sender retries. Operations clear stale hardware flags through RadioLib;
+packets are discarded. Up to four received frames are buffered until read; further
+arrivals are dropped and rely on sender retries. Operations clear stale hardware flags
+through RadioLib;
 a queued notification is accepted only when the IRQ matches the current operation.
 
 CAD and transmission are asynchronous. SPI command setup and mutex acquisition can
