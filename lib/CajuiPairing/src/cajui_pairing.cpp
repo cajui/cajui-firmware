@@ -397,14 +397,23 @@ bool PairingClient::start() {
     transmit(ClientState::Listening);
     return state_ != ClientState::Failed;
 }
+// Like DATA, pairing frames check the channel first; a busy channel waits a random
+// retry delay (Waiting) and checks again, until the pairing deadline.
 void PairingClient::transmit(ClientState next) {
     phaseAt_ = clock_.nowMs();
-    if (!radio_.startTransmit(outgoing_)) {
+    afterSend_ = next;
+    if (!radio_.startChannelCheck()) {
         fail();
         return;
     }
-    state_ = ClientState::Sending;
-    afterSend_ = next;
+    state_ = ClientState::Checking;
+}
+void PairingClient::wait() {
+    uint32_t wait = RetryMinMs;
+    if (!jitter_.between(RetryMinMs, RetryMaxMs, wait)) wait = RetryMaxMs;
+    waitMs_ = wait;
+    phaseAt_ = clock_.nowMs();
+    state_ = ClientState::Waiting;
 }
 void PairingClient::fail() {
     wipe(&keys_, sizeof(keys_));
@@ -448,6 +457,23 @@ void PairingClient::poll() {
         fail();
         return;
     }
+    if (state_ == ClientState::Checking) {
+        const auto channel = radio_.channelStatus();
+        if (channel == ChannelStatus::Error ||
+            (channel == ChannelStatus::Pending && uint32_t(now - phaseAt_) >= TransmitTimeoutMs)) {
+            fail();
+        } else if (channel == ChannelStatus::Busy) {
+            wait();
+        } else if (channel == ChannelStatus::Clear) {
+            phaseAt_ = now;
+            if (!radio_.startTransmit(outgoing_)) {
+                fail();
+                return;
+            }
+            state_ = ClientState::Sending;
+        }
+        return;
+    }
     if (state_ == ClientState::Sending) {
         uint32_t completed = 0;
         const auto status = radio_.transmitStatus(completed);
@@ -462,7 +488,7 @@ void PairingClient::poll() {
         return;
     }
     if (state_ == ClientState::Waiting) {
-        if (uint32_t(now - phaseAt_) >= waitMs_) transmit(ClientState::Listening);
+        if (uint32_t(now - phaseAt_) >= waitMs_) transmit(afterSend_);
         return;
     }
     Frame frame{};
@@ -504,10 +530,7 @@ void PairingClient::poll() {
         transmit(ClientState::AwaitingDone);
         return;
     }
-    uint32_t wait = RetryMinMs;
-    if (!jitter_.between(RetryMinMs, RetryMaxMs, wait)) wait = RetryMaxMs;
-    waitMs_ = wait;
-    phaseAt_ = now;
-    state_ = ClientState::Waiting;
+    afterSend_ = ClientState::Listening;
+    wait();
 }
 } // namespace cajui

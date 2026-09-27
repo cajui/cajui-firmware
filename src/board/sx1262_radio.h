@@ -38,8 +38,13 @@ private:
     Mode mode_ = Mode::Idle;
     cajui::ChannelStatus cad_ = cajui::ChannelStatus::Pending;
     cajui::TransmitStatus tx_ = cajui::TransmitStatus::Pending;
-    cajui::Frame received_{};
-    cajui::Link receivedLink_{}; // Of received_; handed over together with it.
+    // Received frames wait here until read: a frame from a second node that arrives while the
+    // receiver commits and acknowledges the first is kept, not overwritten. Only listen()
+    // and sleep() empty it; a full inbox drops the newest frame and its sender retries.
+    static constexpr size_t InboxCapacity = 4;
+    cajui::Frame inbox_[InboxCapacity]{};
+    cajui::Link links_[InboxCapacity]{}; // Signal quality of the frame in the same slot.
+    size_t inboxHead_ = 0, inboxCount_ = 0;
     uint32_t completedAt_ = 0;
     bool initialized_ = false;
     static Sx1262Radio* instance_;
@@ -50,6 +55,8 @@ private:
     void handleInterrupt();
     void fail();
     bool standby();
+    void clearInbox();
+    cajui::ReceiveStatus pop(cajui::Frame&, cajui::Link&);
 };
 } // namespace board
 #endif

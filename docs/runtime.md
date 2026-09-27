@@ -64,7 +64,9 @@ deadline; an ACK still queued then is conservatively treated as unconfirmed.
 - Inject a monotonic millisecond `Clock`. Its unsigned 32-bit value may wrap. All
   policy intervals are below 2^31 ms; poll regularly and never leave an active
   controller unserviced for 2^31 ms. A clock reset requires a new controller.
-- `Radio` operations are nonblocking. A start clears stale events. CAD must finish
+- `Radio` operations are nonblocking. A start clears stale completion events; received
+  frames stay in a small inbox until read, `listen()` or `sleep()` (the SX1262 adapter keeps
+  four), so a second node's frame is not lost while the receiver acknowledges the first. CAD must finish
   before a transmit starts. The adapter must buffer or otherwise retain fast ACKs
   by entering continuous RX immediately at TX completion, not at the next poll.
 - `transmitStatus` reports the actual completion timestamp in the injected clock's

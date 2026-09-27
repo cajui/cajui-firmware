@@ -28,7 +28,9 @@ public:
     virtual ~Radio() = default;
     virtual bool startChannelCheck() = 0;
     virtual ChannelStatus channelStatus() = 0;
-    // Frame remains valid until sleep(). Clear stale events on each new operation.
+    // Frame remains valid until sleep(). Each new operation clears stale completion events;
+    // received frames stay queued until read, listen() or sleep(), since every frame is
+    // authenticated before it counts.
     virtual bool startTransmit(const Frame&) = 0;
     // At actual TX completion, immediately arm continuous RX (before polling).
     // Complete returns the hardware completion time, not the time of this poll.

@@ -120,6 +120,7 @@ private:
 
 enum class ClientState {
     Idle,
+    Checking, // Channel activity detection before each transmission.
     Sending,
     Listening,
     Waiting,
@@ -160,6 +161,7 @@ private:
     Key key_{};
     Frame outgoing_{};
     void transmit(ClientState next);
+    void wait();
     void fail();
     void handleOffer(const Frame&);
 };

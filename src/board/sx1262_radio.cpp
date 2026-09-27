@@ -71,13 +71,17 @@ bool Sx1262Radio::standby() {
         fail();
         return false;
     }
-    received_ = cajui::Frame{};
     return true;
+}
+void Sx1262Radio::clearInbox() {
+    for (auto& frame : inbox_) frame = cajui::Frame{};
+    inboxHead_ = inboxCount_ = 0;
 }
 bool Sx1262Radio::listen() {
     if (!initialized_) return false;
     Lock lock(mutex_);
     if (!standby()) return false;
+    clearInbox();
     if (radio_.startReceive() != RADIOLIB_ERR_NONE) {
         fail();
         return false;
@@ -118,25 +122,27 @@ cajui::TransmitStatus Sx1262Radio::transmitStatus(uint32_t& time) {
     time = completedAt_;
     return tx_;
 }
-cajui::ReceiveStatus Sx1262Radio::receive(cajui::Frame& out) {
-    Lock lock(mutex_);
-    out = cajui::Frame{};
-    if (mode_ == Mode::Failed) return cajui::ReceiveStatus::Error;
-    if (!received_.size) return cajui::ReceiveStatus::Empty;
-    out = received_;
-    received_ = cajui::Frame{};
-    return cajui::ReceiveStatus::Received;
-}
-cajui::ReceiveStatus Sx1262Radio::receiveMeasured(cajui::Frame& out, cajui::Link& link) {
-    Lock lock(mutex_);
+// Called with the mutex held.
+cajui::ReceiveStatus Sx1262Radio::pop(cajui::Frame& out, cajui::Link& link) {
     out = cajui::Frame{};
     link = cajui::Link{};
     if (mode_ == Mode::Failed) return cajui::ReceiveStatus::Error;
-    if (!received_.size) return cajui::ReceiveStatus::Empty;
-    out = received_;
-    link = receivedLink_;
-    received_ = cajui::Frame{};
+    if (!inboxCount_) return cajui::ReceiveStatus::Empty;
+    out = inbox_[inboxHead_];
+    link = links_[inboxHead_];
+    inbox_[inboxHead_] = cajui::Frame{};
+    inboxHead_ = (inboxHead_ + 1) % InboxCapacity;
+    --inboxCount_;
     return cajui::ReceiveStatus::Received;
+}
+cajui::ReceiveStatus Sx1262Radio::receive(cajui::Frame& out) {
+    Lock lock(mutex_);
+    cajui::Link ignored{};
+    return pop(out, ignored);
+}
+cajui::ReceiveStatus Sx1262Radio::receiveMeasured(cajui::Frame& out, cajui::Link& link) {
+    Lock lock(mutex_);
+    return pop(out, link);
 }
 bool Sx1262Radio::sleep() {
     if (!initialized_) return false;
@@ -149,7 +155,7 @@ bool Sx1262Radio::sleep() {
         return false;
     }
     if (mode_ != Mode::Failed) mode_ = Mode::Idle;
-    received_ = cajui::Frame{};
+    clearInbox();
     return true;
 }
 void Sx1262Radio::handleInterrupt() {
@@ -190,12 +196,14 @@ void Sx1262Radio::handleInterrupt() {
         if (frame.size && frame.size <= cajui::MaxFrame) {
             const auto result = radio_.readData(frame.bytes.data(), frame.size);
             if (result == RADIOLIB_ERR_NONE) {
-                if (!received_.size) { // Bounded inbox; sender retries drops.
-                    received_ = frame;
+                if (inboxCount_ < InboxCapacity) { // Bounded; the sender retries a drop.
+                    const size_t slot = (inboxHead_ + inboxCount_) % InboxCapacity;
+                    inbox_[slot] = frame;
                     // Packet RSSI and SNR of this frame, read before RX is restarted.
-                    receivedLink_.known = true;
-                    receivedLink_.rssiDbm = int16_t(lroundf(radio_.getRSSI()));
-                    receivedLink_.snrTenthsDb = int16_t(lroundf(radio_.getSNR() * 10));
+                    links_[slot].known = true;
+                    links_[slot].rssiDbm = int16_t(lroundf(radio_.getRSSI()));
+                    links_[slot].snrTenthsDb = int16_t(lroundf(radio_.getSNR() * 10));
+                    ++inboxCount_;
                 }
             } else if (result != RADIOLIB_ERR_CRC_MISMATCH) {
                 fail();
