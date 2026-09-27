@@ -54,7 +54,7 @@ its backing store.
 ## Transmitter
 
 The board application powers the DHT22 from Vext, allows 2.2 seconds to settle and
-reads its data pin on GPIO47. The OLED is kept in reset. Sensor 1 supplies metric 1
+reads its data pin on GPIO47. The OLED is kept in reset. The CPU runs at 80 MHz while awake; current draw at this clock has not been measured. Sensor 1 supplies metric 1
 (temperature, unit 1 = degrees Celsius) and metric 2 (humidity, unit 2 = percent).
 Wire values are thousandths of those units. Invalid/non-finite/out-of-range readings
 carry `Error` and zero payload, distinguishable from a valid zero measurement.
