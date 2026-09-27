@@ -24,6 +24,7 @@
 #include "board/sx1262_radio.h"
 
 namespace {
+constexpr uint32_t CpuMhz = 80;
 using namespace board;
 constexpr uint32_t SampleSeconds = 300, SensorWarmupMs = 2200;
 constexpr uint8_t PairButton = 0; // PRG.
@@ -156,6 +157,10 @@ void TransmitterApp::sample(cajui::Binding& binding) {
 }
 void TransmitterApp::setup() {
     bootAt_ = millis();
+    // Most of the awake time is the sensor's warm-up delay and waiting for the radio; the
+    // lowest clock that keeps Wi-Fi-free peripherals (UART, SPI) at full speed saves energy.
+    // The chip returns to its default clock at each wake from deep sleep.
+    setCpuFrequencyMhz(CpuMhz);
     startBoard();
     reportFirmware();
     rtc_gpio_deinit(gpio_num_t(PairButton));
