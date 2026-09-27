@@ -65,8 +65,8 @@ private:
     std::unique_ptr<cajui::DiscoveryReporter> discovery_;
     cajui::CommandRunner commandRunner_{pairing_, store_, clock_};
     // Command results wait in a small outbox: one command can produce up to three (a
-    // superseded or closed accept plus its own), and each publication can wait for the
-    // client's lock, so the loop publishes at most one per pass.
+    // superseded or closed accept plus its own), and the uplink's own outbox is small, so
+    // the loop hands over at most one per pass.
     class Results final : public cajui::ResultSink {
     public:
         explicit Results(MqttUplink& uplink) : uplink_(uplink) {}
@@ -425,13 +425,13 @@ void ReceiverApp::loop() {
         }
         pairing_.poll();
         checkBindings();
-        // State lives in RAM and goes to the client's outbox, never flash. Each enqueue can
-        // wait for the client's lock up to its network timeout: at most one per loop pass,
-        // so a pass that published a sample leaves state for the next one.
+        // State lives in RAM and is copied to the uplink's outbox, never flash; the loop never
+        // waits for the network. One publication per pass shares the small outbox among the
+        // producers; each of them retries what it refuses.
         if (forwarder_ && listening && !published) {
             runCommands();
             if (!results_.empty()) {
-                results_.flush(); // This pass's one wait for the client lock.
+                results_.flush(); // This pass's one publication.
                 published = true;
             }
         }

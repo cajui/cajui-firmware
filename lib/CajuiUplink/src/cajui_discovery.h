@@ -37,7 +37,7 @@ public:
     void pause() { valid_ = false; }
     // Learns the entities of a sample the broker acknowledged.
     void sampleForwarded(const QueuedSample&) override;
-    // True when it published (the caller's one client-lock wait for this loop pass).
+    // True when it published (the caller's one publication for this loop pass).
     bool poll();
 
 private:
