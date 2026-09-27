@@ -64,8 +64,9 @@ in the protocol.
 Each wake measures the battery through the board's divider (GPIO1, enabled by GPIO37; see
 `src/board/battery.cpp` for sources) and sends it in DATA; the receiver forwards it as a
 `battery`/`voltage` reading in volts. A reading outside 2.5–4.5 V is unknown (0). On USB
-without a battery the bench board read 4.21–4.30 V, the charger's output rather than a
-cell, so the value is meaningful only with a battery connected. For a LiPo 1S, below 3.4 V the node reports only every 6 hours
+without a battery the bench board read 4.21–4.30 V, and sometimes out of range (unknown):
+the charger's output rather than a cell, so the value is meaningful only with a battery
+connected. For a LiPo 1S, below 3.4 V the node reports only every 6 hours
 (its `expected_interval_seconds` says so), and below 3.2 V it stops transmitting and only
 measures every 6 hours; a mode is left only 100 mV above its threshold. These thresholds are provisional until checked with the chosen
 battery, and the divider correction has not been calibrated on this board. The schedule is
