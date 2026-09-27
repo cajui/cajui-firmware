@@ -26,6 +26,8 @@ enum class ReceiveStatus { Empty, Received, Error };
 class Radio {
 public:
     virtual ~Radio() = default;
+    // A Busy result leaves the radio receiving, so a frame that made the channel busy is
+    // not missed while the caller backs off.
     virtual bool startChannelCheck() = 0;
     virtual ChannelStatus channelStatus() = 0;
     // Frame remains valid until sleep(). Each new operation clears stale completion events;

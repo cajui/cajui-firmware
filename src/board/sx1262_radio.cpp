@@ -184,6 +184,15 @@ void Sx1262Radio::handleInterrupt() {
                : result == RADIOLIB_LORA_DETECTED ? cajui::ChannelStatus::Busy
                                                   : cajui::ChannelStatus::Error;
         mode_ = Mode::Idle;
+        // A busy channel is often the reply the caller is waiting for: keep receiving during
+        // its backoff instead of sitting in standby. A clear one is followed by a transmit.
+        if (cad_ == cajui::ChannelStatus::Busy) {
+            if (radio_.startReceive() != RADIOLIB_ERR_NONE) {
+                fail();
+                return;
+            }
+            mode_ = Mode::Rx;
+        }
     } else if (mode_ == Mode::Rx && (irq & RADIOLIB_SX126X_IRQ_RX_DONE)) {
         // Stop RX before querying length/readData so another packet cannot change length.
         // readData(len=0) would read the full hardware buffer; never call it for empty input.

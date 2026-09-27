@@ -958,6 +958,45 @@ void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     lossy.client.poll(); // ...and JOIN_DONE is read.
     EXPECT_RESULT(ClientState::Paired, lossy.client.state());
 }
+void test_busy_channel_while_confirming_resumes_the_confirmation() {
+    PairRig rig;
+    TEST_ASSERT_TRUE(rig.client.start());
+    rig.host.open();
+    rig.run(1); // The request is heard.
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // The next request gets the offer.
+    bool offered = false;
+    for (int i = 0; i < 40 && !offered; ++i) {
+        rig.client.poll();
+        rig.toReceiver();
+        rig.toNode();
+        offered = !rig.txRadio.inbox.empty();
+        if (!offered) rig.clock.time += 100;
+    }
+    TEST_ASSERT_TRUE(offered);
+    for (int i = 0; i < 5 && rig.client.state() != ClientState::Checking; ++i)
+        rig.client.poll(); // Finish the request, then read the offer.
+    EXPECT_RESULT(ClientState::Checking, rig.client.state()); // Before the confirmation.
+    rig.txRadio.sent.clear();
+    rig.txRadio.channel = ChannelStatus::Busy;
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Waiting, rig.client.state());
+    TEST_ASSERT_TRUE(rig.txRadio.sent.empty());
+    rig.txRadio.channel = ChannelStatus::Clear;
+    rig.clock.time += PairingClient::RetryMaxMs;
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Checking, rig.client.state());
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Sending, rig.client.state());
+    TEST_ASSERT_EQUAL_size_t(1, rig.txRadio.sent.size());
+    EXPECT_RESULT(uint8_t(PairingType::Confirm), untrustedType(rig.txRadio.sent.front()));
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::AwaitingDone, rig.client.state()); // Not back to requesting.
+    rig.toReceiver();
+    rig.toNode();
+    rig.client.poll();
+    EXPECT_RESULT(ClientState::Paired, rig.client.state());
+}
 void test_node_gives_up_without_storing_anything() {
     PairRig rig;
     TEST_ASSERT_TRUE(rig.client.start());
@@ -1334,6 +1373,7 @@ void runPairingTests() {
     RUN_TEST(test_repeated_confirmations_get_done_only_within_bounds);
     RUN_TEST(test_full_storage_is_refused_before_any_exchange);
     RUN_TEST(test_node_ignores_forged_offers_and_resends_confirm_until_done);
+    RUN_TEST(test_busy_channel_while_confirming_resumes_the_confirmation);
     RUN_TEST(test_node_gives_up_without_storing_anything);
     RUN_TEST(test_node_failures_deadline_radio_and_foreign_network);
     RUN_TEST(test_receiver_without_pairing_handler_drops_pairing_frames);
