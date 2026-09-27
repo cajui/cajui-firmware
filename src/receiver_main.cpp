@@ -117,6 +117,8 @@ private:
     cajui::EnrollmentInfo enrollments_[cajui::BindingCapacity]{};
     size_t enrollmentCount_ = 0;
     uint32_t bindingsCheckedAt_ = 0;
+    uint32_t radioActivityAt_ = 0, radioPackets_ = 0;
+    bool activeEnrollment_ = false;
     int8_t power_ = cajui::DefaultPowerDbm;
     // Reading the update state maps flash: read at start and after a confirmation only.
     const char* slot_ = nullptr;
@@ -303,6 +305,9 @@ void ReceiverApp::checkBindings() {
     }
     std::copy(list, list + count, enrollments_);
     enrollmentCount_ = count;
+    activeEnrollment_ = false;
+    for (size_t i = 0; i < count; ++i)
+        activeEnrollment_ = activeEnrollment_ || list[i].state == cajui::Enrollment::Active;
 }
 void ReceiverApp::reportForwarding() {
     if (uplink_.connected() != reportedOnline_) {
@@ -366,6 +371,9 @@ void ReceiverApp::setup() {
     listening_.store(true);
     Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power_));
     enrollmentCount_ = store_.list(enrollments_, cajui::BindingCapacity);
+    for (size_t i = 0; i < enrollmentCount_; ++i)
+        activeEnrollment_ = activeEnrollment_ || enrollments_[i].state == cajui::Enrollment::Active;
+    radioActivityAt_ = millis();
     startForwarding();
     portal_.setPairing(&pairing_);
     setupRunning_ = portal_.start(listening_);
@@ -425,6 +433,17 @@ void ReceiverApp::loop() {
         }
         pairing_.poll();
         checkBindings();
+        // A radio that silently stops hearing is re-armed; if that fails it is a fault.
+        if (radio_.packets() != radioPackets_) {
+            radioPackets_ = radio_.packets();
+            radioActivityAt_ = millis();
+        }
+        if (listening && !failure &&
+            cajui::radioSilent(millis(), radioActivityAt_, activeEnrollment_)) {
+            radioActivityAt_ = millis();
+            Serial.println("CJAPP RADIO silent rearm");
+            if (!radio_.listen()) failure = "RADIO_SILENT";
+        }
         // State lives in RAM and is copied to the uplink's outbox, never flash; the loop never
         // waits for the network. One publication per pass shares the small outbox among the
         // producers; each of them retries what it refuses.

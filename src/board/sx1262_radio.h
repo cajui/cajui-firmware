@@ -3,6 +3,7 @@
 #ifdef CAJUI_RUNTIME_ROLE
 #include <Arduino.h>
 #include <RadioLib.h>
+#include <atomic>
 #include "cajui_application.h"
 
 namespace board {
@@ -28,6 +29,8 @@ public:
     cajui::ReceiveStatus receive(cajui::Frame&) override;
     bool sleep() override;
     cajui::ReceiveStatus receiveMeasured(cajui::Frame&, cajui::Link&) override;
+    // Packets the radio reported, valid or not (CRC errors included): proof it still hears.
+    uint32_t packets() const { return packets_.load(); }
 
 private:
     enum class Mode { Idle, Cad, Tx, Rx, Failed };
@@ -45,6 +48,7 @@ private:
     cajui::Frame inbox_[InboxCapacity]{};
     cajui::Link links_[InboxCapacity]{}; // Signal quality of the frame in the same slot.
     size_t inboxHead_ = 0, inboxCount_ = 0;
+    std::atomic<uint32_t> packets_{0};
     uint32_t completedAt_ = 0;
     bool initialized_ = false;
     static Sx1262Radio* instance_;
