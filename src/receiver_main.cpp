@@ -199,6 +199,7 @@ void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
     status.wifiRssiDbm = status.wifiKnown ? int16_t(WiFi.RSSI()) : int16_t(0);
     status.queued = store_.queued();
     status.queueCapacity = cajui::QueueCapacity;
+    status.dropped = store_.dropped();
     status.published = forwarder_ ? forwarder_->forwarded() : 0;
     status.retries = forwarder_ ? forwarder_->retries() : 0;
     status.pairingOpen = pairing_.state() != cajui::HostState::Closed;

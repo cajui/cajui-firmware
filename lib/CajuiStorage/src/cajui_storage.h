@@ -70,6 +70,8 @@ public:
     uint64_t receiver() const { return registry_.receiver; }
     uint16_t profile() const { return registry_.profile; }
     size_t queued() const { return size_t(tail_ - head_); }
+    // Oldest samples given up for new ones because the queue was full, since mount.
+    uint32_t dropped() const { return dropped_; }
     Result prepare(uint64_t network, uint64_t receiver, uint64_t node, uint64_t generation,
                    const Key&, uint16_t profile);
     Result activate(uint64_t node, uint64_t generation);
@@ -108,6 +110,7 @@ private:
     std::array<records::ReceiptRecord, BindingCapacity> receipts_{};
     std::array<uint16_t, BindingCapacity> queuedBySlot_{};
     uint64_t head_ = 0, tail_ = 0;
+    uint32_t dropped_ = 0;
     std::array<uint8_t, records::BufferCapacity> buffer_{};
     int find(uint64_t node, uint64_t generation) const;
     int authorized(const Binding&) const;

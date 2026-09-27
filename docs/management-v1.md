@@ -79,7 +79,7 @@ Receiver:
   "uptime_s": 3600,
   "reset_reason": "power_on",
   "wifi": { "rssi_dbm": -61 },
-  "queue": { "depth": 0, "capacity": 128 },
+  "queue": { "depth": 0, "capacity": 128, "dropped": 0 },
   "forwarding": { "published": 42, "retries": 1 },
   "pairing": { "open": false, "remaining_s": 0, "requests": [] },
   "capabilities": ["pairing", "revoke"]
@@ -113,6 +113,8 @@ Field rules:
   `pending` image becomes `valid` once it is [confirmed](updates.md#rollback).
 - `reset_reason` is one of `power_on`, `software`, `panic`, `watchdog`, `brownout`,
   `deep_sleep`, `external` or `other`.
+- `queue.dropped` counts the oldest samples given up for new ones because the queue was
+  full, since the receiver started.
 - `pairing.requests` lists the nodes asking to join during an open window, each as
   `{"node_id": "...", "rssi_dbm": -70, "conflict": false}`; see
   [radio pairing](radio-pairing.md#model-and-security).

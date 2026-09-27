@@ -27,6 +27,7 @@ struct ReceiverStatus {
     bool wifiKnown = false;
     int16_t wifiRssiDbm = 0;
     size_t queued = 0, queueCapacity = 0;
+    uint32_t dropped = 0; // Oldest samples given up for new ones since the receiver started.
     uint32_t published = 0, retries = 0;
     bool pairingOpen = false;
     uint32_t pairingRemainingS = 0;

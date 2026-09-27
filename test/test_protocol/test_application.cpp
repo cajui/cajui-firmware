@@ -118,19 +118,20 @@ void test_receiver_storage_failure_never_acknowledges() {
     r.controller.poll();
     TEST_ASSERT_FALSE(r.controller.start());
 }
-void test_receiver_full_queue_preserves_receipt_and_reacks_duplicate() {
+void test_receiver_full_queue_acknowledges_the_new_sample() {
     Rig r;
     r.start();
     for (uint64_t counter = 1; counter <= 128; ++counter) {
         r.pollData(counter);
         r.complete();
     }
-    r.pollData(129);
-    EXPECT_RESULT(Result::Full, r.controller.lastResult());
-    TEST_ASSERT_EQUAL_UINT(128, r.radio.sends);
-    r.pollData(128);
-    EXPECT_RESULT(Result::Duplicate, r.controller.lastResult());
+    r.pollData(129); // The oldest sample gives way; the node gets its ACK.
+    EXPECT_RESULT(Result::Ok, r.controller.lastResult());
     TEST_ASSERT_EQUAL_UINT(129, r.radio.sends);
+    r.complete();
+    r.pollData(129);
+    EXPECT_RESULT(Result::Duplicate, r.controller.lastResult());
+    TEST_ASSERT_EQUAL_UINT(130, r.radio.sends);
 }
 void test_receiver_radio_failures_and_timeout_are_terminal() {
     for (int scenario = 0; scenario < 5; ++scenario) {
@@ -278,7 +279,7 @@ void runApplicationTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_receiver_routes_only_enrolled_authenticated_data);
     RUN_TEST(test_receiver_storage_failure_never_acknowledges);
-    RUN_TEST(test_receiver_full_queue_preserves_receipt_and_reacks_duplicate);
+    RUN_TEST(test_receiver_full_queue_acknowledges_the_new_sample);
     RUN_TEST(test_receiver_radio_failures_and_timeout_are_terminal);
     RUN_TEST(test_replayed_duplicate_is_acknowledged_a_bounded_number_of_times);
     RUN_TEST(test_duplicate_limiter_tracks_nodes_independently);
