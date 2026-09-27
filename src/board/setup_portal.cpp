@@ -364,11 +364,12 @@ bool SetupPortal::save() {
 void SetupPortal::fillPairing(cajui::PairingView& pairing) const {
     pairing.open = pairing_->state() != cajui::HostState::Closed;
     pairing.remainingSeconds = pairing_->remainingMs() / MsPerSecond;
-    pairing.count = pairing_->candidateCount();
+    cajui::Candidate waiting[cajui::MaxCandidates]{};
+    pairing.count = pairing_->waiting(waiting, cajui::MaxCandidates);
     for (size_t i = 0; i < pairing.count && i < cajui::MaxPairingCandidates; ++i) {
-        pairing.nodes[i] = pairing_->candidates()[i].node;
-        pairing.rssi[i] = pairing_->candidates()[i].rssi;
-        pairing.conflict[i] = pairing_->candidates()[i].conflict;
+        pairing.nodes[i] = waiting[i].node;
+        pairing.rssi[i] = waiting[i].rssi;
+        pairing.conflict[i] = waiting[i].conflict;
     }
     if (pairing_->state() == cajui::HostState::Offered) pairing.offered = pairing_->offeredNode();
     pairing.paired = pairing_->pairedNode();

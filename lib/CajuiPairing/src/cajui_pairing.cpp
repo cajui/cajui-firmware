@@ -239,6 +239,12 @@ void PairingHost::close() {
     count_ = 0;
     for (auto& c : candidates_) c = Candidate{};
 }
+size_t PairingHost::waiting(Candidate* output, size_t capacity) const {
+    size_t count = 0;
+    for (size_t i = 0; i < count_ && count < capacity; ++i)
+        if (!candidates_[i].joined) output[count++] = candidates_[i];
+    return count;
+}
 uint32_t PairingHost::remainingMs() const {
     if (state_ == HostState::Closed) return 0;
     const uint32_t elapsed = clock_.nowMs() - openedAt_;
@@ -326,6 +332,8 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
         wipe(done.key.data(), done.key.size());
         return false;
     }
+    for (size_t i = 0; i < count_; ++i)
+        if (candidates_[i].node == offer_.node) candidates_[i].joined = true;
     forgetCompleted();
     done.at = clock_.nowMs();
     done.replies = 1; // This first JOIN_DONE.

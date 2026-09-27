@@ -63,6 +63,9 @@ struct Candidate {
     int16_t rssi = 0;
     uint32_t seenAt = 0;
     bool conflict = false;
+    // Paired during this window. It stays pinned, so another device cannot take its ID
+    // until the window closes, but it is no longer asking to join.
+    bool joined = false;
 };
 enum class HostState { Closed, Open, Offered, Paired };
 // Receiver side. Owned by the receiver loop; the setup page opens the window and accepts.
@@ -87,6 +90,8 @@ public:
     HostState state() const { return state_; }
     const Candidate* candidates() const { return candidates_; }
     size_t candidateCount() const { return count_; }
+    // Copies the candidates still asking to join, in list order; returns how many.
+    size_t waiting(Candidate* output, size_t capacity) const;
     uint64_t offeredNode() const { return offer_.node; }
     uint64_t pairedNode() const { return paired_; }
     uint32_t remainingMs() const;

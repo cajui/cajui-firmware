@@ -89,6 +89,10 @@ of a new credential generation, exactly as a USB enrollment would store it.
    no more for someone replaying a recorded one.
    On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
+A node that completed the exchange leaves the list shown on the page and in the
+management state, but stays pinned until the window closes, so no other device can
+request its ID with another key in the meantime.
+
 Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
 stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each
 side, like a USB rotation; revoked generations free theirs when a slot is needed, see

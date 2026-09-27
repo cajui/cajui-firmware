@@ -301,6 +301,11 @@ void test_radio_pairing_creates_matching_active_bindings() {
     EXPECT_RESULT(ClientState::Paired, rig.client.state());
     EXPECT_RESULT(HostState::Paired, rig.host.state());
     TEST_ASSERT_EQUAL_UINT64(2, rig.host.pairedNode());
+    // The joined node stays pinned but is no longer listed as asking to join.
+    TEST_ASSERT_EQUAL_size_t(1, rig.host.candidateCount());
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].joined);
+    Candidate waiting[MaxCandidates]{};
+    TEST_ASSERT_EQUAL_size_t(0, rig.host.waiting(waiting, MaxCandidates));
     TEST_ASSERT_EQUAL_UINT64(1, rig.client.receiver());
     Binding atNode{}, atReceiver{};
     TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
@@ -736,6 +741,10 @@ void test_host_ignores_input_outside_the_window_and_limits_candidates() {
     // let an attacker flush the victim and re-list its ID with another key.
     for (size_t i = 0; i < rig.host.candidateCount(); ++i)
         TEST_ASSERT_EQUAL_UINT64(10 + i, rig.host.candidates()[i].node);
+    Candidate firstTwo[2]{};
+    TEST_ASSERT_EQUAL_size_t(2, rig.host.waiting(firstTwo, 2));
+    TEST_ASSERT_EQUAL_UINT64(10, firstTwo[0].node);
+    TEST_ASSERT_EQUAL_UINT64(11, firstTwo[1].node);
     EXPECT_RESULT(Result::NotFound, rig.host.accept(14));
     EXPECT_RESULT(Result::NotFound, rig.host.accept(99));
     TEST_ASSERT_FALSE(rig.host.handle(Frame{}, -50, reply));
