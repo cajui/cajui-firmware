@@ -226,9 +226,11 @@ void TransmitterApp::loop() {
                       unsigned(report.completion), unsigned(report.attempts),
                       int(report.powerCommand));
         rememberPower(report);
-        clearFaults();     // A full cycle ran: storage and radio work.
-        confirmFirmware(); // So a freshly installed image is kept.
         if (restartPending_) restartFor(*commands_);
+        const auto outcome = cajui::afterDelivery(report.completion);
+        if (outcome.fault) return fault("DELIVERY");
+        clearFaults(); // Storage and radio worked, even if no receiver answered.
+        if (outcome.confirm) confirmFirmware(); // Only an ACK keeps a fresh image.
         const uint32_t elapsed = millis() - bootAt_;
         const uint32_t period = SampleSeconds * 1000;
         sleepFor(elapsed < period ? period - elapsed : period);

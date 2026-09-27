@@ -103,4 +103,18 @@ uint32_t retryDelayMs(uint32_t consecutiveFaults) {
     for (uint32_t fault = 1; fault < consecutiveFaults && delay < MaxRetryMs; ++fault) delay *= 2;
     return delay < MaxRetryMs ? delay : MaxRetryMs;
 }
+CycleOutcome afterDelivery(Completion completion) {
+    CycleOutcome outcome{};
+    switch (completion) {
+    case Completion::Acknowledged: outcome.confirm = true; break;
+    case Completion::AttemptsExhausted:
+    case Completion::Deadline:
+    case Completion::Cancelled: break;
+    case Completion::None:
+    case Completion::RadioError:
+    case Completion::RadioTimeout:
+    case Completion::RandomError: outcome.fault = true; break;
+    }
+    return outcome;
+}
 } // namespace cajui
