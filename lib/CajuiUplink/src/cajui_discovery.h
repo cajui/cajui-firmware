@@ -10,8 +10,17 @@ namespace cajui {
 // Cajuí Central sets itself up too (docs/home-assistant.md). Topics are
 // homeassistant/sensor/<source_id>/<object_id>/config: the source is Discovery's optional
 // node level, so a broker ACL can confine each receiver to its own configurations.
-enum class Entity : uint8_t { Temperature, Humidity, Rssi, Snr, WifiRssi, QueueDepth, Uptime };
-constexpr size_t NodeEntities = 4, ReceiverEntities = 3, DiscoveryCapacity = 1024;
+enum class Entity : uint8_t {
+    Temperature,
+    Humidity,
+    Rssi,
+    Snr,
+    BatteryVoltage,
+    WifiRssi,
+    QueueDepth,
+    Uptime
+};
+constexpr size_t NodeEntities = 5, ReceiverEntities = 3, DiscoveryCapacity = 1024;
 struct DiscoveryItem {
     uint64_t device = 0; // A transmitter's node ID, or the receiver's own ID.
     uint16_t sensor = 0; // Sensor of a transmitter measurement; unused otherwise.
@@ -47,7 +56,7 @@ private:
         uint32_t seen = 0; // Order of the last sample, to reuse the stalest slot.
         uint16_t sensor = 0;
         uint32_t intervalS = 0;
-        uint8_t known = 0, published = 0; // Bits of Entity::Temperature..Snr.
+        uint8_t known = 0, published = 0; // Bits of Entity::Temperature..BatteryVoltage.
     };
     StatePublisher& publisher_;
     uint64_t receiver_;

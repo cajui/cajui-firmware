@@ -13,7 +13,7 @@ constexpr unsigned IdSuffixDigits = 4;
 constexpr uint64_t IdSuffixMask = 0xffff;
 
 struct Kind {
-    const char* object; // Object ID suffix and unique ID part.
+    const char* object; // Object ID suffix, unique ID part and telemetry metric.
     const char* name;
     const char* deviceClass; // Null: none.
     const char* unit;        // Null: none.
@@ -28,6 +28,7 @@ const Kind* kind(Entity entity) {
         {"humidity", "Humidity", "humidity", "%", false},
         {"rssi", "Signal strength", "signal_strength", "dBm", true},
         {"snr", "Signal-to-noise ratio", nullptr, "dB", true},
+        {"voltage", "Battery voltage", "voltage", "V", true},
         {"wifi_rssi", "Wi-Fi signal", "signal_strength", "dBm", true},
         {"queue", "Samples waiting", nullptr, nullptr, true},
         {"uptime", "Uptime", "duration", "s", true},
@@ -40,6 +41,10 @@ bool onReceiver(Entity entity) {
 }
 bool radio(Entity entity) {
     return entity == Entity::Rssi || entity == Entity::Snr;
+}
+// Registry measurements carry the transmitter's sensor ID; radio and battery readings do not.
+bool perSensor(Entity entity) {
+    return entity == Entity::Temperature || entity == Entity::Humidity;
 }
 } // namespace
 
@@ -55,7 +60,7 @@ bool formatDiscoveryTopic(const char* source, const DiscoveryItem& item, char* o
     if (!validDiscoverySource(source) || !k || !output || !capacity) return false;
     Text text(output, capacity);
     text.format("homeassistant/sensor/%s/%016" PRIx64 "_%s", source, item.device, k->object);
-    if (!onReceiver(item.entity) && !radio(item.entity)) text.format("_%u", unsigned(item.sensor));
+    if (perSensor(item.entity)) text.format("_%u", unsigned(item.sensor));
     text.format("/config");
     return text.ok();
 }
@@ -74,7 +79,7 @@ bool formatDiscovery(const char* source, uint64_t receiver, const DiscoveryItem&
     Text text(output, capacity);
     text.format("{\"name\":\"%s\",\"uniq_id\":\"cajui_%016" PRIx64 "_%s", k->name, item.device,
                 k->object);
-    if (!own && !radio(item.entity)) text.format("_%u", unsigned(item.sensor));
+    if (perSensor(item.entity)) text.format("_%u", unsigned(item.sensor));
     text.format("\",\"qos\":1");
     if (own)
         text.format(",\"stat_t\":\"manage/v1/%s/%016" PRIx64 "/state\"", source, item.device);
@@ -96,6 +101,8 @@ bool formatDiscovery(const char* source, uint64_t receiver, const DiscoveryItem&
         Text id(sensor, sizeof(sensor));
         if (radio(item.entity))
             id.format("radio");
+        else if (item.entity == Entity::BatteryVoltage)
+            id.format("battery");
         else
             id.format("sensor-%u", unsigned(item.sensor));
         text.format(",\"val_tpl\":\"{%% set r = value_json.readings | selectattr('sensor_id', "
@@ -167,6 +174,7 @@ void DiscoveryReporter::sampleForwarded(const QueuedSample& sample) {
     }
     if (sample.link.known)
         slot->known |= uint8_t(1u << unsigned(Entity::Rssi) | 1u << unsigned(Entity::Snr));
+    if (sample.data.batteryMv) slot->known |= uint8_t(1u << unsigned(Entity::BatteryVoltage));
 }
 bool DiscoveryReporter::publish(const DiscoveryItem& item) {
     size_t size = 0;

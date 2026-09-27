@@ -79,5 +79,7 @@ private:
 };
 // Local metric registry v1: sensor 1, temperature 1/Celsius 1, humidity 2/percent 2.
 // Non-finite/out-of-range DHT22 values become Error with zero payload, not zero readings.
-Data climateSample(float temperatureC, float humidityPercent, uint32_t nextSeconds);
+// batteryMv 0 means unknown, never a zero-volt measurement.
+Data climateSample(float temperatureC, float humidityPercent, uint32_t nextSeconds,
+                   uint16_t batteryMv = 0);
 } // namespace cajui

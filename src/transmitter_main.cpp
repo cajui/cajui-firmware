@@ -18,12 +18,17 @@
 #include "cajui_provisioning.h"
 #include "cajui_setup.h"
 #include "board/admin_console.h"
+#include "board/battery.h"
 #include "board/common.h"
 #include "board/display.h"
 #include "board/ota.h"
 #include "board/sx1262_radio.h"
 
 namespace {
+// Battery mode across deep sleep; the magic rejects RTC memory's power-on contents.
+constexpr uint32_t BatteryMagic = 0x42415454; // "BATT"
+RTC_NOINIT_ATTR uint32_t batteryMagic;
+RTC_NOINIT_ATTR uint8_t batteryModeRtc;
 constexpr uint32_t CpuMhz = 80;
 using namespace board;
 constexpr uint32_t SampleSeconds = 300, SensorWarmupMs = 2200;
@@ -53,6 +58,7 @@ private:
     Mode mode_ = Mode::Admin;
     bool restartPending_ = false;
     uint32_t bootAt_ = 0;
+    uint32_t intervalS_ = SampleSeconds; // Longer on a low battery.
     int8_t configuredPower_ = cajui::DefaultPowerDbm, power_ = cajui::DefaultPowerDbm;
     int8_t startPower();
     void rememberPower(const cajui::SendReport&);
@@ -139,6 +145,21 @@ void TransmitterApp::fault(const char* reason) {
     sleepFor(delay);
 }
 void TransmitterApp::sample(cajui::Binding& binding) {
+    const uint16_t batteryMv = board::readBatteryMv();
+    // The previous mode survives deep sleep in RTC memory; after power-on it starts Normal.
+    const auto previous = batteryMagic == BatteryMagic && esp_reset_reason() != ESP_RST_POWERON
+                              ? cajui::BatteryMode(batteryModeRtc)
+                              : cajui::BatteryMode::Normal;
+    const auto battery = cajui::batteryMode(batteryMv, previous);
+    batteryMagic = BatteryMagic;
+    batteryModeRtc = uint8_t(battery);
+    if (battery == cajui::BatteryMode::Critical) {
+        // Nothing is sent: the radio is the largest draw. Measure again after the long sleep.
+        Serial.printf("CJAPP BATTERY critical mv=%u sleep_s=%u\n", unsigned(batteryMv),
+                      unsigned(cajui::LowBatterySeconds));
+        sleepFor(cajui::LowBatterySeconds * 1000);
+    }
+    intervalS_ = battery == cajui::BatteryMode::Low ? cajui::LowBatterySeconds : SampleSeconds;
     output(board::Vext, LOW);
     // Hold the shared-rail display in reset; this application does not initialize it.
     output(board::OledReset, LOW);
@@ -147,12 +168,13 @@ void TransmitterApp::sample(cajui::Binding& binding) {
     delay(SensorWarmupMs);
     const float humidity = sensor.readHumidity();
     const float temperature = sensor.readTemperature();
-    const auto data = cajui::climateSample(temperature, humidity, SampleSeconds);
+    const auto data = cajui::climateSample(temperature, humidity, intervalS_, batteryMv);
     pinMode(board::SensorData, INPUT);
     output(board::Vext, HIGH);
-    Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u power=%d\n",
-                  unsigned(data.readings[0].status), unsigned(data.readings[1].status),
-                  int(power_));
+    Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u power=%d battery_mv=%u "
+                  "interval_s=%u\n",
+                  unsigned(data.readings[0].status), unsigned(data.readings[1].status), int(power_),
+                  unsigned(batteryMv), unsigned(intervalS_));
     if (sender_.start(binding, data, store_) != cajui::StartResult::Started) fault("SEND_START");
 }
 void TransmitterApp::setup() {
@@ -237,7 +259,7 @@ void TransmitterApp::loop() {
         if (restartPending_) restartFor(*commands_);
         if (outcome.fault) return fault("DELIVERY");
         const uint32_t elapsed = millis() - bootAt_;
-        const uint32_t period = SampleSeconds * 1000;
+        const uint32_t period = intervalS_ * 1000;
         sleepFor(elapsed < period ? period - elapsed : period);
     }
     delay(1);

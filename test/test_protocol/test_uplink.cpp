@@ -225,6 +225,21 @@ void test_radio_link_travels_as_readings_of_a_radio_sensor() {
     big.link = sample.link;
     TEST_ASSERT_NOT_EQUAL(std::string::npos, format(big).find("\"metric\":\"snr\""));
 }
+void test_measured_battery_travels_as_a_voltage_reading() {
+    Data data{};
+    data.nextSeconds = 300;
+    data.count = 1;
+    data.readings[0] = reading(1, 1, 1, Status::Ok, 21000);
+    TEST_ASSERT_EQUAL(std::string::npos, format(queued(data)).find("battery"));
+    data.batteryMv = 3905;
+    TEST_ASSERT_NOT_EQUAL(
+        std::string::npos,
+        format(queued(data))
+            .find(",{\"sensor_id\":\"battery\",\"metric\":\"voltage\",\"value\":3.905,"
+                  "\"unit\":\"V\",\"status\":\"ok\"}"));
+    data.batteryMv = 4012;
+    TEST_ASSERT_NOT_EQUAL(std::string::npos, format(queued(data)).find("\"value\":4.012,"));
+}
 void test_invalid_samples_or_small_buffers_are_rejected() {
     Data data{};
     data.nextSeconds = 300;
@@ -558,6 +573,7 @@ void runUplinkTests() {
     RUN_TEST(test_sample_matches_the_central_mqtt_contract);
     RUN_TEST(test_sample_values_statuses_and_unknown_registry_entries);
     RUN_TEST(test_radio_link_travels_as_readings_of_a_radio_sensor);
+    RUN_TEST(test_measured_battery_travels_as_a_voltage_reading);
     RUN_TEST(test_invalid_samples_or_small_buffers_are_rejected);
     RUN_TEST(test_forwarder_removes_only_after_matching_puback);
     RUN_TEST(test_forwarder_tells_its_observer_about_acknowledged_samples_only);

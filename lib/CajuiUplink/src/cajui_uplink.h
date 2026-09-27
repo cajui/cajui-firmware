@@ -43,7 +43,8 @@ constexpr uint32_t MaxExpectedInterval = 604800; // Central accepts 1 second to 
 bool formatTopic(const char* source, uint64_t device, char* output, size_t capacity);
 // sample_id is "<generation>.<counter>": stable across retries and unique per acquisition
 // for a credential. measured_at is omitted because the receiver does not know it. When the
-// receiver measured the frame, readings "radio"/"rssi" (dBm) and "radio"/"snr" (dB) follow.
+// receiver measured the frame, readings "radio"/"rssi" (dBm) and "radio"/"snr" (dB) follow; a
+// measured battery adds "battery"/"voltage" (V).
 bool formatSample(const char* source, const QueuedSample&, char* output, size_t capacity,
                   size_t& size);
 
