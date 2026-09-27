@@ -174,7 +174,7 @@ bool DiscoveryReporter::publish(const DiscoveryItem& item) {
            formatDiscovery(source_, receiver_, item, payload_, sizeof(payload_), size) &&
            publisher_.publishRetained(topic_, payload_, size);
 }
-// A refusal still counted as this pass's wait for the client; a run of them backs off so the
+// A refusal still counted as this pass's publication; a run of them backs off so the
 // state reporter keeps its turns.
 bool DiscoveryReporter::poll() {
     if (!valid_ || !publisher_.ready()) return false;

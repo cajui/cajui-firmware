@@ -11,11 +11,13 @@ namespace {
 constexpr UBaseType_t AckDepth = 8; // Overflow only delays removal until the retry timeout.
 // A full queue drops a command; its sender gets no result and treats it as not delivered.
 constexpr UBaseType_t CommandDepth = 4;
-// The client's own lock can be held for a network operation up to this timeout, and the
-// radio loop enqueues under that lock: keep it well below the 5-second task watchdog.
+// A full outbox refuses a publication; its producer retries later. Each entry is ~1.7 KB.
+constexpr UBaseType_t OutboxDepth = 4;
+// The client's own lock can be held for a network operation up to this timeout; only the
+// sender, restart and setup tasks can wait for it, never the radio loop.
 constexpr int KeepaliveSeconds = 60, ReconnectMs = 5000, NetworkTimeoutMs = 2500;
 constexpr int QoS = 1, Retain = 0;
-constexpr uint32_t RestartStack = 4096;
+constexpr uint32_t RestartStack = 4096, SenderStack = 6144;
 constexpr int BufferBytes = 2048;
 const char Online[] = "online", Offline[] = "offline";
 }
@@ -26,12 +28,15 @@ bool MqttUplink::prepare() {
     if (!mutex_) mutex_ = xSemaphoreCreateMutex();
     if (!acks_) acks_ = xQueueCreate(AckDepth, sizeof(int));
     if (!commands_) commands_ = xQueueCreate(CommandDepth, sizeof(Incoming));
+    if (!outbox_) outbox_ = xQueueCreate(OutboxDepth, sizeof(Outgoing));
+    if (!sender_ && outbox_)
+        xTaskCreate(senderTask, "cajui-mqtt-tx", SenderStack, this, tskIDLE_PRIORITY + 1, &sender_);
     // Replacing the client can wait for its network task, which neither the radio loop nor
     // the client's own event handler may do.
     if (!restarter_)
         xTaskCreate(restartTask, "cajui-mqtt", RestartStack, this, tskIDLE_PRIORITY + 1,
                     &restarter_);
-    return mutex_ && acks_ && commands_ && restarter_;
+    return mutex_ && acks_ && commands_ && outbox_ && restarter_ && sender_;
 }
 bool MqttUplink::begin(const cajui::UplinkConfig& config, uint64_t device) {
     if (!cajui::validUplink(config)) return false;
@@ -58,9 +63,12 @@ void MqttUplink::stopMqtt() {
     online_.store(false);
     // Message IDs restart with a new client; stale acknowledgements must not match them.
     if (acks_) xQueueReset(acks_);
-    // Commands addressed through the old identity must not run under the new one.
+    // Commands addressed through the old identity must not run under the new one, and
+    // publications meant for the old client are not sent through the new one.
     if (commands_) xQueueReset(commands_);
+    if (outbox_) xQueueReset(outbox_);
     for (auto& id : stateIds_) id.store(0);
+    for (auto& id : messageIds_) id.store(0);
 }
 bool MqttUplink::startMqtt(const cajui::UplinkConfig& config, uint64_t device) {
     if (!cajui::validUplink(config) || !prepare()) return false;
@@ -142,9 +150,21 @@ void MqttUplink::onEvent(void* self, esp_event_base_t, int32_t event, void* data
         uplink->online_.store(true);
         break;
     case MQTT_EVENT_DISCONNECTED: uplink->online_.store(false); break;
-    case MQTT_EVENT_PUBLISHED:
-        if (!uplink->takeStateId(details->msg_id)) xQueueSend(uplink->acks_, &details->msg_id, 0);
+    case MQTT_EVENT_PUBLISHED: {
+        if (uplink->takeStateId(details->msg_id)) break;
+        // A PUBACK that beats the sender's bookkeeping is unmatched: the forwarder then
+        // republishes after its timeout and the consumer deduplicates the sample.
+        for (size_t i = 0; i < Mappings; ++i) {
+            int expected = details->msg_id;
+            if (details->msg_id > 0 &&
+                uplink->messageIds_[i].compare_exchange_strong(expected, 0)) {
+                const int local = uplink->localIds_[i].load();
+                xQueueSend(uplink->acks_, &local, 0);
+                break;
+            }
+        }
         break;
+    }
     case MQTT_EVENT_DATA: uplink->receive(*details); break;
     case MQTT_EVENT_ERROR:
         if (uplink->managed_.load() && details->error_handle &&
@@ -191,47 +211,85 @@ void MqttUplink::receive(const esp_mqtt_event_t& event) {
 bool MqttUplink::nextCommand(Incoming& incoming) {
     return commands_ && xQueueReceive(commands_, &incoming, 0) == pdTRUE;
 }
-bool MqttUplink::publishResult(uint64_t device, const char* payload, uint32_t generation) {
-    // settings_ changes only under the mutex, while the client is replaced.
-    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return false;
-    char topic[cajui::TopicCapacity]{};
-    const int id =
-        generation == generation_.load() && client_ && online_.load() && managed_.load() &&
-                cajui::formatManageTopic(settings_.username, device, cajui::ManageTopic::Results,
-                                         topic, sizeof(topic))
-            ? esp_mqtt_client_enqueue(client_, topic, payload, 0, QoS, 0, true)
-            : -1;
-    rememberStateId(id);
-    xSemaphoreGive(mutex_);
-    return id > 0;
+// The radio loop's side: copy and queue, never touch the client.
+bool MqttUplink::stage(Kind kind, const char* topic, const char* payload, size_t size, bool retain,
+                       int local, uint64_t device, uint32_t generation) {
+    if (!outbox_ || size > cajui::PayloadCapacity) return false;
+    staging_.kind = kind;
+    staging_.retain = retain;
+    staging_.local = local;
+    staging_.generation = generation;
+    staging_.device = device;
+    staging_.size = size;
+    staging_.topic[0] = 0;
+    if (topic) {
+        const size_t length = std::strlen(topic);
+        if (length >= sizeof(staging_.topic)) return false;
+        std::memcpy(staging_.topic, topic, length + 1);
+    }
+    std::memcpy(staging_.payload, payload, size);
+    staging_.payload[size] = 0;
+    return xQueueSend(outbox_, &staging_, 0) == pdTRUE;
 }
-int MqttUplink::enqueueRetained(const char* topic, const char* payload) {
-    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return -1;
-    const int id = client_ && online_.load() && managed_.load()
-                       ? esp_mqtt_client_enqueue(client_, topic, payload, 0, QoS, 1, true)
-                       : -1;
-    rememberStateId(id);
-    xSemaphoreGive(mutex_);
-    return id;
+bool MqttUplink::publishResult(uint64_t device, const char* payload, uint32_t generation) {
+    return online_.load() && managed_.load() &&
+           stage(Kind::Result, nullptr, payload, std::strlen(payload), false, 0, device,
+                 generation);
 }
 bool MqttUplink::publishRetained(const char* topic, const char* payload, size_t size) {
     // The client computes the length of a NUL-terminated payload itself.
-    if (std::strlen(payload) != size) return false;
-    return enqueueRetained(topic, payload) > 0;
+    return std::strlen(payload) == size && online_.load() && managed_.load() &&
+           stage(Kind::State, topic, payload, size, true, 0, 0, generation_.load());
 }
 void MqttUplink::announceOffline() {
-    enqueueRetained(availability_, Offline);
+    stage(Kind::Offline, nullptr, Offline, sizeof(Offline) - 1, true, 0, 0, generation_.load());
 }
 int MqttUplink::publish(const char* topic, const char* payload, size_t size) {
-    // Enqueue instead of publish: the MQTT task performs network I/O. The loop can still
-    // wait for the client's lock, at most the network timeout. The outbox copies the payload. While
-    // the client is being replaced the publication is refused and retried later.
-    if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return -1;
-    const int id =
-        client_ ? esp_mqtt_client_enqueue(client_, topic, payload, int(size), QoS, Retain, true)
-                : -1;
+    int local = nextLocal_.fetch_add(1) + 1;
+    if (local <= 0) { // Wrapped: IDs stay positive, as the forwarder expects.
+        nextLocal_.store(1);
+        local = 1;
+    }
+    return stage(Kind::Sample, topic, payload, size, false, local, 0, generation_.load()) ? local
+                                                                                          : -1;
+}
+// The sender task's side: it may wait for the client's lock, which the radio loop never does.
+void MqttUplink::senderTask(void* self) {
+    auto* uplink = static_cast<MqttUplink*>(self);
+    for (;;)
+        if (xQueueReceive(uplink->outbox_, &uplink->sending_, portMAX_DELAY) == pdTRUE)
+            uplink->send();
+}
+void MqttUplink::send() {
+    Outgoing& item = sending_;
+    xSemaphoreTake(mutex_, portMAX_DELAY);
+    const bool current = client_ && item.generation == generation_.load();
+    const bool managed = online_.load() && managed_.load();
+    int id = -1;
+    if (current && item.kind == Kind::Sample) {
+        id = esp_mqtt_client_enqueue(client_, item.topic, item.payload, int(item.size), QoS, Retain,
+                                     true);
+        if (id > 0) {
+            const size_t slot = nextMapping_.fetch_add(1) % Mappings;
+            localIds_[slot].store(item.local);
+            messageIds_[slot].store(id);
+        }
+    } else if (current && managed) {
+        char topic[cajui::TopicCapacity]{};
+        const char* target = item.topic;
+        if (item.kind == Kind::Offline)
+            target = availability_;
+        else if (item.kind == Kind::Result)
+            target = cajui::formatManageTopic(settings_.username, item.device,
+                                              cajui::ManageTopic::Results, topic, sizeof(topic))
+                         ? topic
+                         : nullptr;
+        if (target)
+            id = esp_mqtt_client_enqueue(client_, target, item.payload, 0, QoS, item.retain ? 1 : 0,
+                                         true);
+        rememberStateId(id);
+    }
     xSemaphoreGive(mutex_);
-    return id;
 }
 bool MqttUplink::acknowledged(int& id) {
     if (!mutex_ || xSemaphoreTake(mutex_, 0) != pdTRUE) return false;
