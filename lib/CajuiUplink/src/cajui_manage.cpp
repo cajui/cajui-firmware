@@ -87,11 +87,11 @@ bool formatReceiverState(const char* source, const ReceiverStatus& status, char*
         text.format(",\"wifi\":{\"rssi_dbm\":%d}", int(status.wifiRssiDbm));
     else
         text.format(",\"wifi\":{\"rssi_dbm\":null}");
-    text.format(",\"queue\":{\"depth\":%u,\"capacity\":%u},\"forwarding\":{\"published\":%" PRIu32
-                ",\"retries\":%" PRIu32 "},\"pairing\":{\"open\":%s,\"remaining_s\":%" PRIu32
-                ",\"requests\":[",
-                unsigned(status.queued), unsigned(status.queueCapacity), status.published,
-                status.retries, status.pairingOpen ? "true" : "false",
+    text.format(",\"queue\":{\"depth\":%u,\"capacity\":%u,\"dropped\":%" PRIu32
+                "},\"forwarding\":{\"published\":%" PRIu32 ",\"retries\":%" PRIu32
+                "},\"pairing\":{\"open\":%s,\"remaining_s\":%" PRIu32 ",\"requests\":[",
+                unsigned(status.queued), unsigned(status.queueCapacity), status.dropped,
+                status.published, status.retries, status.pairingOpen ? "true" : "false",
                 status.pairingOpen ? status.pairingRemainingS : 0);
     for (size_t i = 0; i < status.requestCount; ++i) {
         const Candidate& request = status.requests[i];

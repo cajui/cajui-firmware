@@ -89,8 +89,9 @@ a bounded routing hint to an already enrolled binding, never proof of identity.
 The existing authenticated receive path commits the sample and replay receipt before
 starting the ACK. The radio's RSSI and SNR of each accepted frame are logged
 (`CJAPP ACCEPT ... rssi=<dBm> snr=<dB>`) and stored with the queued sample. Unknown,
-revoked, corrupted, replayed or full-queue input receives
-no acceptance ACK. A duplicate of the last committed sample gets the same ACK without
+revoked, corrupted or replayed input receives no acceptance ACK. A full queue gives up its
+oldest sample for the new one, which is acknowledged; the state's `queue.dropped` counts
+these since the receiver started. A duplicate of the last committed sample gets the same ACK without
 another queue entry, even if the queue is full, at most three times per node per minute:
 a genuine node repeats a sample twice at most when its ACK is lost, and the bound keeps
 a replayed frame from making the receiver transmit on demand.
@@ -245,8 +246,9 @@ polling to arm RX; task/SPI latency still requires measurement on hardware.
 
 Incoming packets are bounded to `MaxFrame`. RX is stopped before querying length and
 reading the FIFO to prevent length changes during a read. Oversized/empty/CRC-failed
-packets are discarded. One pending frame is buffered; extra arrivals are dropped
-and rely on sender retries. Operations clear stale hardware flags through RadioLib;
+packets are discarded. Up to four received frames are buffered until read; further
+arrivals are dropped and rely on sender retries. Operations clear stale hardware flags
+through RadioLib;
 a queued notification is accepted only when the IRQ matches the current operation.
 
 CAD and transmission are asynchronous. SPI command setup and mutex acquisition can

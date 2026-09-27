@@ -48,7 +48,8 @@ contracts and link here.
 
 - Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
   use USB for development. Without uplink settings, or while the broker is unreachable,
-  the receiver stops accepting new samples once its 128-frame durable queue is full.
+  the receiver keeps its newest 128 samples and gives up the oldest ones (counted as
+  `queue.dropped` in its state).
 - **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who
   joins it while it is open (at most 30 minutes, after a button press) can change the
   uplink settings, pair or revoke transmitters. The page itself refuses other origins,

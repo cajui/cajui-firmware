@@ -98,7 +98,7 @@ void test_receiver_state_matches_the_contract() {
         "\"role\":\"receiver\",\"model\":\"heltec-wifi-lora-32-v3\",\"firmware\":{\"version\":"
         "\"2.0.3\",\"slot\":\"ota_1\",\"state\":\"valid\"},\"radio\":{\"profile\":1,"
         "\"power_dbm\":-9},\"uptime_s\":3600,\"reset_reason\":\"power_on\",\"wifi\":{"
-        "\"rssi_dbm\":-61},\"queue\":{\"depth\":3,\"capacity\":128},\"forwarding\":{"
+        "\"rssi_dbm\":-61},\"queue\":{\"depth\":3,\"capacity\":128,\"dropped\":0},\"forwarding\":{"
         "\"published\":42,\"retries\":1},\"pairing\":{\"open\":true,\"remaining_s\":87,"
         "\"requests\":[{\"node_id\":\"00000000000000a2\",\"rssi_dbm\":-70,\"conflict\":false},"
         "{\"node_id\":\"00000000000000a3\",\"rssi_dbm\":-95,\"conflict\":true}]},"
@@ -111,6 +111,12 @@ void test_receiver_state_lists_the_command_families_it_runs() {
     TEST_ASSERT_NOT_NULL(
         std::strstr(receiverJson(status).c_str(), "\"capabilities\":[\"pairing\",\"revoke\"]}"));
 }
+void test_receiver_state_counts_dropped_samples() {
+    auto status = sampleReceiver();
+    status.dropped = 5;
+    TEST_ASSERT_NOT_NULL(
+        std::strstr(receiverJson(status).c_str(), "\"capacity\":128,\"dropped\":5}"));
+}
 void test_unknown_receiver_values_are_null_never_zero() {
     ReceiverStatus status{};
     status.pairingRemainingS = 50; // A closed window reports no remaining time.
@@ -119,7 +125,7 @@ void test_unknown_receiver_values_are_null_never_zero() {
         "\"role\":\"receiver\",\"model\":null,\"firmware\":{\"version\":\"0.0.0\",\"slot\":null,"
         "\"state\":null},\"radio\":{\"profile\":0,\"power_dbm\":0},\"uptime_s\":0,"
         "\"reset_reason\":null,\"wifi\":{\"rssi_dbm\":null},\"queue\":{\"depth\":0,"
-        "\"capacity\":0},\"forwarding\":{\"published\":0,\"retries\":0},\"pairing\":{"
+        "\"capacity\":0,\"dropped\":0},\"forwarding\":{\"published\":0,\"retries\":0},\"pairing\":{"
         "\"open\":false,\"remaining_s\":0,\"requests\":[]},\"capabilities\":[]}",
         receiverJson(status).c_str());
 }
@@ -449,6 +455,7 @@ void runManageTests() {
     RUN_TEST(test_management_topics_follow_the_contract);
     RUN_TEST(test_receiver_state_matches_the_contract);
     RUN_TEST(test_receiver_state_lists_the_command_families_it_runs);
+    RUN_TEST(test_receiver_state_counts_dropped_samples);
     RUN_TEST(test_unknown_receiver_values_are_null_never_zero);
     RUN_TEST(test_invalid_receiver_states_are_rejected);
     RUN_TEST(test_node_state_matches_the_contract);

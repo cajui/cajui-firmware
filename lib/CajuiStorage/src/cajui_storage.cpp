@@ -422,7 +422,21 @@ Result PersistentStore::commit(const Binding& b, uint64_t expected, const Receip
     if (open(b, receipt.last, m) != Result::Ok || m.type != Type::Data ||
         m.counter != receipt.counter || m.counter <= expected)
         return Result::Invalid;
-    if (queued() == QueueCapacity) return Result::Full;
+    // A full queue gives up its oldest sample for the new one (owner's decision, 2026-09-26):
+    // the newest reading is worth more, and refusing it would lose it at the node anyway.
+    // The eviction is durable before the new record is written; a power cut in between loses
+    // the evicted sample and the node repeats the new one.
+    if (queued() == QueueCapacity) {
+        records::QueueRecord oldest{};
+        const Health front = readFront(oldest);
+        if (front != Health::Ready) {
+            fail(front);
+            return Result::StorageError;
+        }
+        if (!saveHead(head_ + 1)) return Result::StorageError;
+        --queuedBySlot_[oldest.slot];
+        ++dropped_;
+    }
     records::QueueRecord record{};
     record.sequence = tail_;
     record.slot = uint8_t(slot);
