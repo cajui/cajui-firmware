@@ -46,8 +46,8 @@ released.
 This list is the single record of implementation status; the other documents describe
 contracts and link here.
 
-- Field battery-voltage/power policy. Runtime battery readings are explicitly unknown;
-  use USB for development. Without uplink settings, or while the broker is unreachable,
+- Battery thresholds and the divider correction are provisional until checked with a real
+  LiPo 1S; on USB without a battery the reading shows the charger's ~4.2 V. Without uplink settings, or while the broker is unreachable,
   the receiver keeps its newest 128 samples and gives up the oldest ones (counted as
   `queue.dropped` in its state).
 - **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who

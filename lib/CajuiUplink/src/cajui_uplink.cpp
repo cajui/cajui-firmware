@@ -202,6 +202,14 @@ bool formatSample(const char* source, const QueuedSample& sample, char* output, 
         if (i) text.format(",");
         addReading(text, data.readings[i]);
     }
+    // The node's battery, when it measured it, as a "battery" sensor reading in volts.
+    if (data.batteryMv) {
+        constexpr unsigned MilliPerVolt = 1000;
+        text.format(",{\"sensor_id\":\"battery\",\"metric\":\"voltage\",\"value\":%u.%03u,"
+                    "\"unit\":\"V\",\"status\":\"ok\"}",
+                    unsigned(data.batteryMv / MilliPerVolt),
+                    unsigned(data.batteryMv % MilliPerVolt));
+    }
     // The receiving radio's measurement of this frame, as readings of a "radio" sensor, so
     // the v1 contract carries it without new fields. Absent when it was not measured.
     if (sample.link.known) {

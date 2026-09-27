@@ -63,6 +63,16 @@ struct CycleOutcome {
 };
 CycleOutcome afterDelivery(Completion);
 
+// Battery policy for a LiPo 1S (owner's choice, 2026-09-26). The thresholds are provisional
+// until checked with the chosen battery. Below LowBatteryMv the node keeps reporting, but only
+// every LowBatterySeconds, so a consumer sees a low battery rather than silence; below
+// CriticalBatteryMv it stops transmitting and only measures at that period. An unknown
+// reading (0) changes nothing.
+constexpr uint16_t LowBatteryMv = 3400, CriticalBatteryMv = 3200;
+constexpr uint32_t LowBatterySeconds = 6UL * 60 * 60;
+enum class BatteryMode { Normal, Low, Critical };
+BatteryMode batteryMode(uint16_t millivolts);
+
 // A receiver's radio can stop reporting packets without any driver error. With an active
 // enrollment, no packet at all (valid or not) for RadioSilenceMs since the last activity or
 // recovery re-arms reception; a failure there is a radio fault. Six missed 5-minute samples:

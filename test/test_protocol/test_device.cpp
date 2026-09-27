@@ -171,6 +171,14 @@ void test_radio_silence_needs_an_enrollment_and_the_full_period() {
     TEST_ASSERT_TRUE(radioSilent(RadioSilenceMs - 10, UINT32_MAX - 9, true));
     TEST_ASSERT_FALSE(radioSilent(5, UINT32_MAX - 9, true));
 }
+void test_battery_mode_follows_the_lipo_thresholds() {
+    EXPECT_RESULT(BatteryMode::Normal, batteryMode(0)); // Unknown changes nothing.
+    EXPECT_RESULT(BatteryMode::Normal, batteryMode(4200));
+    EXPECT_RESULT(BatteryMode::Normal, batteryMode(LowBatteryMv));
+    EXPECT_RESULT(BatteryMode::Low, batteryMode(LowBatteryMv - 1));
+    EXPECT_RESULT(BatteryMode::Low, batteryMode(CriticalBatteryMv));
+    EXPECT_RESULT(BatteryMode::Critical, batteryMode(CriticalBatteryMv - 1));
+}
 } // namespace
 
 void runDeviceTests() {
@@ -182,4 +190,5 @@ void runDeviceTests() {
     RUN_TEST(test_power_follows_commands_within_the_ceiling_and_falls_back);
     RUN_TEST(test_only_an_ack_confirms_and_driver_errors_are_faults);
     RUN_TEST(test_radio_silence_needs_an_enrollment_and_the_full_period);
+    RUN_TEST(test_battery_mode_follows_the_lipo_thresholds);
 }

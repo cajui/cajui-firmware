@@ -20,8 +20,9 @@ Reading measurement(uint16_t metric, float value, float minimum, float maximum) 
     return reading;
 }
 }
-Data climateSample(float temperature, float humidity, uint32_t nextSeconds) {
+Data climateSample(float temperature, float humidity, uint32_t nextSeconds, uint16_t batteryMv) {
     Data data{};
+    data.batteryMv = batteryMv;
     data.nextSeconds = nextSeconds;
     data.count = 2;
     data.readings[0] = measurement(1, temperature, MinTemperature, MaxTemperature);

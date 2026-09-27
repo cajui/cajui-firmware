@@ -83,6 +83,17 @@ void test_transmitter_measurement_configuration() {
     TEST_ASSERT_NOT_NULL(std::strstr(payload(item(Node, Entity::Humidity, 2, 300)).c_str(),
                                      "\"uniq_id\":\"cajui_000048ca433c776c_humidity_2\""));
 }
+void test_battery_voltage_configuration_and_learning() {
+    TEST_ASSERT_EQUAL_STRING("homeassistant/sensor/receiver-1/000048ca433c776c_voltage/config",
+                             topic(item(Node, Entity::BatteryVoltage, 0, 300)).c_str());
+    const std::string battery = payload(item(Node, Entity::BatteryVoltage, 0, 300));
+    TEST_ASSERT_NOT_NULL(
+        std::strstr(battery.c_str(), "\"dev_cla\":\"voltage\",\"unit_of_meas\":\"V\""));
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        battery.c_str(), "'equalto', 'battery') | selectattr('metric', 'equalto', 'voltage')"));
+    TEST_ASSERT_NOT_NULL(
+        std::strstr(battery.c_str(), "\"uniq_id\":\"cajui_000048ca433c776c_voltage\""));
+}
 void test_receiver_diagnostic_configuration() {
     TEST_ASSERT_EQUAL_STRING(
         "{\"name\":\"Wi-Fi signal\",\"uniq_id\":\"cajui_000048ca433c5e10_wifi_rssi\",\"qos\":1,"
@@ -166,10 +177,16 @@ void test_reporter_publishes_the_receiver_then_learned_transmitters() {
     TEST_ASSERT_EQUAL_INT(2, drain(reporter)); // Now the radio link too.
     reporter.sampleForwarded(sample(Node, 300, true));
     TEST_ASSERT_EQUAL_INT(0, drain(reporter)); // Nothing new.
+    QueuedSample powered = sample(Node, 300, true);
+    powered.data.batteryMv = 3900;
+    reporter.sampleForwarded(powered);
+    TEST_ASSERT_EQUAL_INT(1, drain(reporter)); // The battery appears once it is measured.
+    reporter.sampleForwarded(powered);
+    TEST_ASSERT_EQUAL_INT(0, drain(reporter));
     reporter.sampleForwarded(sample(Node, 60, true));
-    TEST_ASSERT_EQUAL_INT(4, drain(reporter)); // A new interval changes expire_after.
+    TEST_ASSERT_EQUAL_INT(5, drain(reporter)); // A new interval changes expire_after.
     publisher.connect();
-    TEST_ASSERT_EQUAL_INT(7, drain(reporter)); // Everything again after a reconnection.
+    TEST_ASSERT_EQUAL_INT(8, drain(reporter)); // Everything again after a reconnection.
 }
 void test_reporter_retries_refusals_and_follows_the_source() {
     Publisher publisher;
@@ -208,6 +225,7 @@ void runDiscoveryTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_discovery_topics_sit_under_the_source);
     RUN_TEST(test_transmitter_measurement_configuration);
+    RUN_TEST(test_battery_voltage_configuration_and_learning);
     RUN_TEST(test_receiver_diagnostic_configuration);
     RUN_TEST(test_invalid_configurations_are_rejected);
     RUN_TEST(test_reporter_publishes_the_receiver_then_learned_transmitters);

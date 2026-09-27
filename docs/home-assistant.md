@@ -13,6 +13,7 @@ that both reach and the Home Assistant MQTT integration with its default discove
 | Receiver | Wi-Fi signal, samples waiting, uptime (diagnostic) | its [management state](management-v1.md#state) |
 | Transmitter | Temperature, humidity | forwarded [telemetry](radio-applications.md#forwarding-to-mqtt) |
 | Transmitter | Signal strength, signal-to-noise ratio (diagnostic) | the receiver's measurement of each frame |
+| Transmitter | Battery voltage (diagnostic), once the node measures it | forwarded telemetry |
 
 Transmitters are linked to their receiver (`via_device`). A transmitter's entities appear
 after the broker acknowledged its first sample, with only the metrics that sample carried,
