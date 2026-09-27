@@ -178,6 +178,17 @@ void test_battery_mode_follows_the_lipo_thresholds() {
     EXPECT_RESULT(BatteryMode::Low, batteryMode(LowBatteryMv - 1));
     EXPECT_RESULT(BatteryMode::Low, batteryMode(CriticalBatteryMv));
     EXPECT_RESULT(BatteryMode::Critical, batteryMode(CriticalBatteryMv - 1));
+    // Leaving a mode needs the hysteresis margin; unknown keeps the previous mode.
+    EXPECT_RESULT(BatteryMode::Low, batteryMode(LowBatteryMv + 50, BatteryMode::Low));
+    EXPECT_RESULT(BatteryMode::Normal,
+                  batteryMode(LowBatteryMv + BatteryHysteresisMv, BatteryMode::Low));
+    EXPECT_RESULT(BatteryMode::Critical,
+                  batteryMode(CriticalBatteryMv + 50, BatteryMode::Critical));
+    EXPECT_RESULT(BatteryMode::Low,
+                  batteryMode(CriticalBatteryMv + BatteryHysteresisMv, BatteryMode::Critical));
+    EXPECT_RESULT(BatteryMode::Normal, batteryMode(4100, BatteryMode::Critical));
+    EXPECT_RESULT(BatteryMode::Low, batteryMode(0, BatteryMode::Low));
+    EXPECT_RESULT(BatteryMode::Critical, batteryMode(LowBatteryMv - 300, BatteryMode::Low));
 }
 } // namespace
 

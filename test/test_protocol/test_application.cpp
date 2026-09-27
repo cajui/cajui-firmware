@@ -254,7 +254,6 @@ void test_routing_hint_is_bounded_and_never_authentication() {
 void test_climate_values_preserve_zero_and_flag_invalid_measurements() {
     TEST_ASSERT_EQUAL_UINT16(3912, climateSample(20, 50, 300, 3912).batteryMv);
     auto sample = climateSample(-12.345f, 0, 300);
-    TEST_ASSERT_EQUAL_UINT16(0, sample.batteryMv); // Unknown by default.
     TEST_ASSERT_EQUAL_UINT(2, sample.count);
     TEST_ASSERT_EQUAL_UINT(0, sample.batteryMv);
     TEST_ASSERT_EQUAL_INT32(-12345, sample.readings[0].milliValue);

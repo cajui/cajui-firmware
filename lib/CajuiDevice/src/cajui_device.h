@@ -69,14 +69,17 @@ CycleOutcome afterDelivery(Completion);
 // CriticalBatteryMv it stops transmitting and only measures at that period. An unknown
 // reading (0) changes nothing.
 constexpr uint16_t LowBatteryMv = 3400, CriticalBatteryMv = 3200;
+// A mode is left only this far above its threshold, so ADC noise and the voltage a resting
+// cell recovers do not switch the schedule on every wake.
+constexpr uint16_t BatteryHysteresisMv = 100;
 constexpr uint32_t LowBatterySeconds = 6UL * 60 * 60;
-enum class BatteryMode { Normal, Low, Critical };
-BatteryMode batteryMode(uint16_t millivolts);
+enum class BatteryMode : uint8_t { Normal, Low, Critical };
+BatteryMode batteryMode(uint16_t millivolts, BatteryMode previous = BatteryMode::Normal);
 
 // A receiver's radio can stop reporting packets without any driver error. With an active
 // enrollment, no packet at all (valid or not) for RadioSilenceMs since the last activity or
 // recovery re-arms reception; a failure there is a radio fault. Six missed 5-minute samples:
-// a transmitter with a longer interval only causes a harmless re-arm.
+// a transmitter with a longer interval (6 h on a low battery) only causes harmless re-arms.
 constexpr uint32_t RadioSilenceMs = 30UL * 60 * 1000;
 bool radioSilent(uint32_t nowMs, uint32_t lastActivityMs, bool activeEnrollment);
 } // namespace cajui

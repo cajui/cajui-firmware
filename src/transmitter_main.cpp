@@ -25,6 +25,10 @@
 #include "board/sx1262_radio.h"
 
 namespace {
+// Battery mode across deep sleep; the magic rejects RTC memory's power-on contents.
+constexpr uint32_t BatteryMagic = 0x42415454; // "BATT"
+RTC_NOINIT_ATTR uint32_t batteryMagic;
+RTC_NOINIT_ATTR uint8_t batteryModeRtc;
 constexpr uint32_t CpuMhz = 80;
 using namespace board;
 constexpr uint32_t SampleSeconds = 300, SensorWarmupMs = 2200;
@@ -142,7 +146,13 @@ void TransmitterApp::fault(const char* reason) {
 }
 void TransmitterApp::sample(cajui::Binding& binding) {
     const uint16_t batteryMv = board::readBatteryMv();
-    const auto battery = cajui::batteryMode(batteryMv);
+    // The previous mode survives deep sleep in RTC memory; after power-on it starts Normal.
+    const auto previous = batteryMagic == BatteryMagic && esp_reset_reason() != ESP_RST_POWERON
+                              ? cajui::BatteryMode(batteryModeRtc)
+                              : cajui::BatteryMode::Normal;
+    const auto battery = cajui::batteryMode(batteryMv, previous);
+    batteryMagic = BatteryMagic;
+    batteryModeRtc = uint8_t(battery);
     if (battery == cajui::BatteryMode::Critical) {
         // Nothing is sent: the radio is the largest draw. Measure again after the long sleep.
         Serial.printf("CJAPP BATTERY critical mv=%u sleep_s=%u\n", unsigned(batteryMv),

@@ -103,10 +103,16 @@ uint32_t retryDelayMs(uint32_t consecutiveFaults) {
     for (uint32_t fault = 1; fault < consecutiveFaults && delay < MaxRetryMs; ++fault) delay *= 2;
     return delay < MaxRetryMs ? delay : MaxRetryMs;
 }
-BatteryMode batteryMode(uint16_t millivolts) {
-    if (!millivolts) return BatteryMode::Normal;
-    if (millivolts < CriticalBatteryMv) return BatteryMode::Critical;
-    return millivolts < LowBatteryMv ? BatteryMode::Low : BatteryMode::Normal;
+BatteryMode batteryMode(uint16_t millivolts, BatteryMode previous) {
+    if (!millivolts) return previous; // Unknown: keep the schedule.
+    const uint16_t critical = previous == BatteryMode::Critical
+                                  ? uint16_t(CriticalBatteryMv + BatteryHysteresisMv)
+                                  : CriticalBatteryMv;
+    const uint16_t low = previous == BatteryMode::Normal
+                             ? LowBatteryMv
+                             : uint16_t(LowBatteryMv + BatteryHysteresisMv);
+    if (millivolts < critical) return BatteryMode::Critical;
+    return millivolts < low ? BatteryMode::Low : BatteryMode::Normal;
 }
 bool radioSilent(uint32_t nowMs, uint32_t lastActivityMs, bool activeEnrollment) {
     return activeEnrollment && uint32_t(nowMs - lastActivityMs) >= RadioSilenceMs;

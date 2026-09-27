@@ -47,7 +47,8 @@ This list is the single record of implementation status; the other documents des
 contracts and link here.
 
 - Battery thresholds and the divider correction are provisional until checked with a real
-  LiPo 1S; on USB without a battery the reading shows the charger's ~4.2 V. Without uplink settings, or while the broker is unreachable,
+  LiPo 1S; on USB without a battery the bench board read the charger's 4.2–4.3 V.
+- Without uplink settings, or while the broker is unreachable,
   the receiver keeps its newest 128 samples and gives up the oldest ones (counted as
   `queue.dropped` in its state).
 - **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who
