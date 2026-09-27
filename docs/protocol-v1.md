@@ -136,15 +136,15 @@ receipt state.
 - Higher counter: atomically commit both the queued sample and receipt, with the
   previous counter as a concurrency precondition. Generate ACK only after success.
 
-A failed/full/conflicting commit must leave queue and receipt unchanged and must
-not produce an acceptance ACK. Failure after commit but before ACK is recovered
+A failed or conflicting commit must leave the receipt unchanged and must not produce an
+acceptance ACK; on a full queue the oldest sample may already have been given up. Failure after commit but before ACK is recovered
 by retrying the same DATA. Queue draining must retain the replay receipt. Restoring
 older receipt state under the same key is unsafe; use fresh credentials if state
 continuity cannot be trusted. The real adapter must uphold these guarantees across
 power loss. In-memory unit tests do not prove that behavior.
 
-An initial integration target is a bounded global queue of 128 DATA frames, without
-overwriting unforwarded samples. Forwarding must use a stable identity including
+An initial integration target is a bounded global queue of 128 DATA frames; when it is
+full, the oldest unforwarded sample gives way to the new one. Forwarding must use a stable identity including
 network, node, credential generation, sample counter, sensor and metric. Delete
 queued samples only after server acceptance. Avoid representing u64 IDs as JSON
 numbers in consumers that lose integer precision.

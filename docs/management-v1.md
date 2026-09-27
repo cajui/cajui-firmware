@@ -114,7 +114,8 @@ Field rules:
 - `reset_reason` is one of `power_on`, `software`, `panic`, `watchdog`, `brownout`,
   `deep_sleep`, `external` or `other`.
 - `queue.dropped` counts the oldest samples given up for new ones because the queue was
-  full, since the receiver started.
+  full, since the receiver started. A sample already published whose PUBACK had not
+  arrived yet counts too, although the broker may have it.
 - `pairing.requests` lists the nodes asking to join during an open window, each as
   `{"node_id": "...", "rssi_dbm": -70, "conflict": false}`; see
   [radio pairing](radio-pairing.md#model-and-security).

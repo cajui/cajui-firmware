@@ -70,7 +70,8 @@ public:
     uint64_t receiver() const { return registry_.receiver; }
     uint16_t profile() const { return registry_.profile; }
     size_t queued() const { return size_t(tail_ - head_); }
-    // Oldest samples given up for new ones because the queue was full, since mount.
+    // Oldest samples given up for new ones because the queue was full, since this object was
+    // created (the receiver started); a remount does not reset it.
     uint32_t dropped() const { return dropped_; }
     Result prepare(uint64_t network, uint64_t receiver, uint64_t node, uint64_t generation,
                    const Key&, uint16_t profile);

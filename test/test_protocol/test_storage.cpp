@@ -368,6 +368,54 @@ void test_full_queue_drops_the_oldest_sample_for_the_new_one() {
     failing.failBefore = true;
     EXPECT_RESULT(Result::StorageError, receive(binding(), data(QueueCapacity + 1), *full, ack));
 }
+void test_power_loss_at_each_step_of_a_full_queue_commit() {
+    // 0: head write lost; 1: head advanced, queue record lost; 2: queue record written over
+    // the evicted one, receipt lost; 3: all written, receipt reported failure (ambiguous).
+    for (int step = 0; step < 4; ++step) {
+        SCENARIO(step);
+        MemoryRecords records;
+        auto store = mounted(records, Role::Receiver);
+        TEST_ASSERT_TRUE(enroll(*store));
+        for (size_t i = 1; i <= QueueCapacity; ++i) receiveOk(*store, i);
+        const uint64_t next = QueueCapacity + 1;
+        Frame ack{};
+        if (step < 3)
+            records.failAt = step;
+        else
+            records.ambiguousAt = 2;
+        EXPECT_RESULT(Result::StorageError, receive(binding(), data(next), *store, ack));
+        TEST_ASSERT_EQUAL_UINT32(0, ack.size);
+        store = remount(records, Role::Receiver);
+        TEST_ASSERT_TRUE(store->healthy());
+        QueuedSample front{};
+        TEST_ASSERT_TRUE(store->peek(front));
+        if (step == 0) { // Nothing changed.
+            TEST_ASSERT_EQUAL_UINT32(QueueCapacity, store->queued());
+            TEST_ASSERT_EQUAL_UINT64(1, front.counter);
+        } else if (step < 3) { // The oldest is gone; the new sample is not a sample yet.
+            TEST_ASSERT_EQUAL_UINT32(QueueCapacity - 1, store->queued());
+            TEST_ASSERT_EQUAL_UINT64(2, front.counter);
+        } else { // Durable despite the reported failure.
+            TEST_ASSERT_EQUAL_UINT32(QueueCapacity, store->queued());
+            TEST_ASSERT_EQUAL_UINT64(2, front.counter);
+        }
+        // The node repeats the sample: accepted, or recognized when already durable.
+        EXPECT_RESULT(step == 3 ? Result::Duplicate : Result::Ok,
+                      receive(binding(), data(next), *store, ack));
+        store = remount(records, Role::Receiver);
+        TEST_ASSERT_EQUAL_UINT32(QueueCapacity, store->queued());
+        // Order is intact: every queued sample reads back and the new one comes last.
+        uint64_t last = 0;
+        for (size_t i = 0; i < QueueCapacity; ++i) {
+            QueuedSample q{};
+            TEST_ASSERT_TRUE(store->peek(q));
+            TEST_ASSERT_TRUE(q.counter > last);
+            last = q.counter;
+            EXPECT_RESULT(Result::Ok, store->forwarded(2, 10, q.counter));
+        }
+        TEST_ASSERT_EQUAL_UINT64(next, last);
+    }
+}
 void test_rotation_revocation_and_retired_keys_are_persistent() {
     MemoryRecords records;
     auto store = mounted(records, Role::Receiver);
@@ -1176,6 +1224,7 @@ void runStorageTests() {
     RUN_TEST(test_ambiguous_head_write_repeats_at_most_one_sample);
     RUN_TEST(test_queue_capacity_wraps_and_survives_restart);
     RUN_TEST(test_full_queue_drops_the_oldest_sample_for_the_new_one);
+    RUN_TEST(test_power_loss_at_each_step_of_a_full_queue_commit);
     RUN_TEST(test_rotation_revocation_and_retired_keys_are_persistent);
     RUN_TEST(test_bad_provisioning_and_identity_do_not_mutate_state);
     RUN_TEST(test_full_registry_reclaims_only_revoked_slots_without_samples);

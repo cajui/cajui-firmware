@@ -26,7 +26,9 @@ then the slot's receipt, which references it (`through` = its sequence + 1). The
 write is the commit point. At mount the tail is recovered from the receipts, so a queue
 record whose receipt write was lost is not a sample and is overwritten by the next one.
 Every sequence between head and tail must hold a valid record; anything else is
-corruption, never a shorter queue. Forwarding a sample writes only `head`.
+corruption, never a shorter queue. Forwarding a sample writes only `head`. On a full queue,
+accepting a sample first advances `head` past the oldest sample (a third write), which gives
+its record, the one the new sample reuses, up.
 
 Receipt and queue records have version 2, which added the ACK power command and the link
 quality; version 1 records still decode, without them. The reverse does not hold: a
@@ -75,8 +77,8 @@ skipped after failure; it must never be reused after it might have encrypted a f
 - One active generation per node on a transmitter. A receiver may hold two for a node
   while a re-paired node has not used its new key yet (see
   [radio pairing](radio-pairing.md)); USB activation revokes the previous one at once.
-- A 128-frame global receiver queue. Full means no new acceptance ACK; an already
-  accepted duplicate can still be acknowledged.
+- A 128-frame global receiver queue. When it is full the oldest queued sample gives way to
+  the new one, which is acknowledged; the state's `queue.dropped` counts these.
 - `forwarded` removes only the queue head matching node, generation and counter. The
   receipt survives draining, so a repeated frame cannot be enqueued again.
 
