@@ -13,8 +13,10 @@
 namespace board {
 // Wi-Fi station plus the ESP-IDF MQTT client. Plain TCP only: use a trusted network
 // until broker TLS is provisioned. MQTT 3.1.1 cannot report an ACL-denied publication.
-// The setup page replaces the client from its own task while the radio loop publishes:
-// an internal mutex guards the client, and the loop's calls never wait for that mutex.
+// The radio loop only copies publications into an outbox; a sender task hands them to the
+// client, whose internal lock can be held for a network operation. So the loop never waits
+// for the network and the receiver keeps acknowledging within the node's ACK window. The
+// setup page replaces the client from its own task; an internal mutex guards the client.
 //
 // Management channel (docs/management-v1.md): the client's last will marks the receiver
 // offline, and "online" is published on each connection. A broker that refuses the
@@ -66,9 +68,29 @@ public:
 private:
     static constexpr size_t StateIds = 8;
     esp_mqtt_client_handle_t client_ = nullptr;
-    QueueHandle_t acks_ = nullptr, commands_ = nullptr;
+    // One publication waiting for the sender task. Samples keep their local ID so the
+    // broker's PUBACK can be matched to what the forwarder published.
+    enum class Kind : uint8_t { Sample, State, Result, Offline };
+    struct Outgoing {
+        Kind kind;
+        bool retain;
+        int local;
+        uint32_t generation; // Of the client it was meant for; dropped after a replacement.
+        uint64_t device;     // Results: the topic's device, formatted by the sender.
+        size_t size;
+        char topic[cajui::TopicCapacity];
+        char payload[cajui::PayloadCapacity + 1];
+    };
+    static constexpr size_t Mappings = 4;
+    QueueHandle_t acks_ = nullptr, commands_ = nullptr, outbox_ = nullptr;
     SemaphoreHandle_t mutex_ = nullptr;
-    TaskHandle_t restarter_ = nullptr;
+    TaskHandle_t restarter_ = nullptr, sender_ = nullptr;
+    Outgoing staging_{}; // Filled by the radio loop only.
+    Outgoing sending_{}; // Used by the sender task only.
+    std::atomic<int> nextLocal_{0};
+    // Client message ID -> local sample ID, for the PUBACK handed to the forwarder.
+    std::atomic<int> messageIds_[Mappings]{}, localIds_[Mappings]{};
+    std::atomic<size_t> nextMapping_{0};
     std::atomic<bool> online_{false}, managed_{true};
     std::atomic<uint32_t> session_{0}, generation_{0};
     // Message IDs of management publications, whose PUBACKs must not reach the forwarder.
@@ -80,7 +102,10 @@ private:
     char availability_[cajui::TopicCapacity]{}, commandFilter_[cajui::TopicCapacity]{};
     void stopMqtt();
     bool restart(const cajui::UplinkConfig&, uint64_t device);
-    int enqueueRetained(const char* topic, const char* payload);
+    bool stage(Kind, const char* topic, const char* payload, size_t size, bool retain, int local,
+               uint64_t device, uint32_t generation);
+    void send();
+    static void senderTask(void* self);
     void rememberStateId(int id);
     void receive(const esp_mqtt_event_t&);
     bool takeStateId(int id);
