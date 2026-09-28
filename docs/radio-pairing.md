@@ -17,8 +17,8 @@ against an active attacker** in radio range during the window: the node has no d
 on which to compare a code, so an attacker who answers first could pair with either side.
 Mitigations are the physical action on both devices, the short window, the displayed node
 ID and signal strength, radio proximity, and key pinning: the first key heard for a node ID
-is kept for the whole window, and a second key or attempt nonce for that ID blocks adding
-it (see step 2). An attacker can therefore make pairing fail, as jamming would, but cannot
+is kept for the window until that node has paired, and a second key or attempt nonce for
+that ID blocks adding it (see step 2). An attacker can therefore make pairing fail, as jamming would, but cannot
 silently take the place of a listed node once the node itself has been heard. A per-device secret printed on a label can
 later authenticate the exchange; it is not part of this version.
 
@@ -90,12 +90,12 @@ of a new credential generation, exactly as a USB enrollment would store it.
    On JOIN_DONE the node stores and activates its binding and restarts into operation.
 
 A node that completed the exchange leaves the list shown on the page and in the
-management state, but stays pinned until the window closes, so no other device can
-request its ID with another key in the meantime. If that node asks again in the same
-window, for example after being revoked, its new attempt is listed afresh rather than
-as a conflict: no offer is pending for it, and adding it still needs the operator and
-the node's button. Like any request, it is not authenticated against an active
-attacker in range (see the security notes above).
+management state. If its ID asks again in the same window, for example after the node
+was revoked, the new attempt is listed afresh rather than as a conflict, and adding it
+starts a new pairing. From that point its key is **not** pinned: a request for that ID
+from any device in range, with any key, is listed the same way. That is the same
+protection as for an ID not heard yet, the operator's click, and it adds to the
+unauthenticated-requests limit described above.
 
 Nothing is stored for an attempt that has not been confirmed: abandoned, expired,
 stopped or spoofed attempts cost no slot. Each successful pairing uses one slot on each

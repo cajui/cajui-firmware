@@ -265,7 +265,8 @@ bool PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKe
         if (listed.node != node) continue;
         // A node that already joined and asks again, after a revocation or a reset, starts
         // a new attempt: list it afresh. No offer or click is pending for it, so there is
-        // nothing to redirect; accepting still needs the operator and the node's button.
+        // nothing to redirect. Its key is no longer pinned, so like any unheard ID it is
+        // only as safe as the operator's click (see docs/radio-pairing.md).
         if (listed.joined && (listed.nonce != nonce || listed.publicKey != publicKey)) {
             listed = Candidate{};
             listed.node = node;
@@ -387,6 +388,9 @@ Result PairingHost::accept(uint64_t node) {
         return Result::CryptoError;
     }
     dropOffer(); // Replaces any earlier offer; nothing was stored for it.
+    // Offering a node that already paired in this window starts a new pairing: until it
+    // confirms, the earlier one must not read as the answer to this offer.
+    if (paired_ == node) paired_ = 0;
     offer_ = offer;
     key_ = key;
     wipe(key.data(), key.size());

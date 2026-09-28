@@ -1271,6 +1271,19 @@ void test_remote_pairing_reports_pending_then_applied() {
     TEST_ASSERT_TRUE(rig.sink.results.empty());
     EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
                    rig.send(command("add", "pairing.accept", 2)));
+    // Asked again in the same window (after a revocation, say), the node is offered anew:
+    // the earlier pairing must not answer the new command before the node confirms.
+    CountingEntropy entropy;
+    KeyPair again{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, again));
+    Frame request{}, reply{};
+    TEST_ASSERT_TRUE(buildRequest(2, 91, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.pair.host.handle(request, -45, reply));
+    EXPECT_OUTCOME(CommandStatus::Pending, CommandReason::None,
+                   rig.send(command("add-again", "pairing.accept", 2)));
+    rig.runner.poll(rig.sink);
+    TEST_ASSERT_TRUE(rig.sink.results.empty());
+    TEST_ASSERT_EQUAL_UINT64(0, rig.pair.host.pairedNode());
 }
 void test_pending_accepts_end_closed_or_superseded() {
     CommandRig rig;

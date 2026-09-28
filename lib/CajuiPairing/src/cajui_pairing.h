@@ -63,8 +63,8 @@ struct Candidate {
     int16_t rssi = 0;
     uint32_t seenAt = 0;
     bool conflict = false;
-    // Paired during this window. It stays pinned, so another device cannot take its ID
-    // until the window closes, but it is no longer asking to join.
+    // Paired during this window, so no longer listed as asking to join. A new attempt for
+    // its ID, from it or from any other device, is listed afresh as a new request.
     bool joined = false;
 };
 enum class HostState { Closed, Open, Offered, Paired };
