@@ -239,6 +239,12 @@ void PairingHost::close() {
     count_ = 0;
     for (auto& c : candidates_) c = Candidate{};
 }
+size_t PairingHost::waiting(Candidate* output, size_t capacity) const {
+    size_t count = 0;
+    for (size_t i = 0; i < count_ && count < capacity; ++i)
+        if (!candidates_[i].joined) output[count++] = candidates_[i];
+    return count;
+}
 uint32_t PairingHost::remainingMs() const {
     if (state_ == HostState::Closed) return 0;
     const uint32_t elapsed = clock_.nowMs() - openedAt_;
@@ -257,6 +263,16 @@ bool PairingHost::track(uint64_t node, uint64_t nonce, const X25519Key& publicKe
     for (size_t i = 0; i < count_; ++i) {
         Candidate& listed = candidates_[i];
         if (listed.node != node) continue;
+        // A node that already joined and asks again, after a revocation or a reset, starts
+        // a new attempt: list it afresh. No offer or click is pending for it, so there is
+        // nothing to redirect. Its key is no longer pinned, so like any unheard ID it is
+        // only as safe as the operator's click (see docs/radio-pairing.md).
+        if (listed.joined && (listed.nonce != nonce || listed.publicKey != publicKey)) {
+            listed = Candidate{};
+            listed.node = node;
+            listed.nonce = nonce;
+            listed.publicKey = publicKey;
+        }
         // Never replace a pinned key: one injected frame would otherwise redirect the
         // operator's click to an attacker while the list still shows the victim's ID.
         if (listed.nonce != nonce || listed.publicKey != publicKey) listed.conflict = true;
@@ -326,6 +342,8 @@ bool PairingHost::handle(const Frame& frame, int16_t rssi, Frame& reply) {
         wipe(done.key.data(), done.key.size());
         return false;
     }
+    for (size_t i = 0; i < count_; ++i)
+        if (candidates_[i].node == offer_.node) candidates_[i].joined = true;
     forgetCompleted();
     done.at = clock_.nowMs();
     done.replies = 1; // This first JOIN_DONE.
@@ -370,6 +388,9 @@ Result PairingHost::accept(uint64_t node) {
         return Result::CryptoError;
     }
     dropOffer(); // Replaces any earlier offer; nothing was stored for it.
+    // Offering a node that already paired in this window starts a new pairing: until it
+    // confirms, the earlier one must not read as the answer to this offer.
+    if (paired_ == node) paired_ = 0;
     offer_ = offer;
     key_ = key;
     wipe(key.data(), key.size());

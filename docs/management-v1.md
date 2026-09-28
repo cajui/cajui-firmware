@@ -117,8 +117,8 @@ Field rules:
   full, since the receiver started. A sample already published whose PUBACK had not
   arrived yet counts too, although the broker may have it.
 - `pairing.requests` lists the nodes asking to join during an open window, each as
-  `{"node_id": "...", "rssi_dbm": -70, "conflict": false}`; see
-  [radio pairing](radio-pairing.md#model-and-security).
+  `{"node_id": "...", "rssi_dbm": -70, "conflict": false}`. A node paired during the
+  window leaves the list; see [radio pairing](radio-pairing.md#model-and-security).
 - `binding` is `active` when the node has an active enrollment, `pending` when it has
   only one prepared over USB and not yet activated, and `revoked` otherwise. A revoked transmitter keeps its retained state with
   `revoked` so that consumers learn about it; publishing an empty retained message later

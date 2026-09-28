@@ -62,6 +62,8 @@ private:
     std::atomic<bool> listening_{false}, updateRestart_{false};
     cajui::ReceiverController controller_{radio_, clock_, store_};
     cajui::PairingHost pairing_{store_, entropy_, clock_};
+    // Requests still waiting, copied for the published state (joined nodes left out).
+    cajui::Candidate requests_[cajui::MaxCandidates]{};
     SetupPortal portal_{store_, uplink_, uplinkBlob_, *this, lock_, entropy_};
     std::unique_ptr<cajui::Forwarder> forwarder_;
     std::unique_ptr<cajui::StateReporter> reporter_;
@@ -207,8 +209,8 @@ void ReceiverApp::receiverStatus(cajui::ReceiverStatus& status) {
     status.retries = forwarder_ ? forwarder_->retries() : 0;
     status.pairingOpen = pairing_.state() != cajui::HostState::Closed;
     status.pairingRemainingS = pairing_.remainingMs() / MsPerSecond;
-    status.requests = pairing_.candidates();
-    status.requestCount = pairing_.candidateCount();
+    status.requestCount = pairing_.waiting(requests_, cajui::MaxCandidates);
+    status.requests = requests_;
     status.commands = true;
 }
 size_t ReceiverApp::nodes(uint64_t* output, size_t capacity) {

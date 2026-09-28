@@ -301,6 +301,27 @@ void test_radio_pairing_creates_matching_active_bindings() {
     EXPECT_RESULT(ClientState::Paired, rig.client.state());
     EXPECT_RESULT(HostState::Paired, rig.host.state());
     TEST_ASSERT_EQUAL_UINT64(2, rig.host.pairedNode());
+    // The joined node stays pinned but is no longer listed as asking to join.
+    TEST_ASSERT_EQUAL_size_t(1, rig.host.candidateCount());
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].joined);
+    Candidate waiting[MaxCandidates]{};
+    TEST_ASSERT_EQUAL_size_t(0, rig.host.waiting(waiting, MaxCandidates));
+    // Asking again in the same window, e.g. after a revocation, is a new attempt: it is
+    // listed afresh instead of conflicting with the key pinned by the finished pairing.
+    CountingEntropy entropy;
+    KeyPair again{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, again));
+    Frame request{}, reply{};
+    TEST_ASSERT_TRUE(buildRequest(2, 77, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -45, reply));
+    TEST_ASSERT_EQUAL_size_t(1, rig.host.waiting(waiting, MaxCandidates));
+    TEST_ASSERT_FALSE(waiting[0].conflict);
+    TEST_ASSERT_EQUAL_UINT64(77, waiting[0].nonce);
+    EXPECT_RESULT(Result::Ok, rig.host.accept(2));
+    // A second different request for the listed attempt still conflicts, as before.
+    TEST_ASSERT_TRUE(buildRequest(2, 78, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.host.handle(request, -45, reply));
+    TEST_ASSERT_TRUE(rig.host.candidates()[0].conflict);
     TEST_ASSERT_EQUAL_UINT64(1, rig.client.receiver());
     Binding atNode{}, atReceiver{};
     TEST_ASSERT_TRUE(rig.tx->binding(2, atNode));
@@ -736,6 +757,10 @@ void test_host_ignores_input_outside_the_window_and_limits_candidates() {
     // let an attacker flush the victim and re-list its ID with another key.
     for (size_t i = 0; i < rig.host.candidateCount(); ++i)
         TEST_ASSERT_EQUAL_UINT64(10 + i, rig.host.candidates()[i].node);
+    Candidate firstTwo[2]{};
+    TEST_ASSERT_EQUAL_size_t(2, rig.host.waiting(firstTwo, 2));
+    TEST_ASSERT_EQUAL_UINT64(10, firstTwo[0].node);
+    TEST_ASSERT_EQUAL_UINT64(11, firstTwo[1].node);
     EXPECT_RESULT(Result::NotFound, rig.host.accept(14));
     EXPECT_RESULT(Result::NotFound, rig.host.accept(99));
     TEST_ASSERT_FALSE(rig.host.handle(Frame{}, -50, reply));
@@ -1246,6 +1271,19 @@ void test_remote_pairing_reports_pending_then_applied() {
     TEST_ASSERT_TRUE(rig.sink.results.empty());
     EXPECT_OUTCOME(CommandStatus::Applied, CommandReason::None,
                    rig.send(command("add", "pairing.accept", 2)));
+    // Asked again in the same window (after a revocation, say), the node is offered anew:
+    // the earlier pairing must not answer the new command before the node confirms.
+    CountingEntropy entropy;
+    KeyPair again{};
+    TEST_ASSERT_TRUE(newKeyPair(entropy, again));
+    Frame request{}, reply{};
+    TEST_ASSERT_TRUE(buildRequest(2, 91, again.publicKey, request));
+    TEST_ASSERT_FALSE(rig.pair.host.handle(request, -45, reply));
+    EXPECT_OUTCOME(CommandStatus::Pending, CommandReason::None,
+                   rig.send(command("add-again", "pairing.accept", 2)));
+    rig.runner.poll(rig.sink);
+    TEST_ASSERT_TRUE(rig.sink.results.empty());
+    TEST_ASSERT_EQUAL_UINT64(0, rig.pair.host.pairedNode());
 }
 void test_pending_accepts_end_closed_or_superseded() {
     CommandRig rig;
