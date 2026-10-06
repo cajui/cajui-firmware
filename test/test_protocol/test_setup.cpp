@@ -34,6 +34,45 @@ size_t count(const std::string& text, const char* part) {
         ++found;
     return found;
 }
+void test_portal_visit_does_not_restart_mqtt() {
+    SetupUplinkRecovery recovery;
+    recovery.restore(10); // Close a read-only visit.
+    TEST_ASSERT_FALSE(recovery.due(10));
+    TEST_ASSERT_FALSE(recovery.due(10000));
+    recovery.suspend(); // Start a Wi-Fi trial.
+    TEST_ASSERT_FALSE(recovery.due(10000));
+    recovery.applied(true);  // Successful save already applied the new settings.
+    recovery.restore(10001); // Closing must not apply them a second time.
+    TEST_ASSERT_FALSE(recovery.due(10001));
+}
+void test_failed_trial_restores_mqtt_with_bounded_retries() {
+    SetupUplinkRecovery recovery;
+    recovery.suspend();
+    recovery.restore(100);
+    TEST_ASSERT_TRUE(recovery.due(100));
+    // Wrong SSID or unavailable record: no apply; poll every 20 ms.
+    for (uint32_t now = 120; now < 1100; now += 20) TEST_ASSERT_FALSE(recovery.due(now));
+    TEST_ASSERT_TRUE(recovery.due(1100));
+    recovery.applied(false); // Failed apply must also wait for the retry deadline.
+    TEST_ASSERT_FALSE(recovery.due(1120));
+    TEST_ASSERT_TRUE(recovery.due(2100));
+    recovery.applied(true);
+    TEST_ASSERT_FALSE(recovery.due(3100));
+    recovery.restore(4000);
+    TEST_ASSERT_FALSE(recovery.due(4000));
+}
+void test_new_trial_cancels_pending_restore_and_timer_wraps() {
+    SetupUplinkRecovery recovery;
+    recovery.suspend();
+    recovery.restore(0xffffff00U);
+    TEST_ASSERT_TRUE(recovery.due(0xffffff00U));
+    TEST_ASSERT_FALSE(recovery.due(743));
+    TEST_ASSERT_TRUE(recovery.due(744));
+    recovery.suspend();
+    TEST_ASSERT_FALSE(recovery.due(2000));
+    recovery.restore(2000);
+    TEST_ASSERT_TRUE(recovery.due(2000));
+}
 void test_every_form_posts_the_session_token() {
     auto staged = complete();
     EnrollmentInfo transmitters[1]{};
@@ -558,6 +597,9 @@ void test_store_lists_enrollments_with_last_received_counter() {
 
 void runSetupTests() {
     UnitySetTestFile(__FILE__);
+    RUN_TEST(test_portal_visit_does_not_restart_mqtt);
+    RUN_TEST(test_failed_trial_restores_mqtt_with_bounded_retries);
+    RUN_TEST(test_new_trial_cancels_pending_restore_and_timer_wraps);
     RUN_TEST(test_long_press_fires_once_per_hold);
     RUN_TEST(test_firmware_section_and_update_pages);
     RUN_TEST(test_every_form_posts_the_session_token);

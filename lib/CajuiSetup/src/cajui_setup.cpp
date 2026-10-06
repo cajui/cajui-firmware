@@ -6,6 +6,22 @@
 #include <cstring>
 
 namespace cajui {
+void SetupUplinkRecovery::suspend() {
+    suspended_ = true;
+    pending_ = false;
+}
+void SetupUplinkRecovery::restore(uint32_t now) {
+    pending_ = suspended_;
+    retryAt_ = now;
+}
+bool SetupUplinkRecovery::due(uint32_t now) {
+    if (!pending_ || int32_t(now - retryAt_) < 0) return false;
+    retryAt_ = now + RetryMs;
+    return true;
+}
+void SetupUplinkRecovery::applied(bool success) {
+    if (success) suspended_ = pending_ = false;
+}
 namespace {
 // HTML on top of the bounded text builder; any truncation invalidates the page.
 class Html : public TextBuffer {

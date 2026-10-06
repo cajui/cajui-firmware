@@ -207,7 +207,9 @@ network and the page says so. Changing the SSID clears the staged broker setting
 stops the existing MQTT client
 before attempting the new network. Re-enter broker settings to authorize that network;
 a failed Wi-Fi trial restores the previous saved configuration and only resumes MQTT
-after reconnecting to its saved network. Saving applies the settings without a reboot: forwarding
+after reconnecting to its saved network. Opening and closing setup without changing
+settings does not restart MQTT. Only a connection suspended by a Wi-Fi trial is
+restored; failed restoration attempts are limited to once per second. Saving applies the settings without a reboot: forwarding
 pauses, MQTT restarts with the new identity, and an in-flight publication is republished.
 Saved passwords are never shown. An empty Wi-Fi password keeps the saved one for the same
 network; an empty broker password keeps the saved one only for the same Wi-Fi network,

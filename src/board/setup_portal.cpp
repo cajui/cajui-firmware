@@ -146,7 +146,7 @@ void SetupPortal::restoreStoredWifi() {
     if (loaded) {
         pending_ = stored;
         savedCurrent_ = true;
-        resumeSaved_ = true;
+        recovery_.restore(millis());
     }
     cajui::wipe(stored);
 }
@@ -174,7 +174,7 @@ void SetupPortal::close() {
 void SetupPortal::poll() {
     // A failed trial/closed portal may restore Wi-Fi asynchronously. Never send the old
     // broker credentials until the station is back on the stored network.
-    if (resumeSaved_ && MqttUplink::wifiConnected()) {
+    if (MqttUplink::wifiConnected() && recovery_.due(millis())) {
         cajui::UplinkConfig stored{};
         bool loaded = false;
         {
@@ -182,10 +182,7 @@ void SetupPortal::poll() {
             loaded = cajui::loadUplink(blob_, stored) == cajui::ReadResult::Ok;
         }
         if (loaded && WiFi.SSID() == stored.ssid) {
-            control_.applyUplink(stored);
-            resumeSaved_ = false;
-        } else if (!loaded) {
-            resumeSaved_ = false;
+            recovery_.applied(control_.applyUplink(stored));
         }
         cajui::wipe(stored);
     }
@@ -204,8 +201,8 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
-        resumeSaved_ = false;
         uplink_.suspend();
+        recovery_.suspend();
         trialAddresses_ = addresses_.load();
         MqttUplink::startWifi(pending_.ssid, pending_.wifiPassword);
         copyWifi(running_, pending_);
@@ -403,6 +400,7 @@ bool SetupPortal::save() {
     const bool written = whileRadioIdle([this] { return cajui::saveUplink(blob_, pending_); });
     if (written) stored_ = true;
     savedCurrent_ = written && control_.applyUplink(pending_);
+    recovery_.applied(savedCurrent_);
     Serial.printf("CJAPP SETUP saved ok=%u\n", unsigned(savedCurrent_));
     return savedCurrent_;
 }

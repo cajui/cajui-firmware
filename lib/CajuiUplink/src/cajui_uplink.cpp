@@ -9,7 +9,7 @@
 namespace cajui {
 namespace {
 constexpr uint8_t UplinkMagic[4] = {'C', 'J', 'U', 'P'};
-constexpr uint8_t UplinkVersion = 1;
+constexpr uint8_t UplinkVersion = 1, UplinkWifiOnlyVersion = 2;
 constexpr int32_t MilliPerUnit = 1000;
 bool alnum(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -151,7 +151,8 @@ bool saveUplink(AtomicBlob& blob, const UplinkConfig& c) {
     Writer w{bytes};
     std::memcpy(w.p, UplinkMagic, sizeof(UplinkMagic));
     w.p += sizeof(UplinkMagic);
-    *w.p++ = validUplink(c) ? UplinkVersion : 2; // v2 permits Wi-Fi-only records.
+    *w.p++ =
+        validUplink(c) ? UplinkVersion : UplinkWifiOnlyVersion; // v2 permits Wi-Fi-only records.
     for (const char* value : {c.ssid, c.wifiPassword, c.host, c.username, c.password})
         w.text(value);
     *w.p++ = uint8_t(c.port >> 8);
@@ -176,7 +177,8 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
         for (size_t i = 0; i < 4; ++i) stored = (stored << 8) | bytes[size - 4 + i];
         Reader r{bytes + sizeof(UplinkMagic) + 1, bytes + size - 4};
         if (std::memcmp(bytes, UplinkMagic, sizeof(UplinkMagic)) == 0 &&
-            (bytes[sizeof(UplinkMagic)] == UplinkVersion || bytes[sizeof(UplinkMagic)] == 2) &&
+            (bytes[sizeof(UplinkMagic)] == UplinkVersion ||
+             bytes[sizeof(UplinkMagic)] == UplinkWifiOnlyVersion) &&
             stored == crc32(bytes, size - 4) && r.text(c.ssid, SsidCapacity) &&
             r.text(c.wifiPassword, WifiPasswordCapacity) && r.text(c.host, HostCapacity) &&
             r.text(c.username, UsernameCapacity) && r.text(c.password, MqttPasswordCapacity) &&

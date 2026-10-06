@@ -66,7 +66,7 @@ private:
     cajui::UplinkConfig pending_{}, running_{};
     bool active_ = false, routed_ = false, stored_ = false, savedCurrent_ = false;
     bool trial_ = false, trialFailed_ = false, reconnect_ = false;
-    bool resumeSaved_ = false;
+    cajui::SetupUplinkRecovery recovery_;
     bool mdns_ = false, mdnsEndPending_ = false;
     bool closing_ = false, scanning_ = false, settling_ = false, scanPending_ = false,
          discoverPending_ = false, scanRetryDue_ = false;
