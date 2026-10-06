@@ -103,6 +103,44 @@ void test_uplink_settings_round_trip_and_fail_closed() {
     blob.failBefore = true;
     TEST_ASSERT_FALSE(saveUplink(blob, config));
 }
+void test_wifi_only_persists_without_broker_and_preserves_atomicity() {
+    MemoryBlob blob;
+    const auto full = validConfig();
+    TEST_ASSERT_TRUE(saveUplink(blob, full));
+    TEST_ASSERT_EQUAL_UINT8(1, blob.bytes[4]); // Existing complete records stay compatible.
+    auto wifi = full;
+    clearBroker(wifi);
+    TEST_ASSERT_TRUE(validWifi(wifi));
+    TEST_ASSERT_TRUE(validSettings(wifi));
+    TEST_ASSERT_FALSE(validUplink(wifi));
+    TEST_ASSERT_EQUAL_STRING(full.wifiPassword, wifi.wifiPassword);
+    blob.failBefore = true;
+    TEST_ASSERT_FALSE(saveUplink(blob, wifi));
+    UplinkConfig loaded{};
+    EXPECT_RESULT(ReadResult::Ok, loadUplink(blob, loaded));
+    TEST_ASSERT_EQUAL_STRING(full.password, loaded.password);
+    blob.failBefore = false;
+    TEST_ASSERT_TRUE(saveUplink(blob, wifi));
+    TEST_ASSERT_EQUAL_UINT8(2, blob.bytes[4]);
+    EXPECT_RESULT(ReadResult::Ok, loadUplink(blob, loaded));
+    TEST_ASSERT_EQUAL_STRING(full.ssid, loaded.ssid);
+    TEST_ASSERT_EQUAL_STRING(full.wifiPassword, loaded.wifiPassword);
+    TEST_ASSERT_EQUAL_STRING("", loaded.password);
+    TEST_ASSERT_EQUAL_STRING("", loaded.host);
+    TEST_ASSERT_EQUAL_UINT16(0, loaded.port);
+    // Version 1 must not silently accept incomplete broker credentials.
+    blob.bytes[4] = 1;
+    fixtures::repairChecksum(blob);
+    EXPECT_RESULT(ReadResult::Error, loadUplink(blob, loaded));
+    wifi.port = 1883;
+    TEST_ASSERT_FALSE(saveUplink(blob, wifi));
+    clearBroker(wifi);
+    wifi.ssid[0] = 0;
+    TEST_ASSERT_FALSE(saveUplink(blob, wifi));
+    TEST_ASSERT_TRUE(saveUplink(blob, full)); // Broker can be added later.
+    EXPECT_RESULT(ReadResult::Ok, loadUplink(blob, loaded));
+    TEST_ASSERT_TRUE(validUplink(loaded));
+}
 void test_uplink_settings_are_validated_before_saving() {
     MemoryBlob blob;
     const auto base = validConfig();
@@ -529,6 +567,9 @@ void test_usb_uplink_settings_are_staged_saved_and_never_echoed() {
     settings.failBefore = true;
     COMMAND(admin, "CJ1 UPLINKSAVE 0000000000000001", "CJ1 ERR STORAGE");
     settings.failBefore = false;
+    clearBroker(stored);
+    TEST_ASSERT_TRUE(saveUplink(settings, stored));
+    COMMAND(admin, "CJ1 UPLINKINFO 0000000000000001", "CJ1 OK UPLINKINFO 0");
     settings.failRead = true;
     COMMAND(admin, "CJ1 UPLINKINFO 0000000000000001", "CJ1 ERR STORAGE");
 }
@@ -569,6 +610,7 @@ void test_usb_uplink_rejects_bad_values_roles_and_devices() {
 void runUplinkTests() {
     UnitySetTestFile(__FILE__);
     RUN_TEST(test_uplink_settings_round_trip_and_fail_closed);
+    RUN_TEST(test_wifi_only_persists_without_broker_and_preserves_atomicity);
     RUN_TEST(test_uplink_settings_are_validated_before_saving);
     RUN_TEST(test_sample_matches_the_central_mqtt_contract);
     RUN_TEST(test_sample_values_statuses_and_unknown_registry_entries);

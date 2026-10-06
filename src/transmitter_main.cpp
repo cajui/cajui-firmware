@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
-// Transmitter image: wakes, reads the DHT22, delivers one sample and sleeps; or pairs by
+// Transmitter image: wakes, reads its climate sensor, delivers one sample and sleeps; or pairs by
 // radio when its button is held. See docs/radio-applications.md.
 #include <Arduino.h>
-#include <DHT.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_random.h>
@@ -19,6 +18,8 @@
 #include "cajui_setup.h"
 #include "board/admin_console.h"
 #include "board/battery.h"
+#include "board/climate.h"
+#include "board/profile.h"
 #include "board/common.h"
 #include "board/display.h"
 #include "board/ota.h"
@@ -32,7 +33,7 @@ RTC_NOINIT_ATTR uint8_t batteryModeRtc;
 constexpr uint32_t CpuMhz = 80, MsPerSecond = 1000;
 constexpr uint64_t MicrosPerMs = 1000;
 using namespace board;
-constexpr uint32_t SampleSeconds = 300, SensorWarmupMs = 2200;
+constexpr uint32_t SampleSeconds = 300;
 constexpr uint8_t PairButton = 0; // PRG.
 constexpr uint32_t PairHoldMs = 3000, PairBlinkMs = 100;
 
@@ -121,7 +122,7 @@ void hold(uint8_t pin, uint8_t level) {
 void TransmitterApp::sleepFor(uint32_t ms) {
     // Reset provides a fallback if the radio driver cannot confirm sleep.
     if (!radio_.sleep()) hold(board::RadioReset, LOW);
-    pinMode(board::SensorData, INPUT);
+    board::climateOff();
     hold(board::Vext, HIGH);
     hold(board::Led, LOW);
     hold(board::RadioCs, HIGH);
@@ -161,17 +162,10 @@ void TransmitterApp::sample(cajui::Binding& binding) {
         sleepFor(cajui::LowBatterySeconds * MsPerSecond);
     }
     intervalS_ = battery == cajui::BatteryMode::Low ? cajui::LowBatterySeconds : SampleSeconds;
-    output(board::Vext, LOW);
-    // Hold the shared-rail display in reset; this application does not initialize it.
-    output(board::OledReset, LOW);
-    DHT sensor(board::SensorData, DHT22);
-    sensor.begin();
-    delay(SensorWarmupMs);
-    const float humidity = sensor.readHumidity();
-    const float temperature = sensor.readTemperature();
+    float temperature = 0;
+    float humidity = 0;
+    board::readClimate(temperature, humidity);
     const auto data = cajui::climateSample(temperature, humidity, intervalS_, batteryMv);
-    pinMode(board::SensorData, INPUT);
-    output(board::Vext, HIGH);
     Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u power=%d battery_mv=%u "
                   "interval_s=%u\n",
                   unsigned(data.readings[0].status), unsigned(data.readings[1].status), int(power_),
@@ -186,6 +180,7 @@ void TransmitterApp::setup() {
     setCpuFrequencyMhz(CpuMhz);
     startBoard();
     reportFirmware();
+    Serial.printf("CJAPP BOARD model=%s sensor=%s\n", board::BoardName, board::SensorName);
     rtc_gpio_deinit(gpio_num_t(PairButton));
     const cajui::BootRequest request = takeBootRequest();
     const bool mounted = records_.begin() && store_.mount();

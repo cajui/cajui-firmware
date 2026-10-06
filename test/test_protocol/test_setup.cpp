@@ -34,6 +34,45 @@ size_t count(const std::string& text, const char* part) {
         ++found;
     return found;
 }
+void test_portal_visit_does_not_restart_mqtt() {
+    SetupUplinkRecovery recovery;
+    recovery.restore(10); // Close a read-only visit.
+    TEST_ASSERT_FALSE(recovery.due(10));
+    TEST_ASSERT_FALSE(recovery.due(10000));
+    recovery.suspend(); // Start a Wi-Fi trial.
+    TEST_ASSERT_FALSE(recovery.due(10000));
+    recovery.applied(true);  // Successful save already applied the new settings.
+    recovery.restore(10001); // Closing must not apply them a second time.
+    TEST_ASSERT_FALSE(recovery.due(10001));
+}
+void test_failed_trial_restores_mqtt_with_bounded_retries() {
+    SetupUplinkRecovery recovery;
+    recovery.suspend();
+    recovery.restore(100);
+    TEST_ASSERT_TRUE(recovery.due(100));
+    // Wrong SSID or unavailable record: no apply; poll every 20 ms.
+    for (uint32_t now = 120; now < 1100; now += 20) TEST_ASSERT_FALSE(recovery.due(now));
+    TEST_ASSERT_TRUE(recovery.due(1100));
+    recovery.applied(false); // Failed apply must also wait for the retry deadline.
+    TEST_ASSERT_FALSE(recovery.due(1120));
+    TEST_ASSERT_TRUE(recovery.due(2100));
+    recovery.applied(true);
+    TEST_ASSERT_FALSE(recovery.due(3100));
+    recovery.restore(4000);
+    TEST_ASSERT_FALSE(recovery.due(4000));
+}
+void test_new_trial_cancels_pending_restore_and_timer_wraps() {
+    SetupUplinkRecovery recovery;
+    recovery.suspend();
+    recovery.restore(0xffffff00U);
+    TEST_ASSERT_TRUE(recovery.due(0xffffff00U));
+    TEST_ASSERT_FALSE(recovery.due(743));
+    TEST_ASSERT_TRUE(recovery.due(744));
+    recovery.suspend();
+    TEST_ASSERT_FALSE(recovery.due(2000));
+    recovery.restore(2000);
+    TEST_ASSERT_TRUE(recovery.due(2000));
+}
 void test_every_form_posts_the_session_token() {
     auto staged = complete();
     EnrollmentInfo transmitters[1]{};
@@ -212,7 +251,8 @@ void test_another_network_needs_the_broker_password_again() {
     TEST_ASSERT_EQUAL_STRING("mqtt-secret", c.password);
     EXPECT_RESULT(SetupError::None, stageWifi(c, "Attacker", "their-password"));
     TEST_ASSERT_EQUAL_STRING("", c.password);
-    TEST_ASSERT_FALSE(validUplink(c)); // Nothing can be saved until it is entered again.
+    TEST_ASSERT_FALSE(validUplink(c)); // Wi-Fi can be saved without reusing broker credentials.
+    TEST_ASSERT_TRUE(validSettings(c));
     EXPECT_RESULT(SetupError::MqttPassword,
                   stageBroker(c, "192.168.1.20", "1883", "receiver-1", ""));
     EXPECT_RESULT(SetupError::None,
@@ -298,7 +338,7 @@ void test_setup_page_escapes_input_and_never_shows_passwords() {
     TEST_ASSERT_TRUE(contains(html, "Broker: <b>online</b> (192.168.1.20:1883, user receiver-1)"));
     TEST_ASSERT_TRUE(contains(html, "Samples waiting to be forwarded: 3"));
     TEST_ASSERT_TRUE(contains(html, "/?host=192.168.1.20&amp;port=1883"));
-    TEST_ASSERT_TRUE(contains(html, "Changes are staged")); // saved=false
+    TEST_ASSERT_TRUE(contains(html, "Changes are not saved yet")); // saved=false
     TEST_ASSERT_TRUE(contains(html, "0000000000000002</td><td>active</td><td>34"));
     transmitters[1] = enrollment(Enrollment::Active, 2, 12, 0); // A pending re-pairing.
     view.wifiTrialFailed = true;
@@ -311,6 +351,38 @@ void test_setup_page_escapes_input_and_never_shows_passwords() {
     TEST_ASSERT_TRUE(contains(html, "2 networks found"));
     TEST_ASSERT_FALSE(renderSetup(view, page, 100));
     TEST_ASSERT_FALSE(renderSetup(view, nullptr, 0));
+}
+void test_network_selection_and_manual_fallback() {
+    auto staged = complete();
+    NetworkView networks[2]{};
+    std::strcpy(networks[0].ssid, "Home");
+    std::strcpy(networks[1].ssid, "<guest>\"&");
+    SetupView view{};
+    view.staged = &staged;
+    view.networks = networks;
+    view.networkCount = 2;
+    view.token = "network-session";
+    static char page[PageCapacity];
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "<select id=\"network\" name=\"ssid\" required>"));
+    TEST_ASSERT_TRUE(contains(page, "value=\"Home\" selected>Home"));
+    TEST_ASSERT_TRUE(contains(page, "&lt;guest&gt;&quot;&amp;"));
+    TEST_ASSERT_FALSE(contains(page, "<guest>"));
+    TEST_ASSERT_TRUE(contains(page, "Hidden network / enter manually"));
+    TEST_ASSERT_EQUAL_size_t(2, count(page, "action=\"/wifi\""));
+    TEST_ASSERT_EQUAL_size_t(count(page, "<form"), count(page, "name=\"token\""));
+    TEST_ASSERT_FALSE(contains(page, "wifi-secret"));
+    std::strcpy(staged.ssid, "Hidden");
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_FALSE(contains(page, " selected>"));
+    TEST_ASSERT_TRUE(contains(page, "value=\"Hidden\""));
+    view.networkCount = 0;
+    view.scanFailed = true;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_FALSE(contains(page, "<select"));
+    TEST_ASSERT_TRUE(contains(page, "Network search failed"));
+    TEST_ASSERT_TRUE(contains(page, "Refresh networks"));
+    TEST_ASSERT_EQUAL_size_t(1, count(page, "action=\"/wifi\""));
 }
 void test_setup_page_states_and_prefill() {
     static char page[PageCapacity];
@@ -326,9 +398,18 @@ void test_setup_page_states_and_prefill() {
         TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
         TEST_ASSERT_TRUE(contains(page, expected[i]));
     }
+    auto wifiOnly = complete();
+    clearBroker(wifiOnly);
+    view.staged = &wifiOnly;
+    view.saved = true;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_TRUE(contains(page, "Wi-Fi settings: <b>saved</b>"));
+    TEST_ASSERT_TRUE(contains(page, "Broker: not configured"));
+    TEST_ASSERT_FALSE(contains(page, "wifi-secret"));
+    view.saved = false;
     TEST_ASSERT_TRUE(contains(page, "No transmitter enrolled"));
     TEST_ASSERT_TRUE(contains(page, "No broker announced"));
-    TEST_ASSERT_TRUE(contains(page, "Broker: offline"));
+    TEST_ASSERT_TRUE(contains(page, "Broker: not configured"));
     TEST_ASSERT_FALSE(contains(page, "Search again")); // Not connected: no discovery link.
     view.scanning = true;
     view.searching = true;
@@ -342,7 +423,7 @@ void test_setup_page_states_and_prefill() {
     TEST_ASSERT_TRUE(contains(page, "Searching the network"));
     TEST_ASSERT_TRUE(contains(page, "value=\"a b&amp;c\""));
     TEST_ASSERT_TRUE(contains(page, "value=\"1884\""));
-    TEST_ASSERT_FALSE(contains(page, "Changes are staged"));
+    TEST_ASSERT_FALSE(contains(page, "Changes are not saved yet"));
     BrokerView odd[1]{};
     std::strcpy(odd[0].host, "host name");
     odd[0].port = 1;
@@ -516,6 +597,9 @@ void test_store_lists_enrollments_with_last_received_counter() {
 
 void runSetupTests() {
     UnitySetTestFile(__FILE__);
+    RUN_TEST(test_portal_visit_does_not_restart_mqtt);
+    RUN_TEST(test_failed_trial_restores_mqtt_with_bounded_retries);
+    RUN_TEST(test_new_trial_cancels_pending_restore_and_timer_wraps);
     RUN_TEST(test_long_press_fires_once_per_hold);
     RUN_TEST(test_firmware_section_and_update_pages);
     RUN_TEST(test_every_form_posts_the_session_token);
@@ -527,6 +611,7 @@ void runSetupTests() {
     RUN_TEST(test_broker_staging_validates_and_keeps_saved_password);
     RUN_TEST(test_another_network_needs_the_broker_password_again);
     RUN_TEST(test_setup_page_escapes_input_and_never_shows_passwords);
+    RUN_TEST(test_network_selection_and_manual_fallback);
     RUN_TEST(test_setup_page_states_and_prefill);
     RUN_TEST(test_hostile_network_names_never_break_the_page);
     RUN_TEST(test_pairing_section_states);

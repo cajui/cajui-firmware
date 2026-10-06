@@ -17,6 +17,21 @@ private:
     bool down_ = false, fired_ = false;
 };
 
+// Tracks MQTT suspended by a Wi-Fi trial, independently of portal open/close.
+// Restoration retries are bounded even if the station joins another network.
+class SetupUplinkRecovery {
+public:
+    void suspend();
+    void restore(uint32_t now);
+    bool due(uint32_t now);
+    void applied(bool success);
+
+private:
+    static constexpr uint32_t RetryMs = 1000;
+    bool suspended_ = false, pending_ = false;
+    uint32_t retryAt_ = 0;
+};
+
 constexpr size_t SetupSsidCapacity = 16, QrCapacity = 96;
 // "Cajui-XXXX" from the last two bytes of the device ID.
 bool setupSsid(uint64_t device, char* output, size_t capacity);
@@ -57,7 +72,7 @@ bool allowedOrigin(const char* origin, const char* address);
 enum class SetupError { None, Ssid, WifiPassword, Host, Port, Username, MqttPassword };
 // Stages fields into a pending configuration. An empty password keeps the staged one
 // only for the same network (Wi-Fi) or the same host, port and username (broker).
-// Changing the network also drops the staged broker password.
+// Changing the network also clears all staged broker settings.
 SetupError stageWifi(UplinkConfig&, const char* ssid, const char* password);
 SetupError stageBroker(UplinkConfig&, const char* host, const char* port, const char* username,
                        const char* password);
@@ -138,6 +153,7 @@ struct SetupView {
     size_t networkCount = 0;
     size_t networksOmitted = 0; // Set by renderSetup when the list did not fit.
     bool scanning = false;
+    bool scanFailed = false;
     const BrokerView* brokers = nullptr;
     size_t brokerCount = 0;
     bool searching = false;

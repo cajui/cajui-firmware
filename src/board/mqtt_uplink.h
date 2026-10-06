@@ -42,6 +42,8 @@ public:
     // Queues a retained "offline" before a deliberate restart; the caller then gives the
     // client a moment to send it.
     void announceOffline();
+    // Stop and forget MQTT before trying another Wi-Fi network.
+    void suspend();
     bool connected() override { return online_.load(); }
     int publish(const char* topic, const char* payload, size_t size) override;
     bool acknowledged(int& id) override;

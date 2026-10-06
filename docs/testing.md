@@ -34,7 +34,7 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing and device decisions) needs 95% lines and 85%
+provisioning, uplink, setup, pairing, SHT4x and device decisions) needs 95% lines and 85%
 branches. One exception is documented in the script: the host branch coverage of
 `crypto.cpp` needs 60%, because its remaining branches are OpenSSL allocation and EVP
 failure returns that no test can trigger without fault injection into the library;

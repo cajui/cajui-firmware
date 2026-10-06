@@ -60,6 +60,7 @@ def check_python_coverage(report):
 
 # Host implementation files under the coverage gate; README and docs/testing.md list them.
 GATED_FILES = (
+    "lib/CajuiSensors/src/cajui_sht4x.cpp",
     "lib/CajuiProtocol/src/codec.cpp",
     "lib/CajuiProtocol/src/delivery.cpp",
     "lib/CajuiRuntime/src/cajui_runtime.cpp",

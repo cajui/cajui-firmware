@@ -20,11 +20,16 @@ struct UplinkConfig {
     char username[UsernameCapacity + 1]{};
     char password[MqttPasswordCapacity + 1]{};
 };
-// Uplink blob v1: magic 4, version 1, five length-prefixed strings, port 2, CRC32 4.
+// Uplink blob: magic 4, version 1 byte, five length-prefixed strings, port 2, CRC32 4.
+// v1 requires a broker; v2 also permits Wi-Fi only. Complete records still use v1.
 constexpr size_t MinUplinkSize = 4 + 1 + 5 + 2 + 4;
 constexpr size_t UplinkBlobCapacity = MinUplinkSize + SsidCapacity + WifiPasswordCapacity +
                                       HostCapacity + UsernameCapacity + MqttPasswordCapacity;
-// Open networks and hidden-length secrets are not supported: every field is required.
+// Open networks and hidden-length secrets are not supported.
+bool validWifi(const UplinkConfig&);
+// A saved record is either Wi-Fi only (all broker fields empty) or a complete uplink.
+bool validSettings(const UplinkConfig&);
+void clearBroker(UplinkConfig&);
 bool validUplink(const UplinkConfig&);
 bool validIdentity(const char*);
 // IPv4 address or host name characters, 1..HostCapacity bytes.

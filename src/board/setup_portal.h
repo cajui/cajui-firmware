@@ -66,12 +66,14 @@ private:
     cajui::UplinkConfig pending_{}, running_{};
     bool active_ = false, routed_ = false, stored_ = false, savedCurrent_ = false;
     bool trial_ = false, trialFailed_ = false, reconnect_ = false;
+    cajui::SetupUplinkRecovery recovery_;
     bool mdns_ = false, mdnsEndPending_ = false;
     bool closing_ = false, scanning_ = false, settling_ = false, scanPending_ = false,
          discoverPending_ = false, scanRetryDue_ = false;
     cajui::WifiState wifi_ = cajui::WifiState::Idle;
     uint32_t wifiSince_ = 0, closeAt_ = 0, settleAt_ = 0, scanRetryAt_ = 0, scanStartedAt_ = 0;
     uint8_t scanFailures_ = 0;
+    bool scanFailed_ = false;
     cajui::NetworkView networks_[cajui::MaxNetworks]{};
     size_t networkCount_ = 0;
     // Written by the discovery task, read by the portal task after searching_ turns false.
@@ -106,6 +108,7 @@ private:
     bool save();
     void restoreStoredWifi();
     void scan();
+    void scanFailed();
     void discover();
     void startMdns();
     void collectScan();

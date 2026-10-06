@@ -6,6 +6,22 @@
 #include <cstring>
 
 namespace cajui {
+void SetupUplinkRecovery::suspend() {
+    suspended_ = true;
+    pending_ = false;
+}
+void SetupUplinkRecovery::restore(uint32_t now) {
+    pending_ = suspended_;
+    retryAt_ = now;
+}
+bool SetupUplinkRecovery::due(uint32_t now) {
+    if (!pending_ || int32_t(now - retryAt_) < 0) return false;
+    retryAt_ = now + RetryMs;
+    return true;
+}
+void SetupUplinkRecovery::applied(bool success) {
+    if (success) suspended_ = pending_ = false;
+}
 namespace {
 // HTML on top of the bounded text builder; any truncation invalidates the page.
 class Html : public TextBuffer {
@@ -58,7 +74,7 @@ void head(Html& page, const char* title) {
         "</title><style>body{font:16px system-ui,sans-serif;margin:0 auto;padding:16px;"
         "max-width:560px;background:#faf9f5;color:#24382f}section{background:#fff;"
         "border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:12px 0}"
-        "label{display:block;margin:8px 0 2px}input{box-sizing:border-box;width:100%%;"
+        "label{display:block;margin:8px 0 2px}input,select{box-sizing:border-box;width:100%%;"
         "padding:10px;font-size:16px}button{margin-top:12px;padding:10px 16px;"
         "font-size:16px}table{width:100%%;border-collapse:collapse}td,th{text-align:left;"
         "padding:6px 4px;border-bottom:1px solid #eee;font-size:14px}.notice{background:"
@@ -97,7 +113,10 @@ void status(Html& page, const SetupView& v) {
     if (v.wifiTrialFailed)
         page.format("<br><b>The new Wi-Fi settings did not connect.</b> Nothing was saved; check "
                     "the network and password.");
-    page.format("<br>Broker: %s", v.brokerOnline ? "<b>online</b>" : "offline");
+    if (v.saved) page.format("<br>Wi-Fi settings: <b>saved</b>");
+    page.format("<br>Broker: %s", v.brokerOnline                       ? "<b>online</b>"
+                                  : v.staged && validUplink(*v.staged) ? "offline"
+                                                                       : "not configured");
     if (v.staged && v.staged->host[0]) {
         page.format(" (");
         page.text(v.staged->host);
@@ -107,35 +126,55 @@ void status(Html& page, const SetupView& v) {
     }
     page.format("<br>Samples waiting to be forwarded: %u</p>", unsigned(v.queued));
     if (v.staged && !v.saved)
-        page.format("<p><small>Changes are staged. They are saved when both Wi-Fi and broker "
-                    "are complete.</small></p>");
+        page.format(
+            "<p><small>Changes are not saved yet. Wi-Fi is saved after a successful connection; "
+            "the broker can be configured later.</small></p>");
     page.format("<p><a href=\"/\">Refresh</a></p></section>");
 }
 void wifiForm(Html& page, const SetupView& v) {
     page.format("<section><h2>Wi-Fi</h2>");
-    form(page, "/wifi", v.token);
-    page.format(
-        "<label for=\"ssid\">Network (2.4 GHz)</label>"
-        "<input id=\"ssid\" name=\"ssid\" list=\"networks\" maxlength=\"32\" required value=\"");
-    page.text(v.staged ? v.staged->ssid : "");
-    page.format("\"><datalist id=\"networks\">");
-    for (size_t i = 0; i < v.networkCount; ++i) {
-        page.format("<option value=\"");
-        page.text(v.networks[i].ssid);
-        page.format("\">%d dBm</option>", v.networks[i].rssi);
+    if (v.networkCount) {
+        form(page, "/wifi", v.token);
+        page.format("<label for=\"network\">Available networks (2.4 GHz)</label>"
+                    "<select id=\"network\" name=\"ssid\" required>"
+                    "<option value=\"\">Choose a network</option>");
+        for (size_t i = 0; i < v.networkCount; ++i) {
+            page.format("<option value=\"");
+            page.text(v.networks[i].ssid);
+            page.format("\"%s>", v.staged && !std::strcmp(v.staged->ssid, v.networks[i].ssid)
+                                     ? " selected"
+                                     : "");
+            page.text(v.networks[i].ssid);
+            page.format(" (%d dBm)</option>", v.networks[i].rssi);
+        }
+        page.format(
+            "</select><label for=\"networkpass\">Password</label>"
+            "<input id=\"networkpass\" name=\"password\" type=\"password\" maxlength=\"64\" "
+            "autocomplete=\"off\" placeholder=\"Leave empty to keep the saved one\">"
+            "<button>Connect</button></form>");
+        page.format("<details><summary>Hidden network / enter manually</summary>");
     }
+    form(page, "/wifi", v.token);
+    page.format("<label for=\"ssid\">Network name (2.4 GHz)</label>"
+                "<input id=\"ssid\" name=\"ssid\" maxlength=\"32\" required value=\"");
+    page.text(v.staged ? v.staged->ssid : "");
     page.format(
-        "</datalist><label for=\"wifipass\">Password</label><input id=\"wifipass\" "
+        "\"><label for=\"wifipass\">Password</label><input id=\"wifipass\" "
         "name=\"password\" type=\"password\" maxlength=\"64\" autocomplete=\"off\" "
         "placeholder=\"Leave empty to keep the saved one\"><button>Connect</button></form>");
+    if (v.networkCount) page.format("</details>");
+    if (v.scanFailed)
+        page.format("<p role=\"status\">Network search failed. Try again or enter the network name "
+                    "manually.</p>");
     if (v.scanning) {
-        page.format("<p><small>Scanning for networks&hellip;</small></p>");
+        page.format("<p><small>Scanning for networks&hellip;</small></p><p><a href=\"/\">Show "
+                    "network results</a></p>");
     } else {
         page.format("<p><small>%u networks found%s.</small></p>",
                     unsigned(v.networkCount + v.networksOmitted),
                     v.networksOmitted ? ", not all listed" : "");
         form(page, "/scan", v.token);
-        page.format("<button>Scan again</button></form>");
+        page.format("<button>Refresh networks</button></form>");
     }
     page.format("</section>");
 }
@@ -332,9 +371,9 @@ const char* noticeText(Notice notice) {
     switch (notice) {
     case Notice::WifiUnchanged: return "Wi-Fi settings unchanged.";
     case Notice::WifiTrying:
-        return "Connecting to the new network. The settings are saved once it connects and the "
-               "broker section is complete.";
-    case Notice::WifiStaged: return "Connecting. Complete the broker section to save.";
+        return "Connecting to the new network. Wi-Fi settings are saved once it connects.";
+    case Notice::WifiStaged:
+        return "Connecting. Wi-Fi will be saved after it connects; configure the broker later.";
     case Notice::WifiFailed:
         return "Could not connect with the new Wi-Fi settings; the saved ones were kept.";
     case Notice::BrokerSaved: return "Broker saved. Forwarding restarts with these settings.";
@@ -432,8 +471,7 @@ SetupError stageWifi(UplinkConfig& pending, const char* ssid, const char* passwo
         return SetupError::WifiPassword;
     // On another network the broker's host name may resolve anywhere: the saved broker
     // password must be entered again rather than sent there.
-    if (!sameNetwork)
-        for (auto& c : next.password) c = 0;
+    if (!sameNetwork) clearBroker(next);
     pending = next;
     wipe(next);
     return SetupError::None;

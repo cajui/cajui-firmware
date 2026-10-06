@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ENVS = ("runtime_tx", "runtime_rx")
+ENVS = ("runtime_tx", "runtime_rx", "runtime_tx_stick_lite")
 # The same pin as check_protocol.py: uvx locally, the hash-pinned install in CI.
 CLANG_TIDY = (
     ["uvx", "--from", "clang-tidy==19.1.0", "clang-tidy"]

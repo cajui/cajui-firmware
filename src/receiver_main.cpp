@@ -154,6 +154,11 @@ void ReceiverApp::startForwarding() {
         return;
     }
     if (uplink_.begin(settings, store_.device())) {
+        if (!cajui::validUplink(settings)) {
+            Serial.println("CJAPP UPLINK wifi_only");
+            cajui::wipe(settings);
+            return;
+        }
         forwarder_.reset(new cajui::Forwarder(uplink_, clock_, store_, settings.username));
         reporter_.reset(new cajui::StateReporter(uplink_, *this, clock_, settings.username));
         discovery_.reset(new cajui::DiscoveryReporter(uplink_, store_.device(), settings.username));
@@ -173,6 +178,10 @@ bool ReceiverApp::applyUplink(const cajui::UplinkConfig& settings) {
         if (forwarder_) forwarder_->pause();
         if (reporter_) reporter_->pause();
         if (discovery_) discovery_->pause();
+    }
+    if (!cajui::validUplink(settings)) {
+        uplink_.suspend();
+        return cajui::validWifi(settings);
     }
     const bool started = uplink_.startMqtt(settings, store_.device());
     Locked held(lock_);

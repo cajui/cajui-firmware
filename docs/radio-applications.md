@@ -1,7 +1,8 @@
 # Experimental radio applications
 
 `runtime_tx` and `runtime_rx` target the Heltec WiFi LoRa 32 V3 (ESP32-S3/SX1262).
-They are development images, not a Wireless Stick Lite port or a production release.
+They are development images, not a production release. The separate
+[Wireless Stick Lite V3 transmitter target](stick-lite.md) uses SHT4x.
 See the [current implementation status](../README.md#pending-and-unvalidated).
 
 ```sh
@@ -192,14 +193,23 @@ Holding the button again, the page's close button, ten minutes without requests,
 minutes after opening, whatever happens first, closes it. Final hardware can wire an external button to any
 GPIO with a pull-up by changing `board::SetupButton`.
 
-The page configures Wi-Fi (scanned 2.4 GHz networks or typed name) and the MQTT broker
+The page configures Wi-Fi (an explicit selector of scanned 2.4 GHz networks, with signal
+strength and a manual form for hidden networks) and the MQTT broker
 (address discovered through mDNS `_mqtt._tcp`, or typed, plus username and password),
 shows Wi-Fi, broker and queue status, and lists enrolled transmitters with their last
-accepted counter and a confirmed revoke action. Settings are staged and saved to the same
-uplink record as the USB commands only once both sections are complete **and** the
-station has connected with the staged Wi-Fi credentials: a mistyped password is never
+accepted counter and a confirmed revoke action. Wi-Fi settings are saved independently
+to the uplink record once the
+station has connected with the submitted credentials. MQTT can be configured later;
+a receiver with only Wi-Fi saved reconnects after restart and keeps samples queued.
+The page distinguishes saved Wi-Fi from an unconfigured broker. A mistyped password is never
 stored, and if it does not connect within 20 seconds the station returns to the saved
-network and the page says so. Saving applies the settings without a reboot: forwarding
+network and the page says so. Changing the SSID clears the staged broker settings and
+stops the existing MQTT client
+before attempting the new network. Re-enter broker settings to authorize that network;
+a failed Wi-Fi trial restores the previous saved configuration and only resumes MQTT
+after reconnecting to its saved network. Opening and closing setup without changing
+settings does not restart MQTT. Only a connection suspended by a Wi-Fi trial is
+restored; failed restoration attempts are limited to once per second. Saving applies the settings without a reboot: forwarding
 pauses, MQTT restarts with the new identity, and an in-flight publication is republished.
 Saved passwords are never shown. An empty Wi-Fi password keeps the saved one for the same
 network; an empty broker password keeps the saved one only for the same Wi-Fi network,
@@ -241,6 +251,12 @@ aborts the connection, so scans wait for it. With the access point active, a sca
 longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.
 These behaviors were observed on a Heltec WiFi LoRa 32 V3, not derived from documentation.
 Diagnostic lines start with `CJAPP SETUP`.
+Wi-Fi discovery retries both immediate start failures and failed completions with a
+bounded delay. After a connection attempt times out, station auto-reconnect is suspended
+while setup is open so unreachable credentials cannot block scanning; a new connection
+attempt or closing setup restores it. Failed searches show an explicit message and retain
+manual entry. Use **Show network results** after an asynchronous search completes, or
+**Refresh networks** to search again. No JavaScript is needed for network selection.
 
 ## Radio adapter
 
@@ -264,3 +280,9 @@ latency guarantee. Host deadline tests do not simulate that delay, flash cache s
 IRQ latency or packet collisions. Driver failures remain latched until reboot.
 
 Implementation reference: [RadioLib SX126x at the pinned 7.1.2 release](https://github.com/jgromes/RadioLib/blob/7.1.2/src/modules/SX126x/SX126x.cpp).
+
+Wi-Fi-only persistence uses uplink blob version 2. Existing complete version-1 records
+remain readable and complete settings are still written as version 1. Older firmware
+rejects a Wi-Fi-only record rather than using incomplete credentials. Enrollment and
+the queued sample storage are unchanged. USB `UPLINKINFO` reports no configured broker
+for a Wi-Fi-only record; it never returns Wi-Fi passwords.
