@@ -42,16 +42,24 @@ bool MqttUplink::prepare() {
     return mutex_ && acks_ && commands_ && outbox_ && restarter_ && sender_;
 }
 bool MqttUplink::begin(const cajui::UplinkConfig& config, uint64_t device) {
-    if (!cajui::validUplink(config)) return false;
+    if (!cajui::validSettings(config)) return false;
     WiFi.mode(WIFI_STA);
     startWifi(config.ssid, config.wifiPassword);
-    return startMqtt(config, device);
+    return !cajui::validUplink(config) || startMqtt(config, device);
 }
 void MqttUplink::startWifi(const char* ssid, const char* password) {
     // Keep Wi-Fi credentials out of the default NVS partition; they live in the uplink blob.
     WiFi.persistent(false);
     WiFi.setAutoReconnect(true);
     WiFi.begin(ssid, password);
+}
+void MqttUplink::suspend() {
+    if (!prepare()) return;
+    xSemaphoreTake(mutex_, portMAX_DELAY);
+    stopMqtt();
+    generation_.fetch_add(1);
+    cajui::wipe(settings_);
+    xSemaphoreGive(mutex_);
 }
 void MqttUplink::stopMqtt() {
     if (client_) {

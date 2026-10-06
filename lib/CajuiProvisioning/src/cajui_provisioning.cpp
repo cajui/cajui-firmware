@@ -265,10 +265,10 @@ void Provisioning::uplink(const char* command, size_t count, char* const* words,
     } else if (!std::strcmp(command, "UPLINKINFO")) {
         UplinkConfig stored{};
         const auto loaded = loadUplink(*uplink_, stored);
-        if (loaded == ReadResult::Ok)
+        if (loaded == ReadResult::Ok && validUplink(stored))
             std::snprintf(reply, capacity, "CJ1 OK UPLINKINFO 1 %s %u %s", stored.host,
                           unsigned(stored.port), stored.username);
-        else if (loaded == ReadResult::Missing)
+        else if (loaded == ReadResult::Missing || loaded == ReadResult::Ok)
             std::snprintf(reply, capacity, "CJ1 OK UPLINKINFO 0");
         else
             respond(Result::StorageError, command, reply, capacity);

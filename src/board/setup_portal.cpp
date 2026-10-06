@@ -94,6 +94,8 @@ void SetupPortal::open() {
     running_ = cajui::UplinkConfig{};
     if (stored_) copyWifi(running_, pending_);
     savedCurrent_ = stored_;
+    scanFailures_ = 0;
+    scanFailed_ = scanRetryDue_ = scanPending_ = false;
     trial_ = trialFailed_ = reconnect_ = closing_ = false;
     WiFi.persistent(false);
     WiFi.mode(WIFI_AP_STA);
@@ -137,15 +139,23 @@ void SetupPortal::restoreStoredWifi() {
         Locked held(lock_);
         loaded = cajui::loadUplink(blob_, stored) == cajui::ReadResult::Ok;
     }
-    if (loaded && !sameWifi(stored, running_)) {
+    if (loaded && (!sameWifi(stored, running_) || !MqttUplink::wifiConnected())) {
         MqttUplink::startWifi(stored.ssid, stored.wifiPassword);
         copyWifi(running_, stored);
     }
-    if (loaded) copyWifi(pending_, stored);
+    if (loaded) {
+        pending_ = stored;
+        savedCurrent_ = true;
+        resumeSaved_ = true;
+    }
     cajui::wipe(stored);
 }
 void SetupPortal::close() {
     if (!active_) return;
+    if (scanning_) esp_wifi_scan_stop();
+    scanning_ = scanRetryDue_ = scanPending_ = false;
+    WiFi.scanDelete();
+    WiFi.setAutoReconnect(true);
     server_.stop();
     dns_.stop();
     WiFi.softAPdisconnect(true);
@@ -162,6 +172,23 @@ void SetupPortal::close() {
     Serial.println("CJAPP SETUP closed");
 }
 void SetupPortal::poll() {
+    // A failed trial/closed portal may restore Wi-Fi asynchronously. Never send the old
+    // broker credentials until the station is back on the stored network.
+    if (resumeSaved_ && MqttUplink::wifiConnected()) {
+        cajui::UplinkConfig stored{};
+        bool loaded = false;
+        {
+            Locked held(lock_);
+            loaded = cajui::loadUplink(blob_, stored) == cajui::ReadResult::Ok;
+        }
+        if (loaded && WiFi.SSID() == stored.ssid) {
+            control_.applyUplink(stored);
+            resumeSaved_ = false;
+        } else if (!loaded) {
+            resumeSaved_ = false;
+        }
+        cajui::wipe(stored);
+    }
     if (mdnsEndPending_ && !searching_.load()) {
         MDNS.end();
         mdns_ = mdnsEndPending_ = false;
@@ -177,6 +204,8 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
+        resumeSaved_ = false;
+        uplink_.suspend();
         trialAddresses_ = addresses_.load();
         MqttUplink::startWifi(pending_.ssid, pending_.wifiPassword);
         copyWifi(running_, pending_);
@@ -217,8 +246,8 @@ void SetupPortal::trackWifi() {
         settling_ = true;
         if (trial_) {
             trial_ = trialFailed_ = false;
-            // The new network works: save now if the broker section is complete.
-            if (cajui::validUplink(pending_) && !savedCurrent_) save();
+            // Persist verified Wi-Fi even when no broker has been configured.
+            if (cajui::validSettings(pending_) && !savedCurrent_) save();
         }
     } else if (!connected && wifi_ == cajui::WifiState::Connected) {
         wifi_ = cajui::WifiState::Connecting;
@@ -236,7 +265,12 @@ void SetupPortal::trackWifi() {
                 return;
             }
         }
-        scan(); // Offer the network list again so the user can correct the choice.
+        // Stop retries of unreachable credentials before scanning. The ESP32 refuses
+        // scans while its station is still trying to associate. Keep the setup AP on.
+        WiFi.setAutoReconnect(false);
+        WiFi.disconnect(false, false);
+        scanRetryDue_ = true;
+        scanRetryAt_ = millis() + ScanRetryMs;
     }
 }
 void SetupPortal::startMdns() {
@@ -259,23 +293,34 @@ void SetupPortal::scan() {
     }
     const int16_t started = WiFi.scanNetworks(true);
     scanStartedAt_ = millis();
-    scanning_ = started == WIFI_SCAN_RUNNING;
+    scanning_ = started == WIFI_SCAN_RUNNING || started >= 0;
+    if (!scanning_) scanFailed();
     Serial.printf("CJAPP SETUP scan start=%d\n", int(started));
+}
+void SetupPortal::scanFailed() {
+    scanFailed_ = true;
+    if (scanFailures_ < ScanRetries) {
+        ++scanFailures_;
+        scanRetryDue_ = true;
+        scanRetryAt_ = millis() + ScanRetryMs;
+    }
 }
 void SetupPortal::collectScan() {
     if (!scanning_) return;
     const int16_t found = WiFi.scanComplete();
-    if (found == WIFI_SCAN_RUNNING) return;
+    if (found == WIFI_SCAN_RUNNING) {
+        if (uint32_t(millis() - scanStartedAt_) < ScanPatienceMs) return;
+        esp_wifi_scan_stop();
+    }
     if (found == WIFI_SCAN_FAILED && uint32_t(millis() - scanStartedAt_) < ScanPatienceMs) return;
     scanning_ = false;
     networkCount_ = 0;
     Serial.printf("CJAPP SETUP scan found=%d\n", int(found));
-    if (found < 0 && scanFailures_ < ScanRetries) {
-        ++scanFailures_;
-        scanRetryDue_ = true;
-        scanRetryAt_ = millis() + ScanRetryMs;
-    } else if (found >= 0) {
+    if (found < 0) {
+        scanFailed();
+    } else {
         scanFailures_ = 0;
+        scanFailed_ = false;
     }
     for (int16_t i = 0; i < found; ++i) {
         const String name = WiFi.SSID(i);
@@ -354,7 +399,7 @@ void SetupPortal::redirect(cajui::Notice notice) {
     server_.send(HttpSeeOther);
 }
 bool SetupPortal::save() {
-    if (!cajui::validUplink(pending_)) return false;
+    if (!cajui::validSettings(pending_)) return false;
     const bool written = whileRadioIdle([this] { return cajui::saveUplink(blob_, pending_); });
     if (written) stored_ = true;
     savedCurrent_ = written && control_.applyUplink(pending_);
@@ -393,7 +438,8 @@ void SetupPortal::home() {
     view.saved = savedCurrent_;
     view.networks = networks_;
     view.networkCount = networkCount_;
-    view.scanning = scanning_;
+    view.scanning = scanning_ || scanRetryDue_ || scanPending_;
+    view.scanFailed = scanFailed_ && !view.scanning;
     view.searching = searching_.load();
     view.brokers = brokers_;
     view.brokerCount = view.searching ? 0 : brokerCount_.load();
@@ -523,6 +569,8 @@ void SetupPortal::route() {
     });
     server_.on("/scan", HTTP_POST, [this] {
         if (!authorize(true)) return;
+        scanFailures_ = 0;
+        scanFailed_ = scanRetryDue_ = false;
         scan();
         redirect(cajui::Notice::None);
     });
@@ -540,7 +588,7 @@ void SetupPortal::route() {
         cajui::wipe(before);
         if (error != cajui::SetupError::None) return redirect(cajui::noticeFor(error));
         if (!changed && wifi_ == cajui::WifiState::Connected && !trial_) {
-            if (!savedCurrent_ && cajui::validUplink(pending_)) save();
+            if (!savedCurrent_ && cajui::validSettings(pending_)) save();
             return redirect(cajui::Notice::WifiUnchanged);
         }
         // Nothing is saved until the station connects with these credentials. Reconnect

@@ -120,10 +120,24 @@ bool validIdentity(const char* text) {
             return false;
     return true;
 }
-bool validUplink(const UplinkConfig& c) {
+bool validWifi(const UplinkConfig& c) {
     return validSecret(c.ssid, 1, SsidCapacity) &&
-           validSecret(c.wifiPassword, MinWifiPassword, WifiPasswordCapacity) &&
-           validHost(c.host) && c.port && validIdentity(c.username) &&
+           validSecret(c.wifiPassword, MinWifiPassword, WifiPasswordCapacity);
+}
+void clearBroker(UplinkConfig& c) {
+    UplinkConfig wifi{};
+    std::memcpy(wifi.ssid, c.ssid, sizeof(c.ssid));
+    std::memcpy(wifi.wifiPassword, c.wifiPassword, sizeof(c.wifiPassword));
+    wipe(c);
+    c = wifi;
+    wipe(wifi);
+}
+bool validSettings(const UplinkConfig& c) {
+    return validUplink(c) ||
+           (validWifi(c) && !c.host[0] && !c.port && !c.username[0] && !c.password[0]);
+}
+bool validUplink(const UplinkConfig& c) {
+    return validWifi(c) && validHost(c.host) && c.port && validIdentity(c.username) &&
            validSecret(c.password, 1, MqttPasswordCapacity);
 }
 void wipe(UplinkConfig& c) {
@@ -132,12 +146,12 @@ void wipe(UplinkConfig& c) {
     for (size_t i = 0; i < sizeof(c); ++i) bytes[i] = 0;
 }
 bool saveUplink(AtomicBlob& blob, const UplinkConfig& c) {
-    if (!validUplink(c)) return false;
+    if (!validSettings(c)) return false;
     uint8_t bytes[UplinkBlobCapacity]{};
     Writer w{bytes};
     std::memcpy(w.p, UplinkMagic, sizeof(UplinkMagic));
     w.p += sizeof(UplinkMagic);
-    *w.p++ = UplinkVersion;
+    *w.p++ = validUplink(c) ? UplinkVersion : 2; // v2 permits Wi-Fi-only records.
     for (const char* value : {c.ssid, c.wifiPassword, c.host, c.username, c.password})
         w.text(value);
     *w.p++ = uint8_t(c.port >> 8);
@@ -162,12 +176,14 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
         for (size_t i = 0; i < 4; ++i) stored = (stored << 8) | bytes[size - 4 + i];
         Reader r{bytes + sizeof(UplinkMagic) + 1, bytes + size - 4};
         if (std::memcmp(bytes, UplinkMagic, sizeof(UplinkMagic)) == 0 &&
-            bytes[sizeof(UplinkMagic)] == UplinkVersion && stored == crc32(bytes, size - 4) &&
-            r.text(c.ssid, SsidCapacity) && r.text(c.wifiPassword, WifiPasswordCapacity) &&
-            r.text(c.host, HostCapacity) && r.text(c.username, UsernameCapacity) &&
-            r.text(c.password, MqttPasswordCapacity) && r.end - r.p == 2) {
+            (bytes[sizeof(UplinkMagic)] == UplinkVersion || bytes[sizeof(UplinkMagic)] == 2) &&
+            stored == crc32(bytes, size - 4) && r.text(c.ssid, SsidCapacity) &&
+            r.text(c.wifiPassword, WifiPasswordCapacity) && r.text(c.host, HostCapacity) &&
+            r.text(c.username, UsernameCapacity) && r.text(c.password, MqttPasswordCapacity) &&
+            r.end - r.p == 2) {
             c.port = uint16_t((r.p[0] << 8) | r.p[1]);
-            if (validUplink(c)) result = ReadResult::Ok;
+            if (bytes[sizeof(UplinkMagic)] == UplinkVersion ? validUplink(c) : validSettings(c))
+                result = ReadResult::Ok;
         }
     }
     volatile uint8_t* clear = bytes;

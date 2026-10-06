@@ -9,6 +9,7 @@ a server.
 **Experimental development code.** The shared protocol core, persistent storage, USB
 enrollment and host-tested delivery controllers are implemented. Experimental ESP32
 transmitter/receiver applications integrate an SX1262 adapter and a DHT22 sensor.
+An experimental [Wireless Stick Lite V3 transmitter](docs/stick-lite.md) supports SHT4x.
 Each image has a USB administration mode that keeps the radio in reset. No production image is
 released.
 

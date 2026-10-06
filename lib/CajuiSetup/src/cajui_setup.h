@@ -138,6 +138,7 @@ struct SetupView {
     size_t networkCount = 0;
     size_t networksOmitted = 0; // Set by renderSetup when the list did not fit.
     bool scanning = false;
+    bool scanFailed = false;
     const BrokerView* brokers = nullptr;
     size_t brokerCount = 0;
     bool searching = false;
