@@ -23,12 +23,35 @@ their enrollment and the transmitter's counters continued. A USB install always 
 
 ## Web installer (USB)
 
-A tag `vX.Y.Z` runs `.github/workflows/release.yml`: it builds both images with that
-version, merges bootloader, partition table, `otadata` and application into one image per
-role, and publishes them on the GitHub release and the project's GitHub Pages site, where
-[ESP Web Tools](https://esphome.github.io/esp-web-tools/) 10.4.0 installs them from Chrome
-or Edge over Web Serial. The page serves ESP Web Tools itself; the release job checks the
-npm tarball against its published SHA-512.
+A maintainer runs `.github/workflows/release.yml` from `main`, supplying an existing
+`vX.Y.Z` tag. Creating a tag alone does not publish a release. The workflow resolves
+it to a commit, requires that commit to belong to the selected main revision, and
+checks the latest main-branch CI run for that exact SHA. All five required jobs must
+have succeeded; pending, failed, cancelled or skipped checks block the release.
+The gate checks the current run attempt and repeats before signing and publishing.
+
+The firmware build checks out the validated SHA. It merges bootloader, partition table,
+`otadata` and application into an image per role, and publishes the images on GitHub
+Releases and GitHub Pages. [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
+10.4.0 installs them from Chrome or Edge over Web Serial. The page serves ESP Web Tools
+itself; the release job checks the npm tarball against its published SHA-512.
+
+Release tooling reads `partitions.csv` for application limits, merge offsets and the
+storage erase image. The built `partitions.bin`, including its format checksum, must
+match that CSV. Invalid bounds, overlap, unsupported types/flags, or an image reaching
+persistent storage stop assembly. The supported ESP32-S3 profile has 8 MiB of flash
+and a partition table at 0x8000; these chip/profile parameters are not CSV partitions.
+Offsets must be explicit; sizes accept hexadecimal, decimal, K and M notation.
+
+```sh
+gh workflow run release.yml --ref main -f tag=v1.2.3
+```
+
+Wait for CI on the main commit before dispatching. A failed gate exits without using
+the signing key; rerun the release after the checks pass. Release tags must be immutable.
+The tag's partition CSV and public key header must match the trusted main revision;
+older layouts or keys require an explicit migration/release plan rather than mixing
+old binaries with a new installer layout.
 
 Each role has two buttons. **Update** writes the merged image from offset 0: bootloader,
 partition table, the default `nvs` (Wi-Fi driver data only), `otadata` and `ota_0`. It
@@ -85,19 +108,36 @@ before being rolled back, the previous image refuses them (see
 
 ### Keys
 
-`src/board/release_key.h` holds the public key (DER SubjectPublicKeyInfo) that release
-images must be signed with. The private key, `FIRMWARE_SIGNING_KEY` (PEM), is a secret of
-the `release` environment, which only `v*.*.*` tags can use. Only the sign job reads it: it
-runs nothing but openssl and the standard-library packaging tool, then checks every signed
-file against `release_key.h`, so a mismatched secret fails the release instead of
-publishing updates no board accepts. The build job, which runs third-party build code, has
-neither the key nor a write token. Nobody else can produce an update the receiver accepts. Keep an offline backup: without it, boards can only be updated
-over USB. To replace the key, generate a pair, update the header and the secret, and
-release; boards accept keys only through a firmware that already carries them.
+`src/board/release_key.h` holds the public key (DER SubjectPublicKeyInfo). The private
+key, `FIRMWARE_SIGNING_KEY` (PEM), belongs only to the `release` environment, restricted
+to the **main branch**, not release tags. Do not create a repository-level copy.
 
-Repository setup, once: the `release` environment with a `v*.*.*` tag rule and the secret,
-and GitHub Pages set to "GitHub Actions" with a `v*.*.*` tag rule on the `github-pages`
-environment (by default it only accepts the default branch).
+Signing runs on a fresh runner. Its checkout is pinned to the main SHA that dispatched
+the workflow, independently of the release tag. It executes only that trusted revision's
+packager and OpenSSL; downloaded firmware images are data. No tagged script executes in
+the signing job. The key is exposed only to the signing step, removed from the child
+process environment after writing a private temporary file, and cleaned up on failure.
+Signed files are checked against the trusted public key before publication. Build jobs
+have neither the key nor a write token.
+
+This trusts maintainers who can change main or environment settings. Passing CI does not
+prove firmware is benign, and environment restrictions do not protect against a malicious
+administrator. Protect main through review and restrict release dispatch privileges.
+GitHub's [environment branch rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+are part of the security boundary: a YAML condition alone cannot stop an older or modified
+tag workflow from requesting a secret if its ref is still allowed by the environment.
+
+Repository setup:
+
+- `release`: selected branches/tags, with exactly one **branch** rule `main`, plus the
+  signing secret. Remove the previous `v*.*.*` tag rule before using this workflow.
+- `github-pages`: branch rule `main`; remove the previous tag rule. Pages uses GitHub Actions.
+- Release tags: prevent updates/deletions for `refs/tags/v*.*.*` with an active ruleset.
+- Main: restrict writes/review workflow and signer changes as trusted release code.
+
+Keep an offline key backup: without it, boards can only be updated over USB. To rotate
+keys, plan the transition through firmware carrying the new key; changing a GitHub secret
+does not change the keys already installed on devices.
 
 ```sh
 python3 tools/package_firmware.py generate-key --private key.pem --public key.der

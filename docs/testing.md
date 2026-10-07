@@ -62,18 +62,24 @@ The ESP32 target compiles the same tests with mbedTLS and explicit
 `UNITY_SUPPORT_64` for the protocol counters and identities. Build-only success is not a
 physical test result. CI does not connect to devices or upload firmware.
 
-Python unittest tests exercise client sequencing, resumable setup, identity checks,
-recovery-file permissions, error redaction and the command line. With `--coverage`, the
-check script also requires 95% line and branch coverage of `tools/provision.py` and of
-`tools/package_firmware.py`. Use `uv run --python 3.12 --with coverage==7.6.1 python
-scripts/check_protocol.py --coverage` or install coverage.py 7.6.1 in a virtual
-environment; covered and ordinary tests use that same interpreter. Python 3.10 is the
-minimum, tested separately in CI; the native coverage job uses 3.12. `--python-only`
-runs the Python suite without building C++. The gate reads each file's JSON counts and
-checks each metric independently, without rounding. A high combined percentage cannot
-compensate for low branch coverage. Regression tests cover that distinction and missing
-coverage data. The build job compiles `runtime_tx`, `runtime_rx` and
-`runtime_tx_stick_lite`. No CI step uploads a device.
+Python unittest tests exercise provisioning, packaging, release eligibility and layout
+validation. With `--coverage`, each file in `PYTHON_FLOORS` must independently reach
+95% lines and branches, without rounding. The policy covers the client, packager,
+partition parser, release assembler and CI gate. Tests include moved/unrelated tags,
+failed or incomplete CI, paginated job results, modified layouts, compiled-table
+mismatches, incorrect slot sizes, and signatures made with disposable keys.
+
+Use `uv run --python 3.12 --with coverage==7.6.1 python scripts/check_protocol.py --coverage`
+or install coverage.py 7.6.1 in a virtual environment. Covered and ordinary tests use the
+same interpreter. CI tests the minimum Python 3.10 separately; native coverage uses 3.12.
+`--python-only` runs Python tests without compiling C++.
+
+After building `runtime_tx` and `runtime_rx`, CI also runs
+`python -m unittest discover -s tests_release -v` with the release requirements installed.
+This exercises the real esptool merge, generated manifests and storage erase image, and
+signs/verifies both compiled application images with a disposable key. It does not use
+the release secret, publish artifacts, exercise GitHub environment protection, or upload
+a device. The Stick Lite target is compiled but remains excluded from release assets.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
