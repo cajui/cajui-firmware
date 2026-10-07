@@ -12,16 +12,6 @@ jobs:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - run: python -m pip install --require-hashes -r .github/requirements/lint.txt
-      - name: Install shell and workflow linters
-        run: |
-          curl -fsSLo actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
-          echo '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  actionlint.tar.gz' | sha256sum -c -
-          curl -fsSLo shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
-          echo '6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  shellcheck.tar.xz' | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/check-tools"
-          tar -xzf actionlint.tar.gz -C "$RUNNER_TEMP/check-tools" actionlint
-          tar -xJf shellcheck.tar.xz --strip-components=1 -C "$RUNNER_TEMP/check-tools" shellcheck-v0.10.0/shellcheck
-          echo "$RUNNER_TEMP/check-tools" >> "$GITHUB_PATH"
       - name: Formatting, clang-tidy and ruff
         run: python scripts/check_protocol.py --lint
   native:
@@ -43,8 +33,8 @@ jobs:
   python-minimum:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.10'
       - run: python -m pip install --require-hashes -r .github/requirements/python.txt

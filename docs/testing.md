@@ -34,28 +34,29 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, firmware updates, SHT4x and device decisions) needs 95% lines and 85%
-branches. One exception is documented in the script: the host branch coverage of
-`crypto.cpp` needs 60%, because its remaining branches are OpenSSL allocation and EVP
-failure returns that no test can trigger without fault injection into the library;
-known-answer vectors cover its success paths. A file missing from the report fails the
-gate. Uplink tests
-check the exact Central JSON, the settings blob and PUBACK-gated queue removal against a
-publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Pairing tests check X25519 and HKDF against RFC 7748 and RFC 5869, tampering with every
-offer byte, a complete exchange between the node and receiver state machines followed by
-accepted DATA, rotation, window expiry, lost JOIN_DONE and a foreign network. The ESP32
-backends (mbedTLS X25519, HKDF composed from mbedTLS HMAC) were checked against the same
-vectors with a separate probe program on a board. Running this Unity suite on the board
-is not part of validation. Setup tests cover button timing, the
-Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host and origin
-checks, notice codes and oversized pages; the access point, DNS, HTTP server, scanning
-and mDNS discovery run only on hardware. Firmware tests cover signed updates: installation in any chunking, every signed byte,
-header shape, role, downgrade, size, truncation and sink failures, against a fixture
-signed by `tools/package_firmware.py` with a throwaway key; the OTA adapter is only
-compiled. Device tests cover boot-mode selection and the
-fault retry delay; the Arduino entry points that use them are only compiled. Compiler/library allocation
-failures are not all induced. Neither a high coverage percentage nor a passing ESP32
-build proves security, radio performance, durable flash behavior or battery life.
+provisioning, uplink, setup, pairing, firmware updates, SHT4x and device decisions)
+needs 95% lines and 85% branches. One exception is documented in the script: the host
+branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
+allocation and EVP failure returns that no test can trigger without fault injection into
+the library; known-answer vectors cover its success paths. A file missing from the
+report fails the gate. Uplink tests check the exact Central JSON, the settings blob and
+PUBACK-gated queue removal against a publisher double; the Wi-Fi/MQTT adapter itself is
+only compiled. Pairing tests check X25519 and HKDF against RFC 7748 and RFC 5869,
+tampering with every offer byte, a complete exchange between the node and receiver state
+machines followed by accepted DATA, rotation, window expiry, lost JOIN_DONE and a
+foreign network. The ESP32 backends (mbedTLS X25519, HKDF composed from mbedTLS HMAC)
+were checked against the same vectors with a separate probe program on a board. Running
+this Unity suite on the board is not part of validation. Setup tests cover button
+timing, the Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host
+and origin checks, notice codes and oversized pages; the access point, DNS, HTTP server,
+scanning and mDNS discovery run only on hardware. Firmware tests cover signed updates:
+installation in any chunking, every signed byte, header shape, role, downgrade, size,
+truncation and sink failures, against a fixture signed by `tools/package_firmware.py`
+with a throwaway key; the OTA adapter is only compiled. Device tests cover boot-mode
+selection and the fault retry delay; the Arduino entry points that use them are only
+compiled. Compiler/library allocation failures are not all induced. Neither a high
+coverage percentage nor a passing ESP32 build proves security, radio performance,
+durable flash behavior or battery life.
 
 The ESP32 target compiles the same tests with mbedTLS and explicit
 `UNITY_SUPPORT_64` for the protocol counters and identities. Build-only success is not a
@@ -63,15 +64,16 @@ physical test result. CI does not connect to devices or upload firmware.
 
 Python unittest tests exercise client sequencing, resumable setup, identity checks,
 recovery-file permissions, error redaction and the command line. With `--coverage`, the
-check script also requires 95% line and branch coverage of `tools/provision.py`
-and of `tools/package_firmware.py`. Install coverage.py 7.6.1 in the Python interpreter
-running the check script; covered and ordinary tests use that same interpreter.
-Python 3.10 is the minimum, tested separately in CI; the native coverage job uses 3.12.
-`--python-only` runs the Python suite without building C++.
-The gate reads each file's JSON counts and checks each metric independently,
-without rounding. A high combined percentage cannot compensate for low branch
-coverage. Regression tests cover that distinction and missing coverage data.
-The build job compiles `runtime_tx`, `runtime_rx` and `runtime_tx_stick_lite`. No CI step uploads a device.
+check script also requires 95% line and branch coverage of `tools/provision.py` and of
+`tools/package_firmware.py`. Use `uv run --python 3.12 --with coverage==7.6.1 python
+scripts/check_protocol.py --coverage` or install coverage.py 7.6.1 in a virtual
+environment; covered and ordinary tests use that same interpreter. Python 3.10 is the
+minimum, tested separately in CI; the native coverage job uses 3.12. `--python-only`
+runs the Python suite without building C++. The gate reads each file's JSON counts and
+checks each metric independently, without rounding. A high combined percentage cannot
+compensate for low branch coverage. Regression tests cover that distinction and missing
+coverage data. The build job compiles `runtime_tx`, `runtime_rx` and
+`runtime_tx_stick_lite`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
@@ -102,17 +104,18 @@ It needs a clang with libFuzzer (Apple's has none) and OpenSSL; CI uses clang++-
 
 ## Tool and coverage policy
 
-`--lint` also requires ShellCheck 0.10.0 and actionlint 1.7.7 on PATH. CI downloads their
-release archives with fixed SHA-256 checksums and checks shell files and workflow YAML.
-Python tools remain version-pinned; CI requirements are hash-locked.
+`--lint` runs ShellCheck 0.10.0 and actionlint 1.7.7 through pinned PyPI wrappers,
+using `uvx` locally and hash-locked requirements in CI. ShellCheck is also available
+to actionlint for checking embedded workflow scripts. All lint tools follow the
+same installation path; separate Homebrew packages are not required.
 
 Every `lib/*/src/*.cpp` must be gated or explicitly excluded with a reason. The sole
-current exclusion is the ESP-IDF NVS adapter. Removed policy entries also fail the check.
-Zero branch counts fail unless the file has been reviewed and explicitly declared
+current exclusion is the ESP-IDF NVS adapter. Removed policy entries also fail the
+check. Zero branch counts fail unless the file has been reviewed and explicitly declared
 branchless; no files currently need that exception. This distinguishes legitimate
 straight-line code from silently missing instrumentation without guessing from C++ text.
 
 Linux CI selects Clang/LLVM 18 explicitly for compilation, profile merging and coverage
 export. Distribution patch updates are still allowed; this is not a bit-reproducible
-toolchain lock. Local overrides are `CC`, `CXX`, `LLVM_PROFDATA` and `LLVM_COV`; use matching
-LLVM tools. macOS defaults use the corresponding Xcode tools through `xcrun`.
+toolchain lock. Local overrides are `CC`, `CXX`, `LLVM_PROFDATA` and `LLVM_COV`; use
+matching LLVM tools. macOS defaults use the corresponding Xcode tools through `xcrun`.

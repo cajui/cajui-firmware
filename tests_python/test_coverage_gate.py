@@ -137,6 +137,46 @@ class CoveragePolicyTests(unittest.TestCase):
             checks.check_coverage_inventory(["a"], ["a"], {"a": "adapter"}),
         )
 
+    def test_branchless_exceptions_must_be_gated(self):
+        self.assertEqual([], checks.check_coverage_inventory(["a"], ["a"], {}, {"a"}))
+        self.assertEqual(
+            ["gone: branchless exception is not gated"],
+            checks.check_coverage_inventory(["a"], ["a"], {}, {"gone"}),
+        )
+
+    def test_local_actionlint_has_shellcheck_in_its_environment(self):
+        with (
+            patch.dict(checks.os.environ, {}, clear=True),
+            patch.object(checks.shutil, "which", return_value="/tools/uvx"),
+        ):
+            self.assertEqual(
+                [
+                    "uvx",
+                    "--with",
+                    checks.TOOLS["shellcheck"],
+                    "--from",
+                    checks.TOOLS["actionlint"],
+                    "actionlint",
+                ],
+                checks.tool("actionlint"),
+            )
+            self.assertEqual(
+                ["uvx", "--from", checks.TOOLS["shellcheck"], "shellcheck"],
+                checks.tool("shellcheck"),
+            )
+
+    def test_missing_linter_has_an_installation_hint(self):
+        with patch.object(checks.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "Missing shellcheck.*virtual environment"):
+                checks.tool("shellcheck")
+
+    def test_ci_uses_installed_tools(self):
+        with (
+            patch.dict(checks.os.environ, {"CI": "true"}),
+            patch.object(checks.shutil, "which", return_value="/tools/actionlint"),
+        ):
+            self.assertEqual(["actionlint"], checks.tool("actionlint"))
+
     def test_unexpected_zero_branches_fails(self):
         path = "lib/A/src/a.cpp"
         self.assertIn(

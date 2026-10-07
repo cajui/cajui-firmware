@@ -18,6 +18,8 @@ TOOLS = {
     "clang-format": "clang-format==19.1.7",
     "clang-tidy": "clang-tidy==19.1.0",
     "ruff": "ruff==0.6.9",
+    "shellcheck": "shellcheck-py==0.10.0.1",
+    "actionlint": "actionlint-py==1.7.7.24",
 }
 PYTHON = ["tools", "tests_python", "scripts"]
 
@@ -34,7 +36,14 @@ def tool(name):
     # uvx guarantees the pinned version locally; CI installs the same pins with hashes and
     # must use those, even if a runner image ships uv.
     local = shutil.which("uvx") and not os.environ.get("CI")
-    return ["uvx", "--from", TOOLS[name], name] if local else [name]
+    if local:
+        dependencies = ["--with", TOOLS["shellcheck"]] if name == "actionlint" else []
+        return ["uvx", *dependencies, "--from", TOOLS[name], name]
+    if not shutil.which(name):
+        raise SystemExit(
+            f"Missing {name}. Install uv or install {TOOLS[name]} in a virtual environment."
+        )
+    return [name]
 
 
 def tracked(*patterns):
@@ -109,7 +118,9 @@ BOARD_ONLY_FILES = {"lib/CajuiStorage/src/cajui_nvs.cpp": "ESP-IDF NVS adapter"}
 BRANCHLESS_FILES = frozenset()
 
 
-def check_coverage_inventory(sources, expected=GATED_FILES, excluded=BOARD_ONLY_FILES):
+def check_coverage_inventory(
+    sources, expected=GATED_FILES, excluded=BOARD_ONLY_FILES, branchless=BRANCHLESS_FILES
+):
     sources, expected, excluded = set(sources), set(expected), set(excluded)
     failures = [
         f"{path}: missing coverage policy" for path in sorted(sources - expected - excluded)
@@ -118,6 +129,9 @@ def check_coverage_inventory(sources, expected=GATED_FILES, excluded=BOARD_ONLY_
         f"{path}: stale coverage policy" for path in sorted((expected | excluded) - sources)
     ]
     failures += [f"{path}: both gated and excluded" for path in sorted(expected & excluded)]
+    failures += [
+        f"{path}: branchless exception is not gated" for path in sorted(set(branchless) - expected)
+    ]
     return failures
 
 
@@ -157,14 +171,8 @@ def lint():
     run(tool("clang-format") + ["--dry-run", "--Werror"] + sources)
     run(tool("ruff") + ["format", "--check"] + PYTHON)
     run(tool("ruff") + ["check"] + PYTHON)
-    for executable, version in (("shellcheck", "0.10.0"), ("actionlint", "1.7.7")):
-        output = subprocess.check_output(
-            [executable, "--version" if executable == "shellcheck" else "-version"], text=True
-        )
-        if version not in output.split():
-            raise SystemExit(f"{executable} {version} is required")
-    run(["shellcheck", "--severity=style", *tracked("*.sh")])
-    run(["actionlint", "-color"])
+    run(tool("shellcheck") + ["--severity=style", *tracked("*.sh")])
+    run(tool("actionlint") + ["-color"])
     # Host-compilable library code only: src/ needs Arduino and test/ is fixture-heavy.
     includes = sorted({str(Path(header).parent) for header in tracked("lib/*/src/*.h")})
     flags = ["-std=c++11"] + [f"-I{path}" for path in includes]
