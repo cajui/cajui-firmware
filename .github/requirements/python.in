@@ -1,2 +1,2 @@
-coverage==7.6.1
+coverage==7.16.2
 pyserial==3.5
