@@ -78,7 +78,7 @@ contracts and link here.
 
 ## Run tests
 
-Requires Python 3, a C/C++ toolchain, OpenSSL development headers, and either
+Requires Python 3.10+, a C/C++ toolchain, OpenSSL development headers, and either
 PlatformIO 6.1.18 or `uv` (the script uses `uvx` when `pio` is absent).
 
 ```sh
@@ -92,20 +92,22 @@ python3 scripts/check_protocol.py
 python3 scripts/check_protocol.py --lint
 ```
 
-`--lint` checks formatting and runs clang-tidy on `lib/` and ruff on the Python code. It
+`--lint` checks formatting, clang-tidy, Python, shell scripts and workflow YAML.
+Install ShellCheck 0.10.0 and actionlint 1.7.7 on PATH. It
 uses `uvx` to run the pinned clang-format 19.1.7, clang-tidy 19.1.0 and ruff 0.6.9; without
 `uv`, install those versions with pip.
 
 For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 
 ```sh
+python3 -m pip install coverage==7.6.1
 CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 ```
 
 The coverage gate applies to each host implementation file listed in
 `scripts/check_protocol.py` on its own: at least 95% line and 85% branch coverage, with one
-documented exception for OpenSSL failure branches in `crypto.cpp`. The Python client needs 95%
-line and branch coverage. Coverage does not measure the ESP32 backend, radio behavior or
+documented exception for OpenSSL failure branches in `crypto.cpp`. The Python client and firmware packager each need 95%
+line and branch coverage using the same interpreter as the ordinary tests. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
 
 Compile the same tests for ESP32 without uploading or executing them:

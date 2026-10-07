@@ -23,8 +23,8 @@ pio test -e protocol_esp32 --without-uploading --without-testing
 
 `--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
-record offsets are deliberate literals. `src/` is not analyzed because it needs the
-Arduino headers. PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
+record offsets are deliberate literals. `src/` is analyzed separately after the ESP32 builds, using their Arduino headers
+and compiler flags (see Board lint below). PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
 would build LLVM from source; on such machines, run `--lint` on macOS or in an x86-64
 container.
 On macOS the runner locates OpenSSL via Homebrew and LLVM via `xcrun`. Elsewhere,
@@ -34,7 +34,7 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, SHT4x and device decisions) needs 95% lines and 85%
+provisioning, uplink, setup, pairing, firmware updates, SHT4x and device decisions) needs 95% lines and 85%
 branches. One exception is documented in the script: the host branch coverage of
 `crypto.cpp` needs 60%, because its remaining branches are OpenSSL allocation and EVP
 failure returns that no test can trigger without fault injection into the library;
@@ -64,18 +64,21 @@ physical test result. CI does not connect to devices or upload firmware.
 Python unittest tests exercise client sequencing, resumable setup, identity checks,
 recovery-file permissions, error redaction and the command line. With `--coverage`, the
 check script also requires 95% line and branch coverage of `tools/provision.py`
-(coverage.py 7.6.1, run through `uvx` or installed with pip).
-The gate reads the client file's JSON counts and checks each metric independently,
+and of `tools/package_firmware.py`. Install coverage.py 7.6.1 in the Python interpreter
+running the check script; covered and ordinary tests use that same interpreter.
+Python 3.10 is the minimum, tested separately in CI; the native coverage job uses 3.12.
+`--python-only` runs the Python suite without building C++.
+The gate reads each file's JSON counts and checks each metric independently,
 without rounding. A high combined percentage cannot compensate for low branch
 coverage. Regression tests cover that distinction and missing coverage data.
-The build job also compiles `runtime_tx` and `runtime_rx`. No CI step uploads a device.
+The build job compiles `runtime_tx`, `runtime_rx` and `runtime_tx_stick_lite`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
 A fixed pre-refactor wire fixture checks compatibility in addition to round trips.
 Coverage includes the send and receive controllers and measurement normalization.
 It excludes the board application, SX1262 adapter, FreeRTOS scheduling and sensor
-driver. Those need physical tests; compile success is not timing validation.
+hardware adapter. Those need physical tests; compile success is not timing validation.
 
 ## Board lint and fuzzing
 
@@ -84,13 +87,32 @@ compiles against the Arduino-ESP32 and ESP-IDF headers: it takes each image's co
 database from PlatformIO, swaps the Xtensa GCC for clang with the toolchain's include
 directories, and reports only diagnostics in `src/`. CI runs it after the ESP32 build.
 
-`sh scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
+`bash scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
 for the given time (default 60 s): `test/fuzz/fuzz_frames.cpp` feeds untrusted bytes to the
 radio frame parsing that runs before authentication (`untrustedType`, `untrustedDataNode`,
 the header and length checks of `open`, and the pairing parsers; the decrypted payload is
 never reached, since the fuzzer cannot forge a GCM tag), and `test/fuzz/fuzz_commands.cpp` to
-the MQTT command parser and topic check. A crashing input is kept under `.pio/fuzz/` and
-uploaded by CI. It needs a clang
-with libFuzzer (Apple's has none) and OpenSSL; CI runs it on Linux. The corpus is kept under
-`.pio/fuzz/` and not committed.
+the MQTT command parser and topic check. Versioned synthetic seeds in `test/fuzz/seeds/`
+exercise valid command grammar, topic shapes, pairing headers and malformed inputs.
+Radio seeds with placeholder tags cover parsing, not authenticated payloads.
+Each run copies these into `.pio/fuzz/corpus_*`; local runs retain newly discovered inputs.
+CI starts from the versioned seeds. Failure artifacts (including crash, timeout, OOM and
+leak inputs) go to `.pio/fuzz/artifacts/` and are uploaded on failure.
+It needs a clang with libFuzzer (Apple's has none) and OpenSSL; CI uses clang++-18.
 
+## Tool and coverage policy
+
+`--lint` also requires ShellCheck 0.10.0 and actionlint 1.7.7 on PATH. CI downloads their
+release archives with fixed SHA-256 checksums and checks shell files and workflow YAML.
+Python tools remain version-pinned; CI requirements are hash-locked.
+
+Every `lib/*/src/*.cpp` must be gated or explicitly excluded with a reason. The sole
+current exclusion is the ESP-IDF NVS adapter. Removed policy entries also fail the check.
+Zero branch counts fail unless the file has been reviewed and explicitly declared
+branchless; no files currently need that exception. This distinguishes legitimate
+straight-line code from silently missing instrumentation without guessing from C++ text.
+
+Linux CI selects Clang/LLVM 18 explicitly for compilation, profile merging and coverage
+export. Distribution patch updates are still allowed; this is not a bit-reproducible
+toolchain lock. Local overrides are `CC`, `CXX`, `LLVM_PROFDATA` and `LLVM_COV`; use matching
+LLVM tools. macOS defaults use the corresponding Xcode tools through `xcrun`.

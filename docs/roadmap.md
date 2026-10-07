@@ -20,8 +20,9 @@ Next milestones:
    for the setup access point. Radio pairing itself and the setup page are implemented.
 5. The [MQTT management channel](management-v1.md) and [Home Assistant Discovery](home-assistant.md)
    are implemented; the radio protocol still has to carry transmitter parameters.
-6. Static analysis of `src/` with the Arduino headers; clang-tidy now covers `lib/` and
-   `test/` only.
+
+Static analysis of `src/` with the Arduino headers is implemented in the board-lint CI
+step, alongside host analysis of `lib/` and `test/`.
 
 TDMA, mesh routing, firmware updates over LoRa, actuator control and LoRaWAN mode are
 outside the first direct-LoRa version. No deadline or field-readiness claim is
