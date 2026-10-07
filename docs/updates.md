@@ -28,6 +28,7 @@ A maintainer runs `.github/workflows/release.yml` from `main`, supplying an exis
 it to a commit, requires that commit to belong to the selected main revision, and
 checks the latest main-branch CI run for that exact SHA. All five required jobs must
 have succeeded; pending, failed, cancelled or skipped checks block the release.
+The trusted main revision must also have passing CI if it differs from the tag.
 The gate checks the current run attempt and repeats before signing and publishing.
 
 The firmware build checks out the validated SHA. It merges bootloader, partition table,

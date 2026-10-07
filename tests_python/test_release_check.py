@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from tools import release_check as release
 
@@ -106,6 +106,22 @@ class ReleaseCheckTests(unittest.TestCase):
             with patch.object(release, "api", side_effect=api):
                 self.assertEqual(sha, release.check("v1.2.3", "example/firmware", sha))
                 self.assertEqual(sha, release.check("v1.2.3", "example/firmware", sha, sha))
+            (root / "notes.txt").write_text("New trusted tooling revision")
+            subprocess.run(["git", "add", "."], check=True)
+            subprocess.run(["git", "commit", "-qm", "Tooling change"], check=True)
+            trusted = release.git("rev-parse", "HEAD")
+            with patch.object(release, "require_ci") as gate:
+                self.assertEqual(sha, release.check("v1.2.3", "example/firmware", trusted))
+            self.assertEqual(
+                [call("example/firmware", sha), call("example/firmware", trusted)],
+                gate.call_args_list,
+            )
+            with patch.object(
+                release, "require_ci", side_effect=[None, release.ReleaseError("Trusted CI failed")]
+            ):
+                with self.assertRaisesRegex(release.ReleaseError, "Trusted CI failed"):
+                    release.check("v1.2.3", "example/firmware", trusted)
+            subprocess.run(["git", "reset", "--hard", sha], check=True, stdout=subprocess.DEVNULL)
             with self.assertRaisesRegex(release.ReleaseError, "changed"):
                 release.check("v1.2.3", "example/firmware", sha, "b" * 40)
             for tag, repo, trusted in [

@@ -43,7 +43,7 @@ def assemble(build, boot_app0, output, name, version, partitions=geometry.DEFAUL
         "--flash_freq",
         "80m",
         "--flash_size",
-        "8MB",
+        f"{geometry.FLASH_SIZE // (1024 * 1024)}MB",
     ]
     for offset, path, _ in inputs:
         command += [hex(offset), str(path)]

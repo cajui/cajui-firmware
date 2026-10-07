@@ -72,6 +72,12 @@ def check(tag, repository, trusted_sha, expected_sha=None):
     for path in ("partitions.csv", "src/board/release_key.h"):
         if git("show", f"{sha}:{path}") != git("show", f"{trusted_sha}:{path}"):
             raise ReleaseError(f"Release {path} differs from the trusted revision")
+    for revision in dict.fromkeys((sha, trusted_sha)):
+        require_ci(repository, revision)
+    return sha
+
+
+def require_ci(repository, sha):
     runs = [
         run
         for page in api(
@@ -88,7 +94,6 @@ def check(tag, repository, trusted_sha, expected_sha=None):
         for job in page["jobs"]
     ]
     check_jobs(jobs)
-    return sha
 
 
 def main():
