@@ -90,7 +90,7 @@ class Device:
         elif verb == "INFO":
             if self.enrollment is None:
                 raise provision.ProvisioningError("Device rejected request: NOT_FOUND")
-            return [str(self.state), f"{self.counter:016x}"]
+            return [str(int(self.state)), f"{self.counter:016x}"]
         elif verb == "ACTIVATE":
             self.state = 2
         elif verb == "RESERVE":

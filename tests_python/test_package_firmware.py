@@ -128,6 +128,38 @@ class PackageTests(unittest.TestCase):
                 tool.generate_key(private, self.dir / "failed.der")
         self.assertFalse(private.exists())
 
+    def test_noncanonical_headers_are_rejected_before_signature_verification(self):
+        original = tool.package(b"firmware", "rx", 10203, self.key)
+        for offset, value in ((4, 2), (6, 1), (7, 1), (16, 0), (16, 73)):
+            with self.subTest(offset=offset, value=value):
+                altered = bytearray(original)
+                altered[offset] = value
+                with patch.object(tool, "openssl") as openssl:
+                    with self.assertRaisesRegex(tool.PackageError, "canonical"):
+                        tool.verify(bytes(altered), self.public.read_bytes())
+                    openssl.assert_not_called()
+
+    def test_missing_image_does_not_replace_an_existing_release(self):
+        output = self.dir / "release.cjfw"
+        previous = tool.package(b"previous firmware", "rx", 10203, self.key)
+        output.write_bytes(previous)
+        code, _, error = self.run_cli(
+            "package",
+            "--image",
+            str(self.dir / "absent.bin"),
+            "--role",
+            "rx",
+            "--version",
+            "1.2.4",
+            "--key",
+            str(self.key),
+            "--output",
+            str(output),
+        )
+        self.assertEqual(1, code)
+        self.assertIn("Packaging failed", error)
+        self.assertEqual(previous, output.read_bytes())
+
     def run_cli(self, *arguments):
         stdout, stderr = io.StringIO(), io.StringIO()
         with (

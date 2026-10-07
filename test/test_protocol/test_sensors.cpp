@@ -106,6 +106,7 @@ void test_sht4x_endpoints_and_humidity_clamping() {
 }
 } // namespace
 void runSensorTests() {
+    UnitySetTestFile(__FILE__);
     RUN_TEST(test_sht4x_valid_response_and_addresses);
     RUN_TEST(test_sht4x_crc_corruption_never_becomes_measurement);
     RUN_TEST(test_sht4x_bus_failures_and_retry);
