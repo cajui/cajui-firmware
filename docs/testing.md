@@ -23,8 +23,8 @@ pio test -e protocol_esp32 --without-uploading --without-testing
 
 `--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
-record offsets are deliberate literals. `src/` is not analyzed because it needs the
-Arduino headers. PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
+record offsets are deliberate literals. `src/` is analyzed separately after the ESP32 builds, using their Arduino headers
+and compiler flags (see Board lint below). PyPI has no clang-tidy 19.1.0 wheel for Linux on ARM64, where pip
 would build LLVM from source; on such machines, run `--lint` on macOS or in an x86-64
 container.
 On macOS the runner locates OpenSSL via Homebrew and LLVM via `xcrun`. Elsewhere,
@@ -34,28 +34,29 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, SHT4x and device decisions) needs 95% lines and 85%
-branches. One exception is documented in the script: the host branch coverage of
-`crypto.cpp` needs 60%, because its remaining branches are OpenSSL allocation and EVP
-failure returns that no test can trigger without fault injection into the library;
-known-answer vectors cover its success paths. A file missing from the report fails the
-gate. Uplink tests
-check the exact Central JSON, the settings blob and PUBACK-gated queue removal against a
-publisher double; the Wi-Fi/MQTT adapter itself is only compiled. Pairing tests check X25519 and HKDF against RFC 7748 and RFC 5869, tampering with every
-offer byte, a complete exchange between the node and receiver state machines followed by
-accepted DATA, rotation, window expiry, lost JOIN_DONE and a foreign network. The ESP32
-backends (mbedTLS X25519, HKDF composed from mbedTLS HMAC) were checked against the same
-vectors with a separate probe program on a board. Running this Unity suite on the board
-is not part of validation. Setup tests cover button timing, the
-Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host and origin
-checks, notice codes and oversized pages; the access point, DNS, HTTP server, scanning
-and mDNS discovery run only on hardware. Firmware tests cover signed updates: installation in any chunking, every signed byte,
-header shape, role, downgrade, size, truncation and sink failures, against a fixture
-signed by `tools/package_firmware.py` with a throwaway key; the OTA adapter is only
-compiled. Device tests cover boot-mode selection and the
-fault retry delay; the Arduino entry points that use them are only compiled. Compiler/library allocation
-failures are not all induced. Neither a high coverage percentage nor a passing ESP32
-build proves security, radio performance, durable flash behavior or battery life.
+provisioning, uplink, setup, pairing, firmware updates, SHT4x and device decisions)
+needs 95% lines and 85% branches. One exception is documented in the script: the host
+branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
+allocation and EVP failure returns that no test can trigger without fault injection into
+the library; known-answer vectors cover its success paths. A file missing from the
+report fails the gate. Uplink tests check the exact Central JSON, the settings blob and
+PUBACK-gated queue removal against a publisher double; the Wi-Fi/MQTT adapter itself is
+only compiled. Pairing tests check X25519 and HKDF against RFC 7748 and RFC 5869,
+tampering with every offer byte, a complete exchange between the node and receiver state
+machines followed by accepted DATA, rotation, window expiry, lost JOIN_DONE and a
+foreign network. The ESP32 backends (mbedTLS X25519, HKDF composed from mbedTLS HMAC)
+were checked against the same vectors with a separate probe program on a board. Running
+this Unity suite on the board is not part of validation. Setup tests cover button
+timing, the Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host
+and origin checks, notice codes and oversized pages; the access point, DNS, HTTP server,
+scanning and mDNS discovery run only on hardware. Firmware tests cover signed updates:
+installation in any chunking, every signed byte, header shape, role, downgrade, size,
+truncation and sink failures, against a fixture signed by `tools/package_firmware.py`
+with a throwaway key; the OTA adapter is only compiled. Device tests cover boot-mode
+selection and the fault retry delay; the Arduino entry points that use them are only
+compiled. Compiler/library allocation failures are not all induced. Neither a high
+coverage percentage nor a passing ESP32 build proves security, radio performance,
+durable flash behavior or battery life.
 
 The ESP32 target compiles the same tests with mbedTLS and explicit
 `UNITY_SUPPORT_64` for the protocol counters and identities. Build-only success is not a
@@ -63,19 +64,23 @@ physical test result. CI does not connect to devices or upload firmware.
 
 Python unittest tests exercise client sequencing, resumable setup, identity checks,
 recovery-file permissions, error redaction and the command line. With `--coverage`, the
-check script also requires 95% line and branch coverage of `tools/provision.py`
-(coverage.py 7.6.1, run through `uvx` or installed with pip).
-The gate reads the client file's JSON counts and checks each metric independently,
-without rounding. A high combined percentage cannot compensate for low branch
-coverage. Regression tests cover that distinction and missing coverage data.
-The build job also compiles `runtime_tx` and `runtime_rx`. No CI step uploads a device.
+check script also requires 95% line and branch coverage of `tools/provision.py` and of
+`tools/package_firmware.py`. Use `uv run --python 3.12 --with coverage==7.6.1 python
+scripts/check_protocol.py --coverage` or install coverage.py 7.6.1 in a virtual
+environment; covered and ordinary tests use that same interpreter. Python 3.10 is the
+minimum, tested separately in CI; the native coverage job uses 3.12. `--python-only`
+runs the Python suite without building C++. The gate reads each file's JSON counts and
+checks each metric independently, without rounding. A high combined percentage cannot
+compensate for low branch coverage. Regression tests cover that distinction and missing
+coverage data. The build job compiles `runtime_tx`, `runtime_rx` and
+`runtime_tx_stick_lite`. No CI step uploads a device.
 
 Controller tests use a simulated clock, radio and jitter source, including time
 rollover, completion timestamps, cancellation, driver failures and invalid ACKs.
 A fixed pre-refactor wire fixture checks compatibility in addition to round trips.
 Coverage includes the send and receive controllers and measurement normalization.
 It excludes the board application, SX1262 adapter, FreeRTOS scheduling and sensor
-driver. Those need physical tests; compile success is not timing validation.
+hardware adapter. Those need physical tests; compile success is not timing validation.
 
 ## Board lint and fuzzing
 
@@ -84,13 +89,33 @@ compiles against the Arduino-ESP32 and ESP-IDF headers: it takes each image's co
 database from PlatformIO, swaps the Xtensa GCC for clang with the toolchain's include
 directories, and reports only diagnostics in `src/`. CI runs it after the ESP32 build.
 
-`sh scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
+`bash scripts/fuzz.sh [seconds]` builds two libFuzzer targets with ASan and UBSan and runs each
 for the given time (default 60 s): `test/fuzz/fuzz_frames.cpp` feeds untrusted bytes to the
 radio frame parsing that runs before authentication (`untrustedType`, `untrustedDataNode`,
 the header and length checks of `open`, and the pairing parsers; the decrypted payload is
 never reached, since the fuzzer cannot forge a GCM tag), and `test/fuzz/fuzz_commands.cpp` to
-the MQTT command parser and topic check. A crashing input is kept under `.pio/fuzz/` and
-uploaded by CI. It needs a clang
-with libFuzzer (Apple's has none) and OpenSSL; CI runs it on Linux. The corpus is kept under
-`.pio/fuzz/` and not committed.
+the MQTT command parser and topic check. Versioned synthetic seeds in `test/fuzz/seeds/`
+exercise valid command grammar, topic shapes, pairing headers and malformed inputs.
+Radio seeds with placeholder tags cover parsing, not authenticated payloads.
+Each run copies these into `.pio/fuzz/corpus_*`; local runs retain newly discovered inputs.
+CI starts from the versioned seeds. Failure artifacts (including crash, timeout, OOM and
+leak inputs) go to `.pio/fuzz/artifacts/` and are uploaded on failure.
+It needs a clang with libFuzzer (Apple's has none) and OpenSSL; CI uses clang++-18.
 
+## Tool and coverage policy
+
+`--lint` runs ShellCheck 0.10.0 and actionlint 1.7.7 through pinned PyPI wrappers,
+using `uvx` locally and hash-locked requirements in CI. ShellCheck is also available
+to actionlint for checking embedded workflow scripts. All lint tools follow the
+same installation path; separate Homebrew packages are not required.
+
+Every `lib/*/src/*.cpp` must be gated or explicitly excluded with a reason. The sole
+current exclusion is the ESP-IDF NVS adapter. Removed policy entries also fail the
+check. Zero branch counts fail unless the file has been reviewed and explicitly declared
+branchless; no files currently need that exception. This distinguishes legitimate
+straight-line code from silently missing instrumentation without guessing from C++ text.
+
+Linux CI selects Clang/LLVM 18 explicitly for compilation, profile merging and coverage
+export. Distribution patch updates are still allowed; this is not a bit-reproducible
+toolchain lock. Local overrides are `CC`, `CXX`, `LLVM_PROFDATA` and `LLVM_COV`; use
+matching LLVM tools. macOS defaults use the corresponding Xcode tools through `xcrun`.

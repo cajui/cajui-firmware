@@ -2,3 +2,5 @@ clang-format==19.1.7
 clang-tidy==19.1.0
 ruff==0.6.9
 platformio==6.1.18
+shellcheck-py==0.10.0.1
+actionlint-py==1.7.7.24

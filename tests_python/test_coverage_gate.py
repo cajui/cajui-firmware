@@ -6,6 +6,7 @@ import importlib.util
 import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
     "check_protocol", Path(__file__).resolve().parents[1] / "scripts/check_protocol.py"
@@ -17,7 +18,7 @@ spec.loader.exec_module(checks)
 def report(lines, statements, branches, possible):
     return {
         "files": {
-            "tools/provision.py": {
+            path: {
                 "summary": {
                     "covered_lines": lines,
                     "num_statements": statements,
@@ -25,6 +26,7 @@ def report(lines, statements, branches, possible):
                     "num_branches": possible,
                 }
             }
+            for path in checks.PYTHON_FLOORS
         }
     }
 
@@ -92,7 +94,12 @@ class NativeCoverageGateTests(unittest.TestCase):
             1, len(checks.check_native_coverage(native([(crypto, 97.0, 59.9)]), (crypto,)))
         )
         self.assertEqual(
-            [], checks.check_native_coverage(native([("lib/C/src/c.cpp", 100.0, None)]), ())
+            [],
+            checks.check_native_coverage(
+                native([("lib/C/src/c.cpp", 100.0, None)]),
+                ("lib/C/src/c.cpp",),
+                {"lib/C/src/c.cpp"},
+            ),
         )
 
     def test_missing_files_and_malformed_reports_fail_closed(self):
@@ -112,3 +119,99 @@ class NativeCoverageGateTests(unittest.TestCase):
             ["lib/A/src/a.cpp: no counted lines"],
             checks.check_native_coverage(report, ("lib/A/src/a.cpp",)),
         )
+
+
+class CoveragePolicyTests(unittest.TestCase):
+    def test_new_and_removed_files_require_policy_review(self):
+        self.assertEqual(
+            [], checks.check_coverage_inventory(["a", "board"], ["a"], {"board": "adapter"})
+        )
+        self.assertIn(
+            "new: missing coverage policy", checks.check_coverage_inventory(["a", "new"], ["a"], {})
+        )
+        self.assertIn(
+            "gone: stale coverage policy", checks.check_coverage_inventory([], ["gone"], {})
+        )
+        self.assertIn(
+            "a: both gated and excluded",
+            checks.check_coverage_inventory(["a"], ["a"], {"a": "adapter"}),
+        )
+
+    def test_branchless_exceptions_must_be_gated(self):
+        self.assertEqual([], checks.check_coverage_inventory(["a"], ["a"], {}, {"a"}))
+        self.assertEqual(
+            ["gone: branchless exception is not gated"],
+            checks.check_coverage_inventory(["a"], ["a"], {}, {"gone"}),
+        )
+
+    def test_local_actionlint_has_shellcheck_in_its_environment(self):
+        with (
+            patch.dict(checks.os.environ, {}, clear=True),
+            patch.object(checks.shutil, "which", return_value="/tools/uvx"),
+        ):
+            self.assertEqual(
+                [
+                    "uvx",
+                    "--with",
+                    checks.TOOLS["shellcheck"],
+                    "--from",
+                    checks.TOOLS["actionlint"],
+                    "actionlint",
+                ],
+                checks.tool("actionlint"),
+            )
+            self.assertEqual(
+                ["uvx", "--from", checks.TOOLS["shellcheck"], "shellcheck"],
+                checks.tool("shellcheck"),
+            )
+
+    def test_missing_linter_has_an_installation_hint(self):
+        with patch.object(checks.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "Missing shellcheck.*virtual environment"):
+                checks.tool("shellcheck")
+
+    def test_ci_uses_installed_tools(self):
+        with (
+            patch.dict(checks.os.environ, {"CI": "true"}),
+            patch.object(checks.shutil, "which", return_value="/tools/actionlint"),
+        ):
+            self.assertEqual(["actionlint"], checks.tool("actionlint"))
+
+    def test_unexpected_zero_branches_fails(self):
+        path = "lib/A/src/a.cpp"
+        self.assertIn(
+            "no counted branches",
+            checks.check_native_coverage(native([(path, 100, None)]), (path,))[0],
+        )
+
+    def test_packager_cannot_be_hidden_by_client_coverage(self):
+        data = report(100, 100, 100, 100)
+        data["files"]["tools/package_firmware.py"]["summary"]["covered_branches"] = 94
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(SystemExit, "package_firmware.py"),
+        ):
+            checks.check_python_coverage(data)
+
+    def test_coverage_uses_the_calling_interpreter(self):
+        with patch.object(
+            checks.importlib.metadata, "version", return_value=checks.COVERAGE_VERSION
+        ):
+            self.assertEqual(
+                [checks.sys.executable, "-m", "coverage"], checks.python_coverage_command()
+            )
+        for value in ("0.1", None):
+            with (
+                patch.object(checks.importlib.metadata, "version", return_value=value),
+                self.assertRaises(SystemExit),
+            ):
+                checks.python_coverage_command()
+        with (
+            patch.object(
+                checks.importlib.metadata,
+                "version",
+                side_effect=checks.importlib.metadata.PackageNotFoundError,
+            ),
+            self.assertRaises(SystemExit),
+        ):
+            checks.python_coverage_command()

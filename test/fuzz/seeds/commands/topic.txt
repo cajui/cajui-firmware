@@ -1,0 +1,1 @@
+manage/v1/receiver-1/00000000000004d2/commands
