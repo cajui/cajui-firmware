@@ -2,7 +2,6 @@
 """Tests for the firmware packaging tool; they use the openssl command line."""
 
 import contextlib
-import importlib.util
 import io
 import json
 from pathlib import Path
@@ -13,11 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location(
-    "package_firmware", Path(__file__).resolve().parents[1] / "tools/package_firmware.py"
-)
-tool = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tool)
+from tools import package_firmware as tool
 
 
 class PackageTests(unittest.TestCase):
@@ -72,7 +67,7 @@ class PackageTests(unittest.TestCase):
     def test_invalid_inputs(self):
         with self.assertRaises(tool.PackageError):
             tool.signed_header("xx", 1, 10)
-        for size in (0, tool.MAX_IMAGE + 1):
+        for size in (0, tool.firmware_layout.image_limit(tool.firmware_layout.load()) + 1):
             with self.subTest(size=size), self.assertRaises(tool.PackageError):
                 tool.signed_header("tx", 1, size)
         with self.assertRaises(tool.PackageError):
@@ -97,7 +92,10 @@ class PackageTests(unittest.TestCase):
         self.assertEqual([{"path": "receiver.bin", "offset": 0}], manifest["builds"][0]["parts"])
         first = tool.manifest("Cajuí receiver", "1.2.3", "receiver.bin", "blank.bin")
         self.assertFalse(first["new_install_prompt_erase"])
-        self.assertEqual({"path": "blank.bin", "offset": 0x310000}, first["builds"][0]["parts"][1])
+        self.assertEqual(
+            {"path": "blank.bin", "offset": tool.firmware_layout.load()["cajui"].offset},
+            first["builds"][0]["parts"][1],
+        )
 
     def test_verify_matches_the_device_rules(self):
         image = bytes(range(200))
@@ -138,6 +136,22 @@ class PackageTests(unittest.TestCase):
                     with self.assertRaisesRegex(tool.PackageError, "canonical"):
                         tool.verify(bytes(altered), self.public.read_bytes())
                     openssl.assert_not_called()
+
+    def test_verify_rejects_invalid_role_version_and_slot_size(self):
+        public = self.public.read_bytes()
+        for role, version, size in ((3, 1, 5), (1, 0, 5), (1, 1, 0)):
+            data = bytearray(tool.package(b"image", "tx", 1, self.key))
+            data[5] = role
+            data[8:16] = struct.pack(">II", version, size)
+            with (
+                self.subTest(role=role, version=version, size=size),
+                self.assertRaises(tool.PackageError),
+            ):
+                tool.verify(bytes(data), public)
+        layout = tool.firmware_layout.load()
+        layout["ota_1"] = layout["ota_1"]._replace(size=4)
+        with self.assertRaises(tool.PackageError):
+            tool.verify(tool.package(b"image", "tx", 1, self.key), public, layout=layout)
 
     def test_missing_image_does_not_replace_an_existing_release(self):
         output = self.dir / "release.cjfw"

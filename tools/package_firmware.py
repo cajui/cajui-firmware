@@ -16,13 +16,17 @@ import subprocess
 import sys
 import tempfile
 
+if __package__:
+    from . import firmware_layout
+else:
+    import firmware_layout
+
 MAGIC = b"CJFW"
 FORMAT = 1
 ROLES = {"tx": 1, "rx": 2}
 CONTEXT = b"cajui-firmware-v1"
 SIGNATURE_CAPACITY = 72  # Largest DER encoding of a P-256 ECDSA signature.
 HEADER_SIZE = 16 + 1 + SIGNATURE_CAPACITY
-MAX_IMAGE = 0x300000  # One application partition (partitions.csv).
 
 
 class PackageError(Exception):
@@ -41,10 +45,10 @@ def version_code(text):
     return code
 
 
-def signed_header(role, version, size):
+def signed_header(role, version, size, layout=None):
     if role not in ROLES:
         raise PackageError("Role must be tx or rx")
-    if not 0 < size <= MAX_IMAGE:
+    if not 0 < size <= firmware_layout.image_limit(layout or firmware_layout.load()):
         raise PackageError("Image must fit one application partition")
     return MAGIC + struct.pack(">BBHII", FORMAT, ROLES[role], 0, version, size)
 
@@ -66,8 +70,8 @@ def sign(message, key):
     return signature
 
 
-def package(image, role, version, key):
-    header = signed_header(role, version, len(image))
+def package(image, role, version, key, layout=None):
+    header = signed_header(role, version, len(image), layout)
     signature = sign(CONTEXT + header + image, key)
     return header + bytes([len(signature)]) + signature.ljust(SIGNATURE_CAPACITY, b"\0") + image
 
@@ -94,7 +98,7 @@ def key_from_header(text):
     return bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", body))
 
 
-def verify(data, public, role=None):
+def verify(data, public, role=None, layout=None):
     """Check an update file as the device does: canonical header, then the signature."""
     if len(data) <= HEADER_SIZE or data[:4] != MAGIC:
         raise PackageError("Not an update file")
@@ -103,7 +107,13 @@ def verify(data, public, role=None):
     padding = data[17 + length : HEADER_SIZE]
     if fmt != FORMAT or reserved or not 0 < length <= SIGNATURE_CAPACITY or any(padding):
         raise PackageError("Not a canonical update file")
-    if size != len(data) - HEADER_SIZE or (role and role_code != ROLES[role]):
+    if (
+        role_code not in ROLES.values()
+        or not version
+        or not 0 < size <= firmware_layout.image_limit(layout or firmware_layout.load())
+        or size != len(data) - HEADER_SIZE
+        or (role and role_code != ROLES[role])
+    ):
         raise PackageError("Size or role does not match")
     with tempfile.TemporaryDirectory() as folder:
         key = Path(folder) / "key.der"
@@ -140,10 +150,7 @@ def key_header(public, name="ReleaseKey"):
     )
 
 
-STORAGE_OFFSET = 0x310000  # The cajui partition (partitions.csv).
-
-
-def manifest(name, version, image, erase_storage=None):
+def manifest(name, version, image, erase_storage=None, layout=None):
     """ESP Web Tools manifest: the merged image at offset 0, never a full-chip erase.
 
     An update keeps the cajui storage partition. A first install also writes an erased
@@ -152,7 +159,9 @@ def manifest(name, version, image, erase_storage=None):
     """
     parts = [{"path": image, "offset": 0}]
     if erase_storage:
-        parts.append({"path": erase_storage, "offset": STORAGE_OFFSET})
+        parts.append(
+            {"path": erase_storage, "offset": (layout or firmware_layout.load())["cajui"].offset}
+        )
     return {
         "name": name,
         "version": version,
@@ -188,10 +197,15 @@ def main():
     check.add_argument("--key-header", type=Path, required=True)
     check.add_argument("--role", choices=sorted(ROLES))
     check.add_argument("files", type=Path, nargs="+")
+    for command in (pack, info, check):
+        command.add_argument("--partitions", type=Path, default=firmware_layout.DEFAULT_PARTITIONS)
     args = parser.parse_args()
     try:
+        layout = firmware_layout.load(args.partitions) if hasattr(args, "partitions") else None
         if args.action == "package":
-            data = package(args.image.read_bytes(), args.role, version_code(args.version), args.key)
+            data = package(
+                args.image.read_bytes(), args.role, version_code(args.version), args.key, layout
+            )
             with tempfile.NamedTemporaryFile(dir=args.output.parent, delete=False) as output:
                 output.write(data)
             os.chmod(output.name, 0o644)  # A release asset, not a secret.
@@ -203,16 +217,16 @@ def main():
         elif args.action == "verify":
             public = key_from_header(args.key_header.read_text())
             for path in args.files:
-                version = verify(path.read_bytes(), public, args.role)
+                version = verify(path.read_bytes(), public, args.role, layout)
                 print(f"{path.name}: signed, version code {version}")
         elif args.action == "manifest":
             text = json.dumps(
-                manifest(args.name, args.version, args.image, args.erase_storage), indent=2
+                manifest(args.name, args.version, args.image, args.erase_storage, layout), indent=2
             )
             args.output.write_text(text + "\n")
         else:
             print(version_code(args.version))
-    except (PackageError, OSError) as error:
+    except (PackageError, firmware_layout.LayoutError, OSError) as error:
         print(f"Packaging failed: {error}", file=sys.stderr)
         return 1
     return 0
