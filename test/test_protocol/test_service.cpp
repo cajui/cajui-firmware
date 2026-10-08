@@ -6,9 +6,9 @@
 namespace {
 class IdleAccess final : public cajui::RadioIdleAccess {
 public:
-    uint32_t now = 0, lockDelay = 0, readyAt = 0;
+    uint32_t now = 0, lockDelay = 0, readyAt = 0, stopAt = 0;
     unsigned takes = 0, gives = 0, waits = 0;
-    bool locked = false, available = true, listening = false;
+    bool locked = false, available = true, listening = false, stopped = false;
     std::vector<uint32_t> budgets;
     uint32_t nowMs() const override { return now; }
     bool take(uint32_t timeoutMs) override {
@@ -24,9 +24,11 @@ public:
         locked = false;
         ++gives;
     }
-    bool idle() const override {
+    cajui::RadioAccessState state() const override {
         TEST_ASSERT_TRUE(locked);
-        return listening;
+        return stopped     ? cajui::RadioAccessState::Stopped
+               : listening ? cajui::RadioAccessState::Listening
+                           : cajui::RadioAccessState::Busy;
     }
     void wait(uint32_t durationMs) override {
         TEST_ASSERT_FALSE(locked);
@@ -34,6 +36,7 @@ public:
         now += durationMs;
         ++waits;
         if (readyAt && now >= readyAt) listening = true;
+        if (stopAt && now >= stopAt) stopped = true;
     }
 };
 
@@ -112,6 +115,25 @@ void test_busy_at_deadline_and_clock_rollover_fail_closed() {
     }
     TEST_ASSERT_EQUAL_UINT32(6, access.now);
     TEST_ASSERT_FALSE(access.locked);
+}
+void test_stopped_receiver_refuses_access_without_waiting() {
+    IdleAccess access;
+    access.stopped = true;
+    {
+        cajui::RadioIdleGuard guard(access);
+        TEST_ASSERT_FALSE(guard.ready());
+        TEST_ASSERT_EQUAL(int(cajui::RadioAccessState::Stopped), int(guard.state()));
+        TEST_ASSERT_FALSE(access.locked);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, access.waits);
+    TEST_ASSERT_EQUAL_UINT32(1, access.gives);
+    IdleAccess transitions;
+    transitions.stopAt = 5;
+    cajui::RadioIdleGuard stoppedWhileWaiting(transitions, 12, 5);
+    TEST_ASSERT_FALSE(stoppedWhileWaiting.ready());
+    TEST_ASSERT_EQUAL(int(cajui::RadioAccessState::Stopped), int(stoppedWhileWaiting.state()));
+    TEST_ASSERT_EQUAL_UINT32(5, transitions.now);
+    TEST_ASSERT_FALSE(transitions.locked);
 }
 void test_invalid_wait_policy_does_not_touch_the_lock() {
     IdleAccess access;
@@ -193,6 +215,7 @@ void runServiceTests() {
     RUN_TEST(test_ack_completion_releases_waiter_before_deadline);
     RUN_TEST(test_deadline_includes_lock_contention_and_refuses_late_idle);
     RUN_TEST(test_busy_at_deadline_and_clock_rollover_fail_closed);
+    RUN_TEST(test_stopped_receiver_refuses_access_without_waiting);
     RUN_TEST(test_invalid_wait_policy_does_not_touch_the_lock);
     RUN_TEST(test_task_runs_only_after_watchdog_registration);
     RUN_TEST(test_task_creation_failure_never_registers_or_starts);

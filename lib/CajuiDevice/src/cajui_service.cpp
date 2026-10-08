@@ -11,7 +11,14 @@ RadioIdleGuard::RadioIdleGuard(RadioIdleAccess& access, uint32_t timeoutMs, uint
         const uint32_t elapsed = access_.nowMs() - start;
         if (elapsed >= timeoutMs || !access_.take(timeoutMs - elapsed)) return;
         const uint32_t lockedAt = access_.nowMs() - start;
-        if (lockedAt < timeoutMs && access_.idle()) {
+        const auto state = access_.state();
+        if (state == RadioAccessState::Stopped) {
+            state_ = state;
+            access_.give();
+            return;
+        }
+        if (lockedAt < timeoutMs && state == RadioAccessState::Listening) {
+            state_ = state;
             held_ = true;
             return;
         }

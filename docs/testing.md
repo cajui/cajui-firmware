@@ -35,8 +35,8 @@ The coverage gate applies **to each file on its own**, never to an aggregate: ev
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
 provisioning, uplink, setup, pairing, firmware updates, SHT4x, device decisions and
-service safety) needs 95% lines and 85% branches. One exception is documented in the script: the host
-branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
+service safety and setup-save retries) needs 95% lines and 85% branches. One exception
+is documented in the script: the host branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
 allocation and EVP failure returns that no test can trigger without fault injection into
 the library; known-answer vectors cover its success paths. A file missing from the
 report fails the gate. Uplink tests check the exact Central JSON, the settings blob and
@@ -55,11 +55,13 @@ truncation and sink failures, against a fixture signed by `tools/package_firmwar
 with a throwaway key; the OTA adapter is only compiled. Service-safety tests inject
 clock, lock, idle-state and task-startup ports. They cover immediate access, ACK
 completion, timeout, lock contention, deadline boundaries, clock rollover, lock
-release, task-creation failure and watchdog-registration failure before task release.
+release, stopped-state refusal, task-creation failure and watchdog-registration failure
+before task release. Save-retry tests cover bounded busy retries, cancellation on
+storage/STOP/apply failures or new configuration, rollover, and distinct page messages.
 FreeRTOS scheduling and ESP-IDF watchdog behavior still require device validation.
 Device tests cover boot-mode selection and the fault retry delay; the Arduino entry
-points that use them are only compiled. Compiler/library allocation failures are not all induced. Neither a high
-coverage percentage nor a passing ESP32 build proves security, radio performance,
+points that use them are only compiled. Compiler/library allocation failures are not
+all induced. Neither a high coverage percentage nor a passing ESP32 build proves security, radio performance,
 durable flash behavior or battery life.
 
 The ESP32 target compiles the same tests with mbedTLS and explicit

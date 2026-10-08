@@ -2,6 +2,7 @@
 #pragma once
 #include "cajui_storage.h"
 #include "cajui_uplink.h"
+#include "cajui_setup_save.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -110,10 +111,15 @@ enum class Notice : uint8_t {
     UpdateBadSignature,
     UpdateFailed,
     UpdatePending,
+    RadioBusy,
+    RadioStopped,
+    SettingsSaved,
+    ApplyFailed,
     Count
 };
 const char* noticeText(Notice);
 Notice noticeFor(SetupError);
+Notice noticeFor(SetupSaveResult);
 // Parses the `n` query value; unknown codes show nothing.
 Notice parseNotice(const char* value);
 
@@ -147,6 +153,9 @@ struct SetupView {
     bool wifiTrialFailed = false; // New credentials did not connect; stored ones kept.
     bool brokerOnline = false;
     const UplinkConfig* staged = nullptr;
+    bool savePending = false;
+    bool radioStopped = false;
+    SetupSaveResult saveResult = SetupSaveResult::None;
     bool saved = false; // Staged settings match what is stored.
     size_t queued = 0;
     const NetworkView* networks = nullptr;

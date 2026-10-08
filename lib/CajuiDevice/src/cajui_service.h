@@ -5,13 +5,15 @@
 namespace cajui {
 constexpr uint32_t RadioIdleWaitMs = 3000, RadioIdlePollMs = 5;
 
+enum class RadioAccessState { Busy, Listening, Stopped };
+
 class RadioIdleAccess {
 public:
     virtual ~RadioIdleAccess() = default;
     virtual uint32_t nowMs() const = 0;
     virtual bool take(uint32_t timeoutMs) = 0;
     virtual void give() = 0;
-    virtual bool idle() const = 0;
+    virtual RadioAccessState state() const = 0;
     virtual void wait(uint32_t durationMs) = 0;
 };
 
@@ -23,10 +25,12 @@ public:
     RadioIdleGuard(const RadioIdleGuard&) = delete;
     RadioIdleGuard& operator=(const RadioIdleGuard&) = delete;
     bool ready() const { return held_; }
+    RadioAccessState state() const { return state_; }
 
 private:
     RadioIdleAccess& access_;
     bool held_ = false;
+    RadioAccessState state_ = RadioAccessState::Busy;
 };
 
 class WatchedTaskStartup {

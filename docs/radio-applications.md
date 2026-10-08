@@ -108,10 +108,12 @@ ACK TX has a three-second watchdog; a completion that is polled late still count
 active enrollment, 30 minutes without any packet (valid or not) re-arms reception and logs
 `CJAPP RADIO silent rearm`; a failure there is a radio fault. The radio service task wakes at
 least once a second. Startup creates it parked, registers its handle with the task
-watchdog, and only then enables interrupts and releases the task. A registration
+watchdog, and only then releases the task and enables interrupts. The initial wait
+consumes one notification, preserving any additional interrupt notification. A registration
 failure logs `CJAPP RADIO watchdog_register_error code=<n>`, deletes the parked task
 and fails radio initialization. The application's `RADIO_INIT` fault path holds the
-radio in reset and preserves enrollment. The service task is therefore registered
+radio in reset and preserves enrollment. Failed radio/task initialization also
+releases the allocated radio mutex. The service task is therefore registered
 before normal operation; if it stops running (blocked on the radio lock, for example)
 the watchdog restarts the device; a stuck BUSY line ends in a driver fault
 through RadioLib's SPI timeout.
@@ -252,9 +254,27 @@ lock the radio loop holds around each poll; storage writes additionally wait unt
 receiver is listening. The three-second deadline includes acquiring the application
 lock; a late idle result does not grant access. While waiting, the page releases the
 lock so the radio loop can finish the ACK. On timeout it logs `CJAPP SETUP radio_busy`,
-reports save/revoke failure and leaves storage and the MQTT client unchanged. A later
-request can retry. On success the operation keeps the lock through the write, and the
-MQTT client is replaced outside the lock. Wi-Fi scans and mDNS discovery never overlap, because a scan
+reports save/revoke failure and leaves storage and the MQTT client unchanged. The
+stopped state is separate: it immediately refuses these operations, logs
+`CJAPP SETUP radio_stopped`, and tells the user to wait for the receiver to restart.
+STOP deliberately blocks setup mutations even with the radio held in reset: the
+fault may involve persistence, whose recovery requires a remount after restart.
+All radio-access state transitions, including fault transitions, use the application
+mutex. A later request can retry after normal operation resumes. On success the operation keeps the lock through the write, and the
+MQTT client is replaced outside the lock.
+
+After verified Wi-Fi connects, a busy-radio save is retried at one-second intervals,
+with at most three attempts in total. The same policy applies to a manual broker save.
+Retries require the verified network and an open setup session; closing the session,
+restoring stored Wi-Fi, or submitting another valid configuration cancels the pending
+retry. STOP, invalid settings, storage failure and failure to apply a persisted setting
+do not trigger automatic writes. The page distinguishes pending/unsaved changes from
+saved settings whose connection could not restart. Resubmitting unchanged Wi-Fi now
+reports the actual save result instead of always reporting unchanged settings. Revoking
+a transmitter remains a manual operation and reports busy/stopped directly, without a
+synthetic generation-conflict result.
+
+Wi-Fi scans and mDNS discovery never overlap, because a scan
 hops channels and drops mDNS traffic; a scan that starts while the station connects
 aborts the connection, so scans wait for it. With the access point active, a scan takes
 longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.
@@ -302,12 +322,13 @@ for a Wi-Fi-only record; it never returns Wi-Fi passwords.
 
 `cajui_service.h` keeps the waiting and task-startup policies independent of FreeRTOS.
 `RadioIdleAccess::take(timeoutMs)` must acquire the application lock within that
-budget or return false without ownership; `idle()` is read only with that lock held.
-The receiver loop must update the idle indication under the same lock. `wait()` must
+budget or return false without ownership; `state()` is read only with that lock held.
+The receiver loop must update the access state under the same lock. `wait()` must
 yield with the lock released and use the same monotonic clock as `nowMs()`. A ready
 `RadioIdleGuard` retains ownership until destruction; an unsuccessful one holds no
-lock and never authorizes a mutation. The ESP32 adapter rounds waits to at least one
-RTOS tick and rechecks the deadline after acquiring the lock.
+lock and never authorizes a mutation. The ESP32 adapter's polling `wait()` rounds to at least one RTOS tick. Mutex
+acquisition uses `pdMS_TO_TICKS` directly; the supported 1000 Hz profile represents
+integer milliseconds exactly. The guard rechecks its deadline after acquiring the lock.
 
 `WatchedTaskStartup::createParked()` must create a task that cannot perform service
 work until `release()`. If subscription fails, `discard()` must remove that parked

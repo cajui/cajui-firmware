@@ -2,6 +2,7 @@
 #pragma once
 #include "cajui_pairing.h"
 #include "cajui_setup.h"
+#include "cajui_service.h"
 #include "common.h"
 #include "mqtt_uplink.h"
 #include "ota.h"
@@ -44,9 +45,8 @@ public:
     SetupPortal& operator=(const SetupPortal&) = delete;
     // Optional: enables adding transmitters by radio pairing from the page.
     void setPairing(cajui::PairingHost* pairing) { pairing_ = pairing; }
-    // Starts the task that watches the button and serves the page. `radioIdle` is true
-    // while the receiver listens; it is written by the loop with the lock held.
-    bool start(const std::atomic<bool>& radioIdle);
+    // Starts the page task; radioState is written with the application lock held.
+    bool start(const std::atomic<cajui::RadioAccessState>& radioState);
 
 private:
     cajui::PersistentStore& store_;
@@ -55,7 +55,7 @@ private:
     ReceiverControl& control_;
     AppLock& lock_;
     cajui::Entropy& entropy_;
-    const std::atomic<bool>* radioIdle_ = nullptr;
+    const std::atomic<cajui::RadioAccessState>* radioState_ = nullptr;
     cajui::PairingHost* pairing_ = nullptr;
     WebServer server_{80};
     DNSServer dns_;
@@ -67,6 +67,7 @@ private:
     bool active_ = false, routed_ = false, stored_ = false, savedCurrent_ = false;
     bool trial_ = false, trialFailed_ = false, reconnect_ = false;
     cajui::SetupUplinkRecovery recovery_;
+    cajui::SetupSaveRetry saveRetry_;
     bool mdns_ = false, mdnsEndPending_ = false;
     bool closing_ = false, scanning_ = false, settling_ = false, scanPending_ = false,
          discoverPending_ = false, scanRetryDue_ = false;
@@ -105,7 +106,7 @@ private:
     void fillPairing(cajui::PairingView&) const;
     void fillTransmitters(cajui::SetupView&);
     bool verified() const;
-    bool save();
+    cajui::SetupSaveResult save();
     void restoreStoredWifi();
     void scan();
     void scanFailed();
@@ -114,8 +115,7 @@ private:
     void collectScan();
     void trackWifi();
     static void discoveryTask(void* self);
-    // Runs `action` under the lock only while listening; timeout returns `unavailable`.
-    template <typename Action>
-    auto whileRadioIdle(Action action, decltype(action()) unavailable) -> decltype(action());
+    // Runs `action` under the lock only while listening; otherwise returns the refusal state.
+    template <typename Action> cajui::RadioAccessState whileRadioIdle(Action action);
 };
 } // namespace board
