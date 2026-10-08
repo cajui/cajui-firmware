@@ -6,6 +6,7 @@
 #include <atomic>
 #include "cajui_application.h"
 #include "profile.h"
+#include "cajui_service.h"
 
 namespace board {
 constexpr uint8_t RadioCs = 8, RadioClock = 9, RadioMiso = 11, RadioMosi = 10;
@@ -14,7 +15,7 @@ constexpr uint16_t RadioProfile = 1;
 
 // One statically allocated adapter for the physical radio; never destroyed while active.
 // Task-side SPI is serialized. The ISR only timestamps and wakes the service task.
-class Sx1262Radio final : public cajui::ReceiverRadio {
+class Sx1262Radio final : public cajui::ReceiverRadio, private cajui::WatchedTaskStartup {
 public:
     Sx1262Radio();
     Sx1262Radio(const Sx1262Radio&) = delete;
@@ -56,6 +57,10 @@ private:
     static volatile uint32_t irqAt_;
     static void IRAM_ATTR interrupt();
     static void service(void*);
+    bool createParked() override;
+    bool subscribeWatchdog() override;
+    void release() override;
+    void discard() override;
     void handleInterrupt();
     void fail();
     bool standby();

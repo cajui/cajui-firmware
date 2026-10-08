@@ -125,7 +125,19 @@ void status(Html& page, const SetupView& v) {
         page.format(")");
     }
     page.format("<br>Samples waiting to be forwarded: %u</p>", unsigned(v.queued));
-    if (v.staged && !v.saved)
+    if (v.radioStopped) {
+        page.format("<p role=\"alert\">");
+        page.text(noticeText(Notice::RadioStopped));
+        page.format("</p>");
+    }
+    if (v.savePending) {
+        page.format("<p role=\"status\">Settings are not saved. The radio is busy; retrying "
+                    "automatically. Keep this setup session open.</p>");
+    } else if (v.saveResult != SetupSaveResult::None) {
+        page.format("<p role=\"status\">");
+        page.text(noticeText(noticeFor(v.saveResult)));
+        page.format("</p>");
+    } else if (v.staged && !v.saved)
         page.format(
             "<p><small>Changes are not saved yet. Wi-Fi is saved after a successful connection; "
             "the broker can be configured later.</small></p>");
@@ -369,6 +381,12 @@ bool allowedOrigin(const char* origin, const char* address) {
 }
 const char* noticeText(Notice notice) {
     switch (notice) {
+    case Notice::RadioBusy: return "Radio is busy; no changes were saved. Try again.";
+    case Notice::RadioStopped:
+        return "Receiver stopped after a fault. Wait for its restart before saving or revoking.";
+    case Notice::SettingsSaved: return "Settings saved.";
+    case Notice::ApplyFailed:
+        return "Settings saved, but the connection could not restart. Restart the receiver.";
     case Notice::WifiUnchanged: return "Wi-Fi settings unchanged.";
     case Notice::WifiTrying:
         return "Connecting to the new network. Wi-Fi settings are saved once it connects.";
@@ -416,6 +434,18 @@ const char* noticeText(Notice notice) {
 static_assert(unsigned(Notice::MqttPasswordInvalid) - unsigned(Notice::SsidInvalid) ==
                   unsigned(SetupError::MqttPassword) - unsigned(SetupError::Ssid),
               "Notices for setup errors must follow SetupError");
+Notice noticeFor(SetupSaveResult result) {
+    switch (result) {
+    case SetupSaveResult::None: return Notice::None;
+    case SetupSaveResult::Saved: return Notice::SettingsSaved;
+    case SetupSaveResult::RadioBusy: return Notice::RadioBusy;
+    case SetupSaveResult::RadioStopped: return Notice::RadioStopped;
+    case SetupSaveResult::ApplyFailed: return Notice::ApplyFailed;
+    case SetupSaveResult::StorageFailed:
+    case SetupSaveResult::Invalid: return Notice::SaveFailed;
+    }
+    return Notice::SaveFailed;
+}
 Notice noticeFor(SetupError error) {
     return error == SetupError::None ? Notice::None
                                      : Notice(unsigned(Notice::SsidInvalid) + unsigned(error) -
