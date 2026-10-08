@@ -51,6 +51,9 @@ jobs:
         run: pio test -e protocol_esp32 --without-uploading --without-testing
       - name: Compile experimental radio applications (no upload)
         run: pio run -e runtime_tx -e runtime_rx -e runtime_tx_stick_lite
+      - run: python -m pip install --require-hashes -r .github/requirements/release.txt
+      - name: Release assembly and signing with a disposable key (no upload)
+        run: python -m unittest discover -s tests_release -v
       - run: python -m pip install --require-hashes -r .github/requirements/lint.txt
       - name: clang-tidy over src/ with the ESP32 build flags
         run: python scripts/lint_board.py
