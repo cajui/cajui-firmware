@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "setup_portal.h"
+#include "cajui_service.h"
 #include "display.h"
 #include "release_key.h"
 #include "sx1262_radio.h"
@@ -9,6 +10,7 @@
 #include <esp_wifi.h>
 #include <cinttypes>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <new>
 
@@ -32,9 +34,21 @@ constexpr uint16_t DnsPort = 53;
 constexpr uint32_t BlinkMs = 500;
 constexpr uint32_t TaskStack = 10240, DiscoveryStack = 4096;
 constexpr uint32_t ActiveDelayMs = 2, IdleDelayMs = 20;
-// A storage write waits this long for the radio to finish acknowledging; after that the
-// radio is stopped or failed and the write proceeds.
-constexpr uint32_t RadioIdleWaitMs = 3000, RadioIdlePollMs = 5;
+class PortalRadioIdle final : public cajui::RadioIdleAccess {
+public:
+    PortalRadioIdle(AppLock& lock, const std::atomic<bool>& idle) : lock_(lock), idle_(idle) {}
+    uint32_t nowMs() const override { return millis(); }
+    bool take(uint32_t timeoutMs) override { return lock_.takeFor(timeoutMs); }
+    void give() override { lock_.give(); }
+    bool idle() const override { return idle_.load(); }
+    void wait(uint32_t durationMs) override {
+        vTaskDelay(std::max(TickType_t(1), pdMS_TO_TICKS(durationMs)));
+    }
+
+private:
+    AppLock& lock_;
+    const std::atomic<bool>& idle_;
+};
 constexpr int IdDigits = 16;
 // WebServer::collectHeaders takes a mutable array.
 const char* CollectedHeaders[] = {"Origin"};
@@ -53,17 +67,16 @@ void copyWifi(cajui::UplinkConfig& to, const cajui::UplinkConfig& from) {
 }
 } // namespace
 
-template <typename Action> auto SetupPortal::whileRadioIdle(Action action) -> decltype(action()) {
-    const uint32_t start = millis();
-    lock_.take();
-    while (!radioIdle_->load() && uint32_t(millis() - start) < RadioIdleWaitMs) {
-        lock_.give();
-        vTaskDelay(pdMS_TO_TICKS(RadioIdlePollMs));
-        lock_.take();
+template <typename Action>
+auto SetupPortal::whileRadioIdle(Action action, decltype(action()) unavailable)
+    -> decltype(action()) {
+    PortalRadioIdle access(lock_, *radioIdle_);
+    cajui::RadioIdleGuard held(access);
+    if (!held.ready()) {
+        Serial.println("CJAPP SETUP radio_busy");
+        return unavailable;
     }
-    auto result = action();
-    lock_.give();
-    return result;
+    return action();
 }
 std::atomic<uint32_t> SetupPortal::addresses_{0};
 bool SetupPortal::start(const std::atomic<bool>& radioIdle) {
@@ -397,7 +410,8 @@ void SetupPortal::redirect(cajui::Notice notice) {
 }
 bool SetupPortal::save() {
     if (!cajui::validSettings(pending_)) return false;
-    const bool written = whileRadioIdle([this] { return cajui::saveUplink(blob_, pending_); });
+    const bool written =
+        whileRadioIdle([this] { return cajui::saveUplink(blob_, pending_); }, false);
     if (written) stored_ = true;
     savedCurrent_ = written && control_.applyUplink(pending_);
     recovery_.applied(savedCurrent_);
@@ -619,7 +633,8 @@ void SetupPortal::route() {
             server_.send(HttpOk, "text/html; charset=utf-8", page_);
             return;
         }
-        const auto result = whileRadioIdle([&] { return store_.revoke(node, generation); });
+        const auto result = whileRadioIdle([&] { return store_.revoke(node, generation); },
+                                           cajui::Result::Conflict);
         Serial.printf("CJAPP SETUP revoke node=%016" PRIx64 " result=%u\n", node, unsigned(result));
         redirect(result == cajui::Result::Ok ? cajui::Notice::Revoked
                                              : cajui::Notice::RevokeFailed);

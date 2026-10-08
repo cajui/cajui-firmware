@@ -107,8 +107,13 @@ a replayed frame from making the receiver transmit on demand.
 ACK TX has a three-second watchdog; a completion that is polled late still counts. With an
 active enrollment, 30 minutes without any packet (valid or not) re-arms reception and logs
 `CJAPP RADIO silent rearm`; a failure there is a radio fault. The radio service task wakes at
-least once a second and is under the task watchdog, so if it stops running (blocked on the
-radio lock, for example) the device restarts; a stuck BUSY line ends in a driver fault
+least once a second. Startup creates it parked, registers its handle with the task
+watchdog, and only then enables interrupts and releases the task. A registration
+failure logs `CJAPP RADIO watchdog_register_error code=<n>`, deletes the parked task
+and fails radio initialization. The application's `RADIO_INIT` fault path holds the
+radio in reset and preserves enrollment. The service task is therefore registered
+before normal operation; if it stops running (blocked on the radio lock, for example)
+the watchdog restarts the device; a stuck BUSY line ends in a driver fault
 through RadioLib's SPI timeout.
 Driver or storage failures latch the controller and stop the radio. The receiver then
 logs `CJAPP STOP <reason> faults=<n> restart_s=<s>`, keeps the USB console available and
@@ -244,12 +249,18 @@ see [firmware updates](updates.md).
 The page runs in its own FreeRTOS task, so a slow or idle HTTP client never delays radio
 processing. It uses the store, pairing host and uplink record only while holding the
 lock the radio loop holds around each poll; storage writes additionally wait until the
-receiver is listening, so they never delay an acknowledgement being transmitted, and the
+receiver is listening. The three-second deadline includes acquiring the application
+lock; a late idle result does not grant access. While waiting, the page releases the
+lock so the radio loop can finish the ACK. On timeout it logs `CJAPP SETUP radio_busy`,
+reports save/revoke failure and leaves storage and the MQTT client unchanged. A later
+request can retry. On success the operation keeps the lock through the write, and the
 MQTT client is replaced outside the lock. Wi-Fi scans and mDNS discovery never overlap, because a scan
 hops channels and drops mDNS traffic; a scan that starts while the station connects
 aborts the connection, so scans wait for it. With the access point active, a scan takes
 longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.
-These behaviors were observed on a Heltec WiFi LoRa 32 V3, not derived from documentation.
+The Wi-Fi scan behavior was observed on a Heltec WiFi LoRa 32 V3. The bounded idle
+access and watchdog startup changes are covered by host tests and ESP32 compilation;
+watchdog registration failures and deadline timing have not been injected on a board.
 Diagnostic lines start with `CJAPP SETUP`.
 Wi-Fi discovery retries both immediate start failures and failed completions with a
 bounded delay. After a connection attempt times out, station auto-reconnect is suspended
@@ -286,3 +297,20 @@ remain readable and complete settings are still written as version 1. Older firm
 rejects a Wi-Fi-only record rather than using incomplete credentials. Enrollment and
 the queued sample storage are unchanged. USB `UPLINKINFO` reports no configured broker
 for a Wi-Fi-only record; it never returns Wi-Fi passwords.
+
+## Service-safety integration
+
+`cajui_service.h` keeps the waiting and task-startup policies independent of FreeRTOS.
+`RadioIdleAccess::take(timeoutMs)` must acquire the application lock within that
+budget or return false without ownership; `idle()` is read only with that lock held.
+The receiver loop must update the idle indication under the same lock. `wait()` must
+yield with the lock released and use the same monotonic clock as `nowMs()`. A ready
+`RadioIdleGuard` retains ownership until destruction; an unsuccessful one holds no
+lock and never authorizes a mutation. The ESP32 adapter rounds waits to at least one
+RTOS tick and rechecks the deadline after acquiring the lock.
+
+`WatchedTaskStartup::createParked()` must create a task that cannot perform service
+work until `release()`. If subscription fails, `discard()` must remove that parked
+task. The ESP32 implementation uses an initial task notification wait and registers
+the new task handle from the caller. It does not silently initialize or reconfigure
+the global watchdog; unavailable watchdog protection is a startup fault.

@@ -113,6 +113,7 @@ GATED_FILES = (
     "lib/CajuiSetup/src/cajui_setup.cpp",
     "lib/CajuiPairing/src/cajui_pairing.cpp",
     "lib/CajuiDevice/src/cajui_device.cpp",
+    "lib/CajuiDevice/src/cajui_service.cpp",
     "lib/CajuiFirmware/src/cajui_firmware.cpp",
 )
 # Every gated host file must reach both minima on its own; an aggregate would let a

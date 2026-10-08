@@ -114,7 +114,8 @@ private:
     void collectScan();
     void trackWifi();
     static void discoveryTask(void* self);
-    // Runs `action` with the lock held once the radio is listening (or after a bound).
-    template <typename Action> auto whileRadioIdle(Action action) -> decltype(action());
+    // Runs `action` under the lock only while listening; timeout returns `unavailable`.
+    template <typename Action>
+    auto whileRadioIdle(Action action, decltype(action()) unavailable) -> decltype(action());
 };
 } // namespace board

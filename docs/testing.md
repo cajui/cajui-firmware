@@ -34,8 +34,8 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, firmware updates, SHT4x and device decisions)
-needs 95% lines and 85% branches. One exception is documented in the script: the host
+provisioning, uplink, setup, pairing, firmware updates, SHT4x, device decisions and
+service safety) needs 95% lines and 85% branches. One exception is documented in the script: the host
 branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
 allocation and EVP failure returns that no test can trigger without fault injection into
 the library; known-answer vectors cover its success paths. A file missing from the
@@ -52,9 +52,13 @@ and origin checks, notice codes and oversized pages; the access point, DNS, HTTP
 scanning and mDNS discovery run only on hardware. Firmware tests cover signed updates:
 installation in any chunking, every signed byte, header shape, role, downgrade, size,
 truncation and sink failures, against a fixture signed by `tools/package_firmware.py`
-with a throwaway key; the OTA adapter is only compiled. Device tests cover boot-mode
-selection and the fault retry delay; the Arduino entry points that use them are only
-compiled. Compiler/library allocation failures are not all induced. Neither a high
+with a throwaway key; the OTA adapter is only compiled. Service-safety tests inject
+clock, lock, idle-state and task-startup ports. They cover immediate access, ACK
+completion, timeout, lock contention, deadline boundaries, clock rollover, lock
+release, task-creation failure and watchdog-registration failure before task release.
+FreeRTOS scheduling and ESP-IDF watchdog behavior still require device validation.
+Device tests cover boot-mode selection and the fault retry delay; the Arduino entry
+points that use them are only compiled. Compiler/library allocation failures are not all induced. Neither a high
 coverage percentage nor a passing ESP32 build proves security, radio performance,
 durable flash behavior or battery life.
 
