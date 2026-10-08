@@ -153,6 +153,39 @@ class PackageTests(unittest.TestCase):
         with self.assertRaises(tool.PackageError):
             tool.verify(tool.package(b"image", "tx", 1, self.key), public, layout=layout)
 
+    def test_signing_inputs_reject_links_directories_and_oversized_files(self):
+        layout = tool.firmware_layout.load()
+        image = self.dir / "input.bin"
+        image.write_bytes(b"image")
+        self.assertEqual(b"image", tool.read_image(image, layout))
+        link = self.dir / "link.bin"
+        link.symlink_to(self.key)
+        for invalid in (link, self.dir, self.dir / "missing.bin"):
+            with self.subTest(path=invalid), self.assertRaises(tool.PackageError):
+                tool.read_image(invalid, layout)
+        with patch.object(tool.firmware_layout, "image_limit", return_value=4):
+            with self.assertRaises(tool.PackageError):
+                tool.read_image(image, layout)
+        image.write_bytes(b"")
+        with self.assertRaises(tool.PackageError):
+            tool.read_image(image, layout)
+        with patch.object(tool, "sign") as sign:
+            code, _, _ = self.run_cli(
+                "package",
+                "--image",
+                str(link),
+                "--role",
+                "rx",
+                "--version",
+                "1.2.3",
+                "--key",
+                str(self.key),
+                "--output",
+                str(self.dir / "signed.cjfw"),
+            )
+        self.assertEqual(1, code)
+        sign.assert_not_called()
+
     def test_missing_image_does_not_replace_an_existing_release(self):
         output = self.dir / "release.cjfw"
         previous = tool.package(b"previous firmware", "rx", 10203, self.key)

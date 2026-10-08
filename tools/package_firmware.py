@@ -76,6 +76,17 @@ def package(image, role, version, key, layout=None):
     return header + bytes([len(signature)]) + signature.ljust(SIGNATURE_CAPACITY, b"\0") + image
 
 
+def read_image(path, layout):
+    if path.is_symlink() or not path.is_file():
+        raise PackageError("Application image must be a regular file, not a symbolic link")
+    limit = firmware_layout.image_limit(layout)
+    with path.open("rb") as source:
+        image = source.read(limit + 1)
+    if not 0 < len(image) <= limit:
+        raise PackageError("Image must fit one application partition")
+    return image
+
+
 def public_der(key):
     return openssl("pkey", "-in", str(key), "-pubout", "-outform", "DER")
 
@@ -204,7 +215,11 @@ def main():
         layout = firmware_layout.load(args.partitions) if hasattr(args, "partitions") else None
         if args.action == "package":
             data = package(
-                args.image.read_bytes(), args.role, version_code(args.version), args.key, layout
+                read_image(args.image, layout),
+                args.role,
+                version_code(args.version),
+                args.key,
+                layout,
             )
             with tempfile.NamedTemporaryFile(dir=args.output.parent, delete=False) as output:
                 output.write(data)
