@@ -11,12 +11,14 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: read
-  actions: read
 env:
   ESP_WEB_TOOLS: 10.4.0
   ESP_WEB_TOOLS_SHA512: 3pwkeFFm5Fj7UQo8SJNYK5RXrtNCpq6X9QoI6bMT4GBZWgrJqjn0YvM9ihG74BtMoSFYXfmDtkehuxe50PTMPQ==
 jobs:
   validate:
+    permissions:
+      contents: write
+      actions: read
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     outputs:
@@ -43,38 +45,57 @@ jobs:
           ref: ${{ needs.validate.outputs.sha }}
           path: source
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.sha }}
-          path: trusted
-          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
-      - run: python -m pip install --require-hashes -r trusted/.github/requirements/release.txt
-      - name: Version from the validated tag
-        working-directory: trusted
+      - run: python -m pip install --require-hashes -r source/.github/requirements/build.txt
+      - name: Build
+        working-directory: source
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
           CODE="$(python tools/package_firmware.py version-code "$VERSION")"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "CAJUI_FIRMWARE_VERSION=$CODE" >> "$GITHUB_ENV"
-      - name: Build
-        working-directory: source
-        run: pio run -e runtime_tx -e runtime_rx
+          CAJUI_FIRMWARE_VERSION="$CODE" pio run -e runtime_tx -e runtime_rx
+          mkdir -p raw/runtime_tx raw/runtime_rx
+          for ROLE in tx rx; do
+            cp ".pio/build/runtime_$ROLE/bootloader.bin" \
+              ".pio/build/runtime_$ROLE/partitions.bin" \
+              ".pio/build/runtime_$ROLE/firmware.bin" "raw/runtime_$ROLE/"
+          done
+          cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" raw/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: raw-images
+          path: source/raw
+  assemble:
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r .github/requirements/release.txt
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: raw-images
+          path: raw
       - name: Merge images and assemble the installer page
-        working-directory: trusted
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
-          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          BOOT_APP0="raw/boot_app0.bin"
           mkdir -p out/images out/site/esp-web-tools
           for pair in tx:transmitter rx:receiver; do
             ROLE="${pair%%:*}"; NAME="${pair##*:}"
-            python -m tools.release_assets --build "../source/.pio/build/runtime_$ROLE" \
+            python -m tools.release_assets --build "raw/runtime_$ROLE" \
               --boot-app0 "$BOOT_APP0" --name "$NAME" --version "$VERSION" \
-              --partitions ../source/partitions.csv --output out/site
+              --partitions partitions.csv --output out/site
           done
           curl -sSfL -o ewt.tgz "https://registry.npmjs.org/esp-web-tools/-/esp-web-tools-$ESP_WEB_TOOLS.tgz"
           python -c "import base64, hashlib, os, sys; data = open('ewt.tgz', 'rb').read(); \
@@ -84,10 +105,13 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned
-          path: trusted/out
+          path: out
   sign:
-    needs: [validate, build]
+    needs: [validate, assemble]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     environment: release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -150,7 +174,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           TRUSTED_SHA: ${{ github.sha }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-        run: python3 -m tools.release_check --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --trusted-sha "$TRUSTED_SHA" --expected-sha "$RELEASE_SHA"
+          PUBLICATION_RUN: ${{ github.run_id }}
+        run: python3 -m tools.release_check --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --trusted-sha "$TRUSTED_SHA" --expected-sha "$RELEASE_SHA" --publication-run "$PUBLICATION_RUN"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
@@ -159,24 +184,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          PUBLICATION_RUN: ${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p dist
           cp artifacts/signed/*.cjfw artifacts/unsigned/site/cajui-*-full.bin dist/
           (cd dist && sha256sum -- * > SHA256SUMS)
-          gh release create "$RELEASE_TAG" dist/* --verify-tag --title "$RELEASE_TAG" --generate-notes
+          python3 -m tools.release_publish --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --sha "$RELEASE_SHA" --run-id "$PUBLICATION_RUN" --directory dist
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: artifacts/unsigned/site
   pages:
-    needs: publish
+    needs: [validate, publish]
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prevent an older rerun from replacing the current installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          TRUSTED_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          PUBLICATION_RUN: ${{ github.run_id }}
+        run: python3 -m tools.release_check --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" --trusted-sha "$TRUSTED_SHA" --expected-sha "$RELEASE_SHA" --publication-run "$PUBLICATION_RUN"
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

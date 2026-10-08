@@ -65,9 +65,13 @@ physical test result. CI does not connect to devices or upload firmware.
 Python unittest tests exercise provisioning, packaging, release eligibility and layout
 validation. With `--coverage`, each file in `PYTHON_FLOORS` must independently reach
 95% lines and branches, without rounding. The policy covers the client, packager,
-partition parser, release assembler and CI gate. Tests include moved/unrelated tags,
-failed or incomplete CI, paginated job results, modified layouts, compiled-table
-mismatches, incorrect slot sizes, and signatures made with disposable keys.
+partition parser, release assembler, publisher and CI gate. Tests include moved/unrelated tags,
+failed or incomplete CI, partial reruns without masking newer failures, paginated
+results, numeric release ordering, same-run draft recovery, interrupted uploads,
+remote asset corruption, modified layouts, compiled-table mismatches, incorrect slot
+sizes, and signatures made with disposable keys. A regression test checks required
+job IDs against the CI workflow and rejects custom job names or matrices until the
+gate supports them. Publication tests simulate GitHub; they do not create releases.
 
 Use `uv run --python 3.12 --with coverage==7.6.1 python scripts/check_protocol.py --coverage`
 or install coverage.py 7.6.1 in a virtual environment. Covered and ordinary tests use the

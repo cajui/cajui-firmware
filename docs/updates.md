@@ -29,11 +29,16 @@ it to a commit, requires that commit to belong to the selected main revision, an
 checks the latest main-branch CI run for that exact SHA. All five required jobs must
 have succeeded; pending, failed, cancelled or skipped checks block the release.
 The trusted main revision must also have passing CI if it differs from the tag.
-The gate checks the current run attempt and repeats before signing and publishing.
+The gate checks the latest execution of each job across attempts, so rerunning only
+failed jobs preserves earlier successes without hiding a newer failure. It repeats
+before signing, publishing and deploying Pages.
 
-The firmware build checks out the validated SHA. It merges bootloader, partition table,
-`otadata` and application into an image per role, and publishes the images on GitHub
-Releases and GitHub Pages. [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
+The firmware build checks out the validated SHA and exports only binary inputs:
+bootloader, partition table, application and `boot_app0`. A separate, fresh assembly
+runner checks out the trusted main SHA, validates the built table against its CSV,
+and merges those inputs into an image per role. No tagged scripts execute there;
+the installer template, assembly tools and dependency checksum come from main.
+Images are published on GitHub Releases and GitHub Pages. [ESP Web Tools](https://esphome.github.io/esp-web-tools/)
 10.4.0 installs them from Chrome or Edge over Web Serial. The page serves ESP Web Tools
 itself; the release job checks the npm tarball against its published SHA-512.
 
@@ -54,12 +59,44 @@ The tag's partition CSV and public key header must match the trusted main revisi
 older layouts or keys require an explicit migration/release plan rather than mixing
 old binaries with a new installer layout.
 
+### Publication and recovery
+
+A new dispatch refuses any tag that already has a release, including a draft, before
+signing. The trusted preflight job has `contents: write` because the GitHub API
+[only lists drafts for callers with push access](https://docs.github.com/en/rest/releases/releases#list-releases).
+Build, assembly and signing retain read-only repository permissions. Its numeric version must exceed every published stable version; the `latest`
+label is not the authority. Drafts and prereleases of other tags do not advance that
+floor. A stable release with a noncanonical tag blocks publication for manual review.
+
+Publication creates a draft with a marker identifying the workflow run and validated
+commit. It uploads the four firmware assets and `SHA256SUMS`, then downloads them to
+verify exact names, sizes and SHA-256 hashes before publishing and marking it latest.
+Only the original run may resume its draft. Already published files are verified,
+never replaced. This marker establishes workflow ownership, not cryptographic proof
+against a maintainer who can edit releases.
+
+- If upload or verification fails, use **Re-run failed jobs** on the original release
+  workflow. Its publish job replaces incomplete draft assets using the same signed
+  artifacts; it does not rebuild or sign again.
+- If publication succeeded but the Pages artifact upload failed, rerun the failed job.
+  It verifies the existing published files and retries the Pages artifact upload.
+- If only Pages deployment failed, rerun that job. Its gate rechecks version eligibility,
+  preventing an older run from replacing the installer after a newer stable release.
+- Do not start another dispatch or rerun all jobs to repair an existing draft: the
+  initial/signing gates deliberately refuse it. If original artifacts have expired,
+  review and remove only the unpublished draft before starting a new dispatch.
+  Published releases are not automatically deleted or overwritten.
+
+These recovery paths are covered with simulated API and upload failures. They have
+not been exercised against a production release or the real signing secret.
+
 Each role has two buttons. **Update** writes the merged image from offset 0: bootloader,
 partition table, the default `nvs` (Wi-Fi driver data only), `otadata` and `ota_0`. It
 stops well before `cajui`, so enrollment, counters, uplink settings and queued samples stay.
 **Install on a new board** also writes an erased image over `cajui`, so leftovers of the
 firmware a board shipped with are never read as corrupt storage; on an enrolled board it
-discards its keys for good. Neither ever erases the whole chip
+discards its keys for good. The erase image contains `0xff`, the erased-flash value
+that NVS treats as empty pages. Neither ever erases the whole chip
 (`new_install_prompt_erase: false`).
 
 ## Signed updates (setup page)
@@ -118,7 +155,8 @@ the workflow, independently of the release tag. It executes only that trusted re
 packager and OpenSSL; downloaded firmware images are data. No tagged script executes in
 the signing job. The key is exposed only to the signing step, removed from the child
 process environment after writing a private temporary file, and cleaned up on failure.
-Signed files are checked against the trusted public key before publication. Build jobs
+Signed files are checked against the trusted public key before publication; a secret
+that does not match the embedded public key would produce updates boards cannot accept. Build jobs
 have neither the key nor a write token.
 
 This trusts maintainers who can change main or environment settings. Passing CI does not

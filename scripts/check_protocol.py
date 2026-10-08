@@ -59,6 +59,7 @@ PYTHON_FLOORS = {
         "tools/firmware_layout.py",
         "tools/release_assets.py",
         "tools/release_check.py",
+        "tools/release_publish.py",
     )
 }
 COVERAGE_VERSION = "7.6.1"
