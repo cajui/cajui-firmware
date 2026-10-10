@@ -39,16 +39,37 @@ bool Sx1262Radio::begin(int8_t powerDbm) {
     SPI.begin(RadioClock, RadioMiso, RadioMosi, RadioCs);
     if (radio_.begin(FrequencyMHz, BandwidthKHz, SpreadingFactor, CodingRate, SyncWord, powerDbm,
                      PreambleSymbols, TcxoVoltage) != RADIOLIB_ERR_NONE ||
-        radio_.setCRC(true) != RADIOLIB_ERR_NONE)
-        return false;
-    instance_ = this;
-    if (xTaskCreate(service, "cajui-radio", 4096, this, 3, &task_) != pdPASS) {
-        instance_ = nullptr;
+        radio_.setCRC(true) != RADIOLIB_ERR_NONE) {
+        vSemaphoreDelete(mutex_);
+        mutex_ = nullptr;
         return false;
     }
-    initialized_ = true;
-    radio_.setDio1Action(interrupt);
+    instance_ = this;
+    if (!cajui::startWatchedTask(*this)) {
+        instance_ = nullptr;
+        vSemaphoreDelete(mutex_);
+        mutex_ = nullptr;
+        return false;
+    }
     return true;
+}
+bool Sx1262Radio::createParked() {
+    return xTaskCreate(service, "cajui-radio", 4096, this, 3, &task_) == pdPASS;
+}
+bool Sx1262Radio::subscribeWatchdog() {
+    const esp_err_t result = esp_task_wdt_add(task_);
+    if (result != ESP_OK)
+        Serial.printf("CJAPP RADIO watchdog_register_error code=%d\n", int(result));
+    return result == ESP_OK;
+}
+void Sx1262Radio::release() {
+    initialized_ = true;
+    xTaskNotifyGive(task_);
+    radio_.setDio1Action(interrupt);
+}
+void Sx1262Radio::discard() {
+    vTaskDelete(task_);
+    task_ = nullptr;
 }
 void IRAM_ATTR Sx1262Radio::interrupt() {
     portENTER_CRITICAL_ISR(&irqLock_);
@@ -60,7 +81,7 @@ void IRAM_ATTR Sx1262Radio::interrupt() {
 }
 void Sx1262Radio::service(void* argument) {
     auto& self = *static_cast<Sx1262Radio*>(argument);
-    esp_task_wdt_add(nullptr); // Fails harmlessly if the watchdog is not running.
+    ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
     for (;;) {
         const bool notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ServiceWakeMs)) != 0;
         esp_task_wdt_reset();

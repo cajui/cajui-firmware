@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y libssl-dev
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y clang-18 llvm-18 libssl-dev
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.10'
       - run: python -m pip install --require-hashes -r .github/requirements/python.txt
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r .github/requirements/build.txt
@@ -51,6 +51,9 @@ jobs:
         run: pio test -e protocol_esp32 --without-uploading --without-testing
       - name: Compile experimental radio applications (no upload)
         run: pio run -e runtime_tx -e runtime_rx -e runtime_tx_stick_lite
+      - run: python -m pip install --require-hashes -r .github/requirements/release.txt
+      - name: Release assembly and signing with a disposable key (no upload)
+        run: python -m unittest discover -s tests_release -v
       - run: python -m pip install --require-hashes -r .github/requirements/lint.txt
       - name: clang-tidy over src/ with the ESP32 build flags
         run: python scripts/lint_board.py
