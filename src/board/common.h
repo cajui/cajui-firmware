@@ -37,6 +37,7 @@ public:
     // Creates the mutex; call once from setup() before any other task can take it.
     bool begin();
     void take();
+    bool takeFor(uint32_t timeoutMs);
     void give();
 
 private:

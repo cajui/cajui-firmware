@@ -593,10 +593,86 @@ void test_store_lists_enrollments_with_last_received_counter() {
     EXPECT_RESULT(Result::StorageError, store->revoke(2, 10));
     TEST_ASSERT_EQUAL_size_t(0, store->list(list, BindingCapacity)); // Unhealthy store.
 }
+
+void test_save_retries_only_busy_and_stops_at_three_attempts() {
+    SetupSaveRetry retry;
+    TEST_ASSERT_FALSE(retry.pending());
+    TEST_ASSERT_FALSE(retry.due(0));
+    EXPECT_RESULT(SetupSaveResult::None, retry.result());
+    retry.record(SetupSaveResult::RadioBusy, 10);
+    TEST_ASSERT_TRUE(retry.pending());
+    TEST_ASSERT_FALSE(retry.due(10 + SetupSaveRetryMs - 1));
+    TEST_ASSERT_TRUE(retry.due(10 + SetupSaveRetryMs));
+    retry.record(SetupSaveResult::RadioBusy, 1010);
+    TEST_ASSERT_TRUE(retry.pending());
+    retry.record(SetupSaveResult::RadioBusy, 2010);
+    TEST_ASSERT_FALSE(retry.pending());
+    TEST_ASSERT_FALSE(retry.due(100000));
+    retry.record(SetupSaveResult::RadioBusy, 3010);
+    TEST_ASSERT_FALSE(retry.pending());
+    retry.reset();
+    EXPECT_RESULT(SetupSaveResult::None, retry.result());
+    retry.record(SetupSaveResult::RadioBusy, UINT32_MAX - 500);
+    TEST_ASSERT_FALSE(retry.due(498));
+    TEST_ASSERT_TRUE(retry.due(499));
+}
+void test_save_failure_or_success_cancels_automatic_retry() {
+    for (auto result :
+         {SetupSaveResult::Saved, SetupSaveResult::StorageFailed, SetupSaveResult::RadioStopped,
+          SetupSaveResult::ApplyFailed, SetupSaveResult::Invalid, SetupSaveResult::None}) {
+        SetupSaveRetry retry;
+        retry.record(SetupSaveResult::RadioBusy, 0);
+        TEST_ASSERT_TRUE(retry.pending());
+        retry.record(result, 1000);
+        TEST_ASSERT_FALSE(retry.pending());
+        TEST_ASSERT_FALSE(retry.due(2000));
+        EXPECT_RESULT(result, retry.result());
+    }
+    SetupSaveRetry retry;
+    retry.record(SetupSaveResult::RadioBusy, 0);
+    retry.reset();
+    TEST_ASSERT_FALSE(retry.due(2000));
+}
+void test_save_feedback_distinguishes_retry_stop_storage_and_apply_failure() {
+    static char page[PageCapacity];
+    SetupView view{};
+    view.wifi = WifiState::Connected;
+    UplinkConfig config{};
+    view.staged = &config;
+    view.savePending = true;
+    view.saveResult = SetupSaveResult::RadioBusy;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_NOT_NULL(std::strstr(page, "retrying automatically"));
+    TEST_ASSERT_NOT_NULL(std::strstr(page, "Settings are not saved"));
+    view.savePending = false;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_NOT_NULL(std::strstr(page, noticeText(Notice::RadioBusy)));
+    TEST_ASSERT_NULL(std::strstr(page, "retrying automatically"));
+    view.radioStopped = true;
+    view.saveResult = SetupSaveResult::RadioStopped;
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    TEST_ASSERT_NOT_NULL(std::strstr(page, "Receiver stopped after a fault"));
+    for (auto result : {SetupSaveResult::None, SetupSaveResult::Saved, SetupSaveResult::RadioBusy,
+                        SetupSaveResult::RadioStopped, SetupSaveResult::StorageFailed,
+                        SetupSaveResult::ApplyFailed, SetupSaveResult::Invalid}) {
+        view.saveResult = result;
+        TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+        const char* message = noticeText(noticeFor(result));
+        if (message)
+            TEST_ASSERT_NOT_NULL(std::strstr(page, message));
+        else
+            EXPECT_RESULT(SetupSaveResult::None, result);
+    }
+    EXPECT_RESULT(Notice::SaveFailed, noticeFor(static_cast<SetupSaveResult>(255)));
+    EXPECT_RESULT(Notice::ApplyFailed, noticeFor(SetupSaveResult::ApplyFailed));
+}
 } // namespace
 
 void runSetupTests() {
     UnitySetTestFile(__FILE__);
+    RUN_TEST(test_save_retries_only_busy_and_stops_at_three_attempts);
+    RUN_TEST(test_save_failure_or_success_cancels_automatic_retry);
+    RUN_TEST(test_save_feedback_distinguishes_retry_stop_storage_and_apply_failure);
     RUN_TEST(test_portal_visit_does_not_restart_mqtt);
     RUN_TEST(test_failed_trial_restores_mqtt_with_bounded_retries);
     RUN_TEST(test_new_trial_cancels_pending_restore_and_timer_wraps);
