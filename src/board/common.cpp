@@ -39,6 +39,9 @@ bool AppLock::begin() {
 void AppLock::take() {
     if (mutex_) xSemaphoreTake(mutex_, portMAX_DELAY);
 }
+bool AppLock::takeFor(uint32_t timeoutMs) {
+    return mutex_ && xSemaphoreTake(mutex_, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
 void AppLock::give() {
     if (mutex_) xSemaphoreGive(mutex_);
 }
