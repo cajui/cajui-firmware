@@ -21,7 +21,7 @@ TOOLS = {
     "shellcheck": "shellcheck-py==0.10.0.1",
     "actionlint": "actionlint-py==1.7.7.24",
 }
-PYTHON = ["tools", "tests_python", "scripts"]
+PYTHON = ["tools", "tests_python", "tests_release", "scripts"]
 
 
 def run(command, **kwargs):
@@ -51,7 +51,17 @@ def tracked(*patterns):
     return output.split()
 
 
-PYTHON_FLOORS = {"tools/provision.py": (95, 95), "tools/package_firmware.py": (95, 95)}
+PYTHON_FLOORS = {
+    path: (95, 95)
+    for path in (
+        "tools/provision.py",
+        "tools/package_firmware.py",
+        "tools/firmware_layout.py",
+        "tools/release_assets.py",
+        "tools/release_check.py",
+        "tools/release_publish.py",
+    )
+}
 COVERAGE_VERSION = "7.6.1"
 
 
@@ -101,8 +111,10 @@ GATED_FILES = (
     "lib/CajuiUplink/src/cajui_command.cpp",
     "lib/CajuiUplink/src/cajui_discovery.cpp",
     "lib/CajuiSetup/src/cajui_setup.cpp",
+    "lib/CajuiSetup/src/cajui_setup_save.cpp",
     "lib/CajuiPairing/src/cajui_pairing.cpp",
     "lib/CajuiDevice/src/cajui_device.cpp",
+    "lib/CajuiDevice/src/cajui_service.cpp",
     "lib/CajuiFirmware/src/cajui_firmware.cpp",
 )
 # Every gated host file must reach both minima on its own; an aggregate would let a

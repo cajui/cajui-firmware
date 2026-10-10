@@ -107,7 +107,7 @@ CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.6.1 \
 The coverage gate applies to each host implementation file listed in
 `scripts/check_protocol.py` on its own: at least 95% line and 85% branch coverage, with
 one documented exception for OpenSSL failure branches in `crypto.cpp`. The Python client
-and firmware packager each need 95% line and branch coverage using the same interpreter
+and release tools each need 95% line and branch coverage using the same interpreter
 as the ordinary tests. Coverage does not measure the ESP32 backend, radio behavior or
 the NVS backend itself. See [testing](docs/testing.md).
 

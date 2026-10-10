@@ -59,7 +59,8 @@ private:
     cajui::PersistentStore store_;
     MqttUplink uplink_;
     AppLock lock_;
-    std::atomic<bool> listening_{false}, updateRestart_{false};
+    std::atomic<cajui::RadioAccessState> radioAccess_{cajui::RadioAccessState::Stopped};
+    std::atomic<bool> updateRestart_{false};
     cajui::ReceiverController controller_{radio_, clock_, store_};
     cajui::PairingHost pairing_{store_, entropy_, clock_};
     // Requests still waiting, copied for the published state (joined nodes left out).
@@ -349,11 +350,14 @@ void ReceiverApp::fault(const char* reason) {
     const uint32_t delay = cajui::retryDelayMs(faults);
     Serial.printf("CJAPP STOP %s faults=%u restart_s=%u\n", reason, unsigned(faults),
                   unsigned(delay / MsPerSecond));
-    radio_.sleep();
-    output(board::RadioReset, LOW);
-    output(board::Vext, HIGH);
-    running_ = false;
-    listening_.store(false);
+    {
+        Locked held(lock_);
+        radioAccess_.store(cajui::RadioAccessState::Stopped);
+        radio_.sleep();
+        output(board::RadioReset, LOW);
+        output(board::Vext, HIGH);
+        running_ = false;
+    }
     retryAt_ = millis() + delay;
 }
 void ReceiverApp::setup() {
@@ -385,7 +389,10 @@ void ReceiverApp::setup() {
     if (!radio_.begin(power_)) return fault("RADIO_INIT");
     controller_.setPairing(&pairing_);
     if (!controller_.start()) return fault("RECEIVE_START");
-    listening_.store(true);
+    {
+        Locked held(lock_);
+        radioAccess_.store(cajui::RadioAccessState::Listening);
+    }
     Serial.printf("CJAPP RECEIVER queued=%u power=%d\n", unsigned(store_.queued()), int(power_));
     enrollmentCount_ = store_.list(enrollments_, cajui::BindingCapacity);
     for (size_t i = 0; i < enrollmentCount_; ++i)
@@ -393,7 +400,7 @@ void ReceiverApp::setup() {
     radioActivityAt_ = millis();
     startForwarding();
     portal_.setPairing(&pairing_);
-    setupRunning_ = portal_.start(listening_);
+    setupRunning_ = portal_.start(radioAccess_);
     if (!setupRunning_) Serial.println("CJAPP SETUP unavailable");
     running_ = true;
     startedAt_ = millis();
@@ -438,7 +445,6 @@ void ReceiverApp::loop() {
             recordFrame();
         }
         listening = controller_.state() == cajui::ReceiverState::Listening;
-        listening_.store(listening);
         if (controller_.state() == cajui::ReceiverState::Failed) {
             failure = "RECEIVER";
         } else if (forwarder_) {
@@ -476,6 +482,9 @@ void ReceiverApp::loop() {
         // A few Discovery configurations after each connection, then only new entities.
         if (discovery_ && listening && !published) published = discovery_->poll();
         if (reporter_ && listening && !published) reporter_->poll();
+        radioAccess_.store(failure     ? cajui::RadioAccessState::Stopped
+                           : listening ? cajui::RadioAccessState::Listening
+                                       : cajui::RadioAccessState::Busy);
     }
     if (failure) return fault(failure);
     if (restartPending_ && listening) restartFor(*commands_);

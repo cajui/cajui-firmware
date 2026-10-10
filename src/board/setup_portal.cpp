@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "setup_portal.h"
+#include "cajui_service.h"
 #include "display.h"
 #include "release_key.h"
 #include "sx1262_radio.h"
@@ -9,6 +10,7 @@
 #include <esp_wifi.h>
 #include <cinttypes>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <new>
 
@@ -32,9 +34,22 @@ constexpr uint16_t DnsPort = 53;
 constexpr uint32_t BlinkMs = 500;
 constexpr uint32_t TaskStack = 10240, DiscoveryStack = 4096;
 constexpr uint32_t ActiveDelayMs = 2, IdleDelayMs = 20;
-// A storage write waits this long for the radio to finish acknowledging; after that the
-// radio is stopped or failed and the write proceeds.
-constexpr uint32_t RadioIdleWaitMs = 3000, RadioIdlePollMs = 5;
+class PortalRadioIdle final : public cajui::RadioIdleAccess {
+public:
+    PortalRadioIdle(AppLock& lock, const std::atomic<cajui::RadioAccessState>& state)
+        : lock_(lock), state_(state) {}
+    uint32_t nowMs() const override { return millis(); }
+    bool take(uint32_t timeoutMs) override { return lock_.takeFor(timeoutMs); }
+    void give() override { lock_.give(); }
+    cajui::RadioAccessState state() const override { return state_.load(); }
+    void wait(uint32_t durationMs) override {
+        vTaskDelay(std::max(TickType_t(1), pdMS_TO_TICKS(durationMs)));
+    }
+
+private:
+    AppLock& lock_;
+    const std::atomic<cajui::RadioAccessState>& state_;
+};
 constexpr int IdDigits = 16;
 // WebServer::collectHeaders takes a mutable array.
 const char* CollectedHeaders[] = {"Origin"};
@@ -53,21 +68,21 @@ void copyWifi(cajui::UplinkConfig& to, const cajui::UplinkConfig& from) {
 }
 } // namespace
 
-template <typename Action> auto SetupPortal::whileRadioIdle(Action action) -> decltype(action()) {
-    const uint32_t start = millis();
-    lock_.take();
-    while (!radioIdle_->load() && uint32_t(millis() - start) < RadioIdleWaitMs) {
-        lock_.give();
-        vTaskDelay(pdMS_TO_TICKS(RadioIdlePollMs));
-        lock_.take();
+template <typename Action> cajui::RadioAccessState SetupPortal::whileRadioIdle(Action action) {
+    PortalRadioIdle access(lock_, *radioState_);
+    cajui::RadioIdleGuard held(access);
+    if (!held.ready()) {
+        Serial.println(held.state() == cajui::RadioAccessState::Stopped
+                           ? "CJAPP SETUP radio_stopped"
+                           : "CJAPP SETUP radio_busy");
+        return held.state();
     }
-    auto result = action();
-    lock_.give();
-    return result;
+    action();
+    return cajui::RadioAccessState::Listening;
 }
 std::atomic<uint32_t> SetupPortal::addresses_{0};
-bool SetupPortal::start(const std::atomic<bool>& radioIdle) {
-    radioIdle_ = &radioIdle;
+bool SetupPortal::start(const std::atomic<cajui::RadioAccessState>& radioState) {
+    radioState_ = &radioState;
     WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t) { addresses_.fetch_add(1); },
                  ARDUINO_EVENT_WIFI_STA_GOT_IP);
     return xTaskCreate(task, "cajui-setup", TaskStack, this, 1, nullptr) == pdPASS;
@@ -86,6 +101,7 @@ void SetupPortal::run() {
 }
 void SetupPortal::open() {
     if (active_) return;
+    saveRetry_.reset();
     cajui::setupSsid(store_.device(), ssid_, sizeof(ssid_));
     {
         Locked held(lock_);
@@ -132,6 +148,7 @@ void SetupPortal::open() {
 }
 // Credentials that never connected are not kept: the station returns to the stored ones.
 void SetupPortal::restoreStoredWifi() {
+    saveRetry_.reset();
     if (!stored_) return;
     cajui::UplinkConfig stored{};
     bool loaded = false;
@@ -152,6 +169,7 @@ void SetupPortal::restoreStoredWifi() {
 }
 void SetupPortal::close() {
     if (!active_) return;
+    saveRetry_.reset();
     if (scanning_) esp_wifi_scan_stop();
     scanning_ = scanRetryDue_ = scanPending_ = false;
     WiFi.scanDelete();
@@ -211,6 +229,9 @@ void SetupPortal::poll() {
     }
     collectScan();
     trackWifi();
+    if (saveRetry_.pending() && radioState_->load() == cajui::RadioAccessState::Stopped)
+        saveRetry_.record(cajui::SetupSaveResult::RadioStopped, millis());
+    if (saveRetry_.due(millis()) && verified()) save();
     const uint32_t now = millis();
     if (settling_ && int32_t(now - settleAt_) >= 0) {
         settling_ = false;
@@ -395,14 +416,28 @@ void SetupPortal::redirect(cajui::Notice notice) {
     server_.sendHeader("Location", location);
     server_.send(HttpSeeOther);
 }
-bool SetupPortal::save() {
-    if (!cajui::validSettings(pending_)) return false;
-    const bool written = whileRadioIdle([this] { return cajui::saveUplink(blob_, pending_); });
-    if (written) stored_ = true;
-    savedCurrent_ = written && control_.applyUplink(pending_);
+cajui::SetupSaveResult SetupPortal::save() {
+    auto result = cajui::SetupSaveResult::Invalid;
+    if (cajui::validSettings(pending_)) {
+        bool written = false;
+        const auto access = whileRadioIdle([&] { written = cajui::saveUplink(blob_, pending_); });
+        if (access == cajui::RadioAccessState::Stopped) {
+            result = cajui::SetupSaveResult::RadioStopped;
+        } else if (access == cajui::RadioAccessState::Busy) {
+            result = cajui::SetupSaveResult::RadioBusy;
+        } else if (!written) {
+            result = cajui::SetupSaveResult::StorageFailed;
+        } else {
+            stored_ = true;
+            result = control_.applyUplink(pending_) ? cajui::SetupSaveResult::Saved
+                                                    : cajui::SetupSaveResult::ApplyFailed;
+        }
+    }
+    savedCurrent_ = result == cajui::SetupSaveResult::Saved;
     recovery_.applied(savedCurrent_);
-    Serial.printf("CJAPP SETUP saved ok=%u\n", unsigned(savedCurrent_));
-    return savedCurrent_;
+    saveRetry_.record(result, millis());
+    Serial.printf("CJAPP SETUP saved ok=%u result=%u\n", unsigned(savedCurrent_), unsigned(result));
+    return result;
 }
 void SetupPortal::fillPairing(cajui::PairingView& pairing) const {
     pairing.open = pairing_->state() != cajui::HostState::Closed;
@@ -434,6 +469,9 @@ void SetupPortal::home() {
     view.brokerOnline = uplink_.connected();
     view.staged = &pending_;
     view.saved = savedCurrent_;
+    view.savePending = saveRetry_.pending();
+    view.saveResult = saveRetry_.result();
+    view.radioStopped = radioState_->load() == cajui::RadioAccessState::Stopped;
     view.networks = networks_;
     view.networkCount = networkCount_;
     view.scanning = scanning_ || scanRetryDue_ || scanPending_;
@@ -585,8 +623,10 @@ void SetupPortal::route() {
         const bool changed = !sameWifi(before, pending_);
         cajui::wipe(before);
         if (error != cajui::SetupError::None) return redirect(cajui::noticeFor(error));
+        saveRetry_.reset();
         if (!changed && wifi_ == cajui::WifiState::Connected && !trial_) {
-            if (!savedCurrent_ && cajui::validSettings(pending_)) save();
+            if (!savedCurrent_ && cajui::validSettings(pending_))
+                return redirect(cajui::noticeFor(save()));
             return redirect(cajui::Notice::WifiUnchanged);
         }
         // Nothing is saved until the station connects with these credentials. Reconnect
@@ -603,9 +643,10 @@ void SetupPortal::route() {
             cajui::stageBroker(pending_, server_.arg("host").c_str(), server_.arg("port").c_str(),
                                server_.arg("username").c_str(), server_.arg("password").c_str());
         if (error != cajui::SetupError::None) return redirect(cajui::noticeFor(error));
+        saveRetry_.reset();
         savedCurrent_ = false;
         if (!verified()) return redirect(cajui::Notice::BrokerStaged);
-        redirect(save() ? cajui::Notice::BrokerSaved : cajui::Notice::SaveFailed);
+        redirect(cajui::noticeFor(save()));
     });
     server_.on("/revoke", HTTP_POST, [this] {
         if (!authorize(true)) return;
@@ -619,7 +660,11 @@ void SetupPortal::route() {
             server_.send(HttpOk, "text/html; charset=utf-8", page_);
             return;
         }
-        const auto result = whileRadioIdle([&] { return store_.revoke(node, generation); });
+        auto result = cajui::Result::Invalid;
+        const auto access = whileRadioIdle([&] { result = store_.revoke(node, generation); });
+        if (access != cajui::RadioAccessState::Listening)
+            return redirect(access == cajui::RadioAccessState::Stopped ? cajui::Notice::RadioStopped
+                                                                       : cajui::Notice::RadioBusy);
         Serial.printf("CJAPP SETUP revoke node=%016" PRIx64 " result=%u\n", node, unsigned(result));
         redirect(result == cajui::Result::Ok ? cajui::Notice::Revoked
                                              : cajui::Notice::RevokeFailed);
