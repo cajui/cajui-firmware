@@ -29,7 +29,7 @@ def run(command, **kwargs):
 
 
 def pio():
-    return ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.1.18", "pio"]
+    return ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.2.0", "pio"]
 
 
 def tool(name):
