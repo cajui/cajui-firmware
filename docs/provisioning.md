@@ -13,7 +13,7 @@ it is done.
 
 ## Build and install
 
-Install PlatformIO 6.1.18. Confirm the target and stable MAC of each physical device
+Install PlatformIO 6.2.0. Confirm the target and stable MAC of each physical device
 before uploading; serial port names and USB-bridge serial numbers are not reliable
 identities. Back up existing flash/state before changing the partition layout.
 The images use the [dedicated storage layout](persistence.md). Released images install
