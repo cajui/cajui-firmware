@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = {
     "clang-format": "clang-format==23.1.2",
     "clang-tidy": "clang-tidy==19.1.0",
-    "ruff": "ruff==0.6.9",
+    "ruff": "ruff==0.16.10",
     "shellcheck": "shellcheck-py==0.10.0.1",
     "actionlint": "actionlint-py==1.7.7.24",
 }
@@ -29,7 +29,7 @@ def run(command, **kwargs):
 
 
 def pio():
-    return ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.1.18", "pio"]
+    return ["pio"] if shutil.which("pio") else ["uvx", "--from", "platformio==6.2.0", "pio"]
 
 
 def tool(name):
@@ -62,7 +62,7 @@ PYTHON_FLOORS = {
         "tools/release_publish.py",
     )
 }
-COVERAGE_VERSION = "7.6.1"
+COVERAGE_VERSION = "7.16.2"
 
 
 def python_coverage_command():

@@ -79,7 +79,7 @@ contracts and link here.
 ## Run tests
 
 Requires Python 3.10+, a C/C++ toolchain, OpenSSL development headers, and either
-PlatformIO 6.1.18 or `uv` (the script uses `uvx` when `pio` is absent).
+PlatformIO 6.2.0 or `uv` (the script uses `uvx` when `pio` is absent).
 
 ```sh
 # macOS dependency
@@ -100,7 +100,7 @@ Without `uv`, create a virtual environment and install the versions listed in
 For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 
 ```sh
-CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.6.1 \
+CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.16.2 \
   python scripts/check_protocol.py --coverage
 ```
 
@@ -114,7 +114,7 @@ the NVS backend itself. See [testing](docs/testing.md).
 Compile the same tests for ESP32 without uploading or executing them:
 
 ```sh
-uvx --from platformio==6.1.18 pio test -e protocol_esp32 --without-uploading --without-testing
+uvx --from platformio==6.2.0 pio test -e protocol_esp32 --without-uploading --without-testing
 ```
 
 This builds a test image, not an operational node. The current compile target is
