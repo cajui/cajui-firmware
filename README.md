@@ -100,7 +100,7 @@ Without `uv`, create a virtual environment and install the versions listed in
 For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
 
 ```sh
-CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.6.1 \
+CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.16.2 \
   python scripts/check_protocol.py --coverage
 ```
 
