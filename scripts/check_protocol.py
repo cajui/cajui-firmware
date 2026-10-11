@@ -62,7 +62,7 @@ PYTHON_FLOORS = {
         "tools/release_publish.py",
     )
 }
-COVERAGE_VERSION = "7.6.1"
+COVERAGE_VERSION = "7.16.2"
 
 
 def python_coverage_command():
