@@ -3,6 +3,7 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-throwing-static-initialization,
   performance-*,
   readability-isolate-declaration,
   readability-magic-numbers
