@@ -4,5 +4,7 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-string-to-number-conversion,
   performance-*
 WarningsAsErrors: '*'
+HeaderFilterRegex: ''

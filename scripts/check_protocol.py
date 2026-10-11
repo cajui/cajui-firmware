@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Pinned so local runs and CI format and lint identically.
 TOOLS = {
     "clang-format": "clang-format==23.1.2",
-    "clang-tidy": "clang-tidy==19.1.0",
+    "clang-tidy": "clang-tidy==22.1.8",
     "ruff": "ruff==0.16.10",
     "shellcheck": "shellcheck-py==0.10.0.1",
     "actionlint": "actionlint-py==1.7.7.24",

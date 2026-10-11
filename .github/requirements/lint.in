@@ -1,5 +1,5 @@
 clang-format==23.1.2
-clang-tidy==19.1.0
+clang-tidy==22.1.8
 ruff==0.16.10
 platformio==6.2.0
 shellcheck-py==0.10.0.1
