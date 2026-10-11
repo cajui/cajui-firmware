@@ -79,7 +79,7 @@ contracts and link here.
 ## Run tests
 
 Requires Python 3.10+, a C/C++ toolchain, OpenSSL development headers, and either
-PlatformIO 6.1.18 or `uv` (the script uses `uvx` when `pio` is absent).
+PlatformIO 6.2.0 or `uv` (the script uses `uvx` when `pio` is absent).
 
 ```sh
 # macOS dependency
@@ -114,7 +114,7 @@ the NVS backend itself. See [testing](docs/testing.md).
 Compile the same tests for ESP32 without uploading or executing them:
 
 ```sh
-uvx --from platformio==6.1.18 pio test -e protocol_esp32 --without-uploading --without-testing
+uvx --from platformio==6.2.0 pio test -e protocol_esp32 --without-uploading --without-testing
 ```
 
 This builds a test image, not an operational node. The current compile target is
