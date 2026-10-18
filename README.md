@@ -2,23 +2,24 @@
 
 English | [Português brasileiro](README.pt-BR.md)
 
-**Build battery-powered sensor transmitters and a receiver from ordinary LoRa boards.**
+**Firmware for Heltec ESP32/SX1262 boards: one code base turns a board into a
+battery-powered sensor transmitter or into the receiver that delivers the
+measurements over MQTT.**
 
-Cajuí Firmware provides the radio link for an open-source sensor network. Supported
-ESP32/SX1262 boards run as transmitters or as a receiver, so you can build the
-reception side with a single board instead of buying a commercial LoRaWAN gateway.
-The receiver forwards measurements over Wi-Fi to an MQTT broker for Cajuí Central,
-Home Assistant or your own application.
+The transmitter reads its sensor, sends the measurement over LoRa and sleeps until
+the next cycle. The receiver accepts enrolled transmitters, acknowledges each frame,
+keeps the samples in a persistent queue and publishes them over Wi-Fi to an MQTT
+broker, where Cajuí Central, Home Assistant or your own application consume them.
+Only the receiver needs Wi-Fi.
 
-The project is designed to grow toward different sensor types and several sensors
-per transmitter. Temperature and humidity are the first implemented example;
-current reference builds read one DHT22/AM2302 or SHT4x climate sensor per transmitter.
-New sensor types and combinations require firmware support.
+The link is Cajuí's own LoRa protocol, point to point with the receiver. One of the
+same boards, running this firmware, does the receiving; there is no LoRaWAN gateway
+or network server, and the system does not join LoRaWAN networks.
 
-Low power is central to the transmitter design: it sleeps between measurement
-cycles. The goal is months between battery charges with periodic readings. That
-autonomy has not yet been measured; it depends on the board, sensors, battery,
-reporting interval and radio conditions.
+The reference builds read one climate sensor per transmitter, SHT4x or DHT22/AM2302,
+on the boards in the [compatibility table](#compatible-boards-and-sensors). This
+repository is the radio layer of [Cajuí](https://github.com/cajui/docs); the project
+documentation explains the whole system and where it is heading.
 
 [![CI](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml)
 
@@ -31,10 +32,6 @@ flowchart LR
     B --> H[Home Assistant or your application]
 ```
 
-Only the receiver needs Wi-Fi. The radio link uses Cajuí's direct LoRa protocol,
-so a supported radio board serves as the receiver. It does not require a LoRaWAN
-gateway or network server, and it is not compatible with LoRaWAN networks.
-
 **Experimental firmware.** Assembly, USB installation and network configuration
 still require technical work. Range, network capacity, battery life and long-term
 field reliability have not been established. Read the [status and limitations](docs/status.md)
@@ -46,8 +43,8 @@ before choosing it for an installation.
 ## What it does
 
 - Runs periodic measurement cycles with deep sleep between transmissions.
-- Reads supported sensors independently of the radio protocol; current drivers
-  provide temperature and humidity measurements.
+- Reads the supported sensor on each transmitter; current drivers measure
+  temperature and humidity.
 - Sends authenticated, encrypted radio frames and retries within a bounded delivery cycle.
 - Stores accepted samples in the receiver before acknowledging them over LoRa.
 - Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
@@ -69,9 +66,8 @@ retries, queue limits and failures.
 | Heltec WiFi LoRa 32 V3 | Transmitter | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmitter | SHT4x over I2C | `runtime_tx_stick_lite` |
 
-The current applications read one climate sensor per transmitter. Adding another
-sensor model requires driver and application support; plugging in an arbitrary
-sensor does not identify or configure it automatically.
+Adding another sensor model requires driver and application support; plugging in
+an arbitrary sensor does not identify or configure it automatically.
 
 The Stick Lite image is installed over USB and is excluded from signed/web release
 artifacts. Use its [wiring and installation guide](docs/stick-lite.md); a WiFi LoRa

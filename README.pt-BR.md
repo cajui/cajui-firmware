@@ -2,23 +2,25 @@
 
 [English](README.md) | Português brasileiro
 
-**Monte transmissores de sensores a bateria e uma receptora com placas LoRa comuns.**
+**Firmware para placas Heltec ESP32/SX1262: a mesma base de código faz uma placa
+funcionar como transmissor de sensor a bateria ou como a receptora que entrega as
+medições por MQTT.**
 
-O Cajuí Firmware oferece a comunicação por rádio de uma rede de sensores open source.
-Placas ESP32/SX1262 compatíveis funcionam como transmissores ou como receptora,
-permitindo montar a recepção com uma única placa, sem comprar um gateway LoRaWAN
-comercial. A receptora encaminha as medições por Wi-Fi a um broker MQTT para o
-Cajuí Central, o Home Assistant ou sua própria aplicação.
+O transmissor lê o sensor, envia a medição por LoRa e dorme até o próximo ciclo.
+A receptora aceita os transmissores pareados, confirma cada quadro, guarda as
+amostras em uma fila persistente e as publica por Wi-Fi em um broker MQTT, de onde
+o Cajuí Central, o Home Assistant ou sua própria aplicação as consomem. Só a
+receptora precisa de Wi-Fi.
 
-O projeto foi pensado para evoluir com diferentes tipos de sensor e vários
-sensores por transmissor. Temperatura e umidade são o primeiro exemplo implementado;
-as compilações de referência atuais leem um sensor de clima DHT22/AM2302 ou SHT4x
-por transmissor. Novos tipos e combinações precisam de suporte no firmware.
+O enlace é o protocolo LoRa próprio do Cajuí, ponto a ponto com a receptora. Uma
+das mesmas placas, rodando este firmware, faz a recepção; não há gateway nem
+servidor de rede LoRaWAN, e o sistema não entra em redes LoRaWAN.
 
-O baixo consumo orienta o transmissor: ele dorme entre ciclos de medição. O objetivo
-é passar meses entre recargas com leituras periódicas. Essa autonomia ainda não foi
-medida; depende da placa, dos sensores, da bateria, do intervalo de envio e das
-condições do rádio.
+As compilações de referência leem um sensor de clima por transmissor, SHT4x ou
+DHT22/AM2302, nas placas da [tabela de compatibilidade](#placas-e-sensores-compatíveis).
+Este repositório é a camada de rádio do
+[Cajuí](https://github.com/cajui/docs/blob/main/README.pt-BR.md); a documentação
+do projeto explica o conjunto e para onde ele vai.
 
 [![CI](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml)
 
@@ -31,10 +33,6 @@ flowchart LR
     B --> H[Home Assistant ou sua aplicação]
 ```
 
-Apenas a receptora precisa de Wi-Fi. O enlace usa o protocolo LoRa direto do Cajuí,
-e uma placa de rádio compatível faz o papel de receptora. Ele não exige gateway
-nem servidor de rede LoRaWAN e não é compatível com redes LoRaWAN.
-
 **Firmware experimental.** Montagem, instalação por USB e configuração de rede
 ainda exigem trabalho técnico. Alcance, capacidade da rede, autonomia e
 confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
@@ -46,8 +44,8 @@ confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
 ## O que ele faz
 
 - Executa ciclos periódicos de medição com sono profundo entre transmissões.
-- Lê sensores compatíveis separadamente do protocolo de rádio; os drivers atuais
-  fornecem medições de temperatura e umidade.
+- Lê o sensor compatível de cada transmissor; os drivers atuais medem
+  temperatura e umidade.
 - Envia quadros de rádio autenticados e criptografados, com tentativas limitadas por ciclo.
 - Grava as amostras aceitas na receptora antes de confirmá-las pelo LoRa.
 - Mantém uma fila persistente de até 128 amostras enquanto o MQTT está indisponível
@@ -69,9 +67,8 @@ explica tentativas, limites da fila e falhas.
 | Heltec WiFi LoRa 32 V3 | Transmissor | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmissor | SHT4x por I2C | `runtime_tx_stick_lite` |
 
-As aplicações atuais leem um sensor de clima por transmissor. Outro modelo de
-sensor exige suporte no driver e na aplicação; conectar um sensor qualquer não
-faz sua identificação ou configuração automática.
+Outro modelo de sensor exige suporte no driver e na aplicação; conectar um sensor
+qualquer não faz sua identificação ou configuração automática.
 
 A imagem da Stick Lite é instalada por USB e não faz parte dos artefatos de
 release assinados ou do instalador web. Use o [guia de ligação e instalação](docs/stick-lite.md);
