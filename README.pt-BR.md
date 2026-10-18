@@ -2,18 +2,29 @@
 
 [English](README.md) | Português brasileiro
 
-**Leia um sensor, envie as medições por LoRa e disponibilize os dados na sua rede local.**
+**Monte transmissores de sensores a bateria e uma receptora com placas LoRa comuns.**
 
-O Cajuí Firmware transforma placas ESP32/SX1262 compatíveis em transmissores de
-sensores ou em uma receptora. Os transmissores podem dormir entre leituras. A
-receptora encaminha as amostras aceitas por Wi-Fi a um broker MQTT, onde o Cajuí
-Central, o Home Assistant ou sua própria aplicação podem consumi-las.
+O Cajuí Firmware oferece a comunicação por rádio de uma rede de sensores open source.
+Placas ESP32/SX1262 compatíveis funcionam como transmissores ou como receptora,
+permitindo montar a recepção com uma única placa, sem comprar um gateway LoRaWAN
+comercial. A receptora encaminha as medições por Wi-Fi a um broker MQTT para o
+Cajuí Central, o Home Assistant ou sua própria aplicação.
+
+O projeto foi pensado para evoluir com diferentes tipos de sensor e vários
+sensores por transmissor. Temperatura e umidade são o primeiro exemplo implementado;
+as compilações de referência atuais leem um sensor de clima DHT22/AM2302 ou SHT4x
+por transmissor. Novos tipos e combinações precisam de suporte no firmware.
+
+O baixo consumo orienta o transmissor: ele dorme entre ciclos de medição. O objetivo
+é passar meses entre recargas com leituras periódicas. Essa autonomia ainda não foi
+medida; depende da placa, dos sensores, da bateria, do intervalo de envio e das
+condições do rádio.
 
 [![CI](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml)
 
 ```mermaid
 flowchart LR
-    S[Sensor de clima] --> T[Transmissor]
+    S[Sensor compatível] --> T[Transmissor]
     T <-->|LoRa| R[Receptora]
     R -->|Wi-Fi / MQTT| B[Broker MQTT]
     B --> C[Cajuí Central]
@@ -34,7 +45,9 @@ confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
 
 ## O que ele faz
 
-- Mede temperatura e umidade com os sensores compatíveis.
+- Executa ciclos periódicos de medição com sono profundo entre transmissões.
+- Lê sensores compatíveis separadamente do protocolo de rádio; os drivers atuais
+  fornecem medições de temperatura e umidade.
 - Envia quadros de rádio autenticados e criptografados, com tentativas limitadas por ciclo.
 - Grava as amostras aceitas na receptora antes de confirmá-las pelo LoRa.
 - Mantém uma fila persistente de até 128 amostras enquanto o MQTT está indisponível

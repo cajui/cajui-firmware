@@ -2,18 +2,29 @@
 
 English | [Português brasileiro](README.pt-BR.md)
 
-**Read a sensor, send its measurements over LoRa, and make them available on your local network.**
+**Build battery-powered sensor transmitters and a receiver from ordinary LoRa boards.**
 
-Cajuí Firmware turns supported ESP32/SX1262 boards into sensor transmitters or a
-receiver. Transmitters can sleep between readings. The receiver forwards accepted
-samples over Wi-Fi to an MQTT broker, where Cajuí Central, Home Assistant or your
-own application can consume them.
+Cajuí Firmware provides the radio link for an open-source sensor network. Supported
+ESP32/SX1262 boards run as transmitters or as a receiver, so you can build the
+reception side with a single board instead of buying a commercial LoRaWAN gateway.
+The receiver forwards measurements over Wi-Fi to an MQTT broker for Cajuí Central,
+Home Assistant or your own application.
+
+The project is designed to grow toward different sensor types and several sensors
+per transmitter. Temperature and humidity are the first implemented example;
+current reference builds read one DHT22/AM2302 or SHT4x climate sensor per transmitter.
+New sensor types and combinations require firmware support.
+
+Low power is central to the transmitter design: it sleeps between measurement
+cycles. The goal is months between battery charges with periodic readings. That
+autonomy has not yet been measured; it depends on the board, sensors, battery,
+reporting interval and radio conditions.
 
 [![CI](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml)
 
 ```mermaid
 flowchart LR
-    S[Climate sensor] --> T[Transmitter]
+    S[Supported sensor] --> T[Transmitter]
     T <-->|LoRa| R[Receiver]
     R -->|Wi-Fi / MQTT| B[MQTT broker]
     B --> C[Cajuí Central]
@@ -34,7 +45,9 @@ before choosing it for an installation.
 
 ## What it does
 
-- Measures temperature and humidity with the supported climate sensors.
+- Runs periodic measurement cycles with deep sleep between transmissions.
+- Reads supported sensors independently of the radio protocol; current drivers
+  provide temperature and humidity measurements.
 - Sends authenticated, encrypted radio frames and retries within a bounded delivery cycle.
 - Stores accepted samples in the receiver before acknowledging them over LoRa.
 - Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
