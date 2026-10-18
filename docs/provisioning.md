@@ -177,7 +177,7 @@ uv run tools/provision.py uplink-status --receiver <rx-port>
 
 Omitting `--wifi-password-file` or `--mqtt-password-file` prompts without echo. Files
 contribute their first line. The MQTT username is also the `source_id` in
-[Cajuí Central's contract](https://github.com/cajui/cajui-central#wire-contract-version-1),
+[Cajuí Central's contract](https://github.com/cajui/cajui-central/blob/main/docs/mqtt.md#wire-contract-version-1),
 so a broker ACL that grants each user `telemetry/v1/<user>/+/samples` authorizes it.
 Every field is required: open Wi-Fi networks and 5 GHz-only networks are not
 supported (the ESP32-S3 has no 5 GHz radio). Output reports the stored host, port and

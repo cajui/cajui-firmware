@@ -2,7 +2,7 @@
 
 Draft implementation contract; it has not undergone an independent security audit.
 For what is implemented and validated, see [pending and
-unvalidated](../README.md#pending-and-unvalidated).
+unvalidated](status.md#pending-and-unvalidated).
 
 ## Scope
 
@@ -192,7 +192,7 @@ enrollment uses the separate [pairing](radio-pairing.md) frames (types 3–6).
 
 [Tests](testing.md) exercise the host core and compile the same suite for ESP32. The
 public fixtures use fixed keys solely as test vectors. Open validation work is listed
-in [pending and unvalidated](../README.md#pending-and-unvalidated).
+in [pending and unvalidated](status.md#pending-and-unvalidated).
 
 - [NIST SP 800-38D: GCM](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
 - [OpenSSL EVP](https://docs.openssl.org/3.0/man3/EVP_EncryptInit/)

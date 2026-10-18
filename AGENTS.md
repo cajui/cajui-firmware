@@ -1,6 +1,7 @@
 # Development of Cajuí Firmware
 
-- Keep source comments, documentation and commit messages in English.
+- Keep source comments, technical documentation and commit messages in English.
+- Keep README.md and README.pt-BR.md equivalent; the latter uses Brazilian Portuguese.
 - Read README.md and docs/protocol-v1.md before modifying wire behavior.
 - Keep protocol logic independent of radio drivers, sensors and storage adapters.
 - Never implement cryptographic primitives locally; use established libraries.

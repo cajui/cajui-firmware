@@ -1,155 +1,149 @@
 # Cajuí Firmware
 
+English | [Português brasileiro](README.pt-BR.md)
+
+**Read a sensor, send its measurements over LoRa, and make them available on your local network.**
+
+Cajuí Firmware turns supported ESP32/SX1262 boards into sensor transmitters or a
+receiver. Transmitters can sleep between readings. The receiver forwards accepted
+samples over Wi-Fi to an MQTT broker, where Cajuí Central, Home Assistant or your
+own application can consume them.
+
 [![CI](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/cajui/cajui-firmware/actions/workflows/ci.yml)
 
-Firmware foundations for a direct LoRa telemetry network: sensor nodes send readings
-to a receiver, which acknowledges accepted samples and eventually forwards them to
-a server.
+```mermaid
+flowchart LR
+    S[Climate sensor] --> T[Transmitter]
+    T <-->|LoRa| R[Receiver]
+    R -->|Wi-Fi / MQTT| B[MQTT broker]
+    B --> C[Cajuí Central]
+    B --> H[Home Assistant or your application]
+```
 
-**Experimental development code.** The shared protocol core, persistent storage, USB
-enrollment and host-tested delivery controllers are implemented. Experimental ESP32
-transmitter/receiver applications integrate an SX1262 adapter and a DHT22 sensor.
-An experimental [Wireless Stick Lite V3 transmitter](docs/stick-lite.md) supports SHT4x.
-Each image has a USB administration mode that keeps the radio in reset. No production image is
-released.
+Only the receiver needs Wi-Fi. The radio link uses Cajuí's direct LoRa protocol,
+so a supported radio board serves as the receiver. It does not require a LoRaWAN
+gateway or network server, and it is not compatible with LoRaWAN networks.
 
-## Implemented
+**Experimental firmware.** Assembly, USB installation and network configuration
+still require technical work. Range, network capacity, battery life and long-term
+field reliability have not been established. Read the [status and limitations](docs/status.md)
+before choosing it for an installation.
 
-- Bounded DATA/ACK frames with up to eight sensor metrics and AES-128-GCM.
-- Per-device credentials, replay/duplicate handling and bounded sender attempts.
-- Versioned per-record storage with an ESP32 NVS adapter, durable counter reservation,
-  a 128-frame receiver queue committed before ACK in two small writes per sample,
-  reusable enrollment slots and migration from the earlier single-snapshot layout.
-- Wire version 2: the ACK can command the transmitter's power (clamped to its configured
-  maximum, with a fallback after missed ACKs); version 1 nodes keep working. No power
-  policy is enabled yet. Transmit power is configurable per device over USB.
-- Radio RSSI/SNR of each accepted frame, logged and forwarded as `radio` readings.
-- Two application slots with rollback: a browser installer over USB for released images,
-  and signed updates installed from the receiver's setup page ([updates](docs/updates.md)).
-- Two-phase USB enrollment, resumable setup, key rotation, revocation and leaving a
-  network (retired keys can never return).
-- A local Python tool with private recovery files and a software-restart check.
-- A nonblocking send controller with injected radio, clock and jitter, bounded
-  channel waits, ACK deadlines and cancellation.
-- SX1262 CAD/TX/RX adapter with task-driven interrupt handling, a durable receiver
-  loop, DHT22 sampling and a five-minute transmitter sleep schedule.
-- Receiver forwarding to an MQTT broker over Wi-Fi in Cajuí Central's JSON contract,
-  removing each queued sample only after its PUBACK, with USB-provisioned settings.
-- A receiver setup page on a temporary access point opened by holding the PRG button:
-  Wi-Fi, MQTT broker (with mDNS discovery), status and transmitter revocation, applied
-  without a reboot. The OLED shows a QR code to join the setup network.
-- [Radio pairing](docs/radio-pairing.md): add a transmitter from the setup page with an
-  X25519/HKDF key exchange; the transmitter joins after a long PRG press or `CJ1 PAIR`.
-- Unity tests, Python client tests, ASan/UBSan and coverage checks.
+[Start here](#your-first-sensor-link) · [Compatible boards](#compatible-boards-and-sensors) ·
+[Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
 
-## Pending and unvalidated
+## What it does
 
-This list is the single record of implementation status; the other documents describe
-contracts and link here.
+- Measures temperature and humidity with the supported climate sensors.
+- Sends authenticated, encrypted radio frames and retries within a bounded delivery cycle.
+- Stores accepted samples in the receiver before acknowledging them over LoRa.
+- Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
+  removes each sample after the broker acknowledges it. A full queue drops the oldest sample.
+- Offers a receiver setup page for Wi-Fi, broker configuration, pairing and revocation.
+- Reports battery voltage and radio signal alongside measurements, and publishes
+  MQTT Discovery definitions for Home Assistant.
 
-- Battery thresholds and the divider correction are provisional until checked with a real
-  LiPo 1S; on USB without a battery the bench board read the charger's 4.2–4.3 V.
-- Without uplink settings, or while the broker is unreachable,
-  the receiver keeps its newest 128 samples and gives up the oldest ones (counted as
-  `queue.dropped` in its state).
-- **TODO (security): the setup access point is open.** Anyone within Wi-Fi range who
-  joins it while it is open (at most 30 minutes, after a button press) can change the
-  uplink settings, pair or revoke transmitters. The page itself refuses other origins,
-  other hosts and the home-network interface, and never reveals or re-sends a stored
-  password. A per-device password on a label/QR is planned.
-- **Radio pairing is not authenticated against an active attacker** in radio range during
-  the two-minute window; a per-device label code is planned. Signal strength is shown,
-  not enforced.
-- Broker TLS and an application-level receipt from Central. Forwarding uses plain MQTT
-  3.1.1 on a trusted network; PUBACK proves broker acceptance only.
-- Physical validation is limited: a manual bench exchange achieved durable acceptance
-  and authenticated ACKs on the first attempt, including sensor-error telemetry followed
-  by valid climate readings on a subsequent boot. The queue survived that restart;
-  one automatic five-minute wake also delivered valid readings and received an ACK.
-  IRQ timing, loss/interference, sustained cadence and power use need measurement. CI only
-  compiles the ESP32 targets; USB enrollment alone does not validate RF.
-- Arbitrary power-loss behavior and flash endurance of the NVS adapter. Host tests inject
-  storage failures; the adapter relies on NVS atomic blob replacement.
-- RF coexistence, regulatory configuration and an independent security review.
+A radio acknowledgement confirms receiver acceptance. An MQTT acknowledgement
+confirms broker acceptance. Neither proves that a monitoring application stored the
+sample. [Delivery semantics](docs/radio-applications.md#forwarding-to-mqtt) explain
+retries, queue limits and failures.
 
-[Runtime architecture](docs/runtime.md) · [USB administration](docs/provisioning.md) ·
-[Persistent storage](docs/persistence.md) · [Radio applications](docs/radio-applications.md) ·
-[Firmware updates](docs/updates.md) · [MQTT management channel (draft)](docs/management-v1.md) · [Home Assistant](docs/home-assistant.md)
+## Compatible boards and sensors
 
-## Run tests
+| Board | Role | Sensor | Build target |
+| --- | --- | --- | --- |
+| Heltec WiFi LoRa 32 V3 | Receiver | Receives enrolled transmitters | `runtime_rx` |
+| Heltec WiFi LoRa 32 V3 | Transmitter | DHT22 / AM2302 | `runtime_tx` |
+| Heltec Wireless Stick Lite V3 | Transmitter | SHT4x over I2C | `runtime_tx_stick_lite` |
 
-Requires Python 3.10+, a C/C++ toolchain, OpenSSL development headers, and either
-PlatformIO 6.2.0 or `uv` (the script uses `uvx` when `pio` is absent).
+The current applications read one climate sensor per transmitter. Adding another
+sensor model requires driver and application support; plugging in an arbitrary
+sensor does not identify or configure it automatically.
+
+The Stick Lite image is installed over USB and is excluded from signed/web release
+artifacts. Use its [wiring and installation guide](docs/stick-lite.md); a WiFi LoRa
+32 image is not a substitute. See [reference applications](docs/radio-applications.md)
+for DHT22 wiring. Qwiic/STEMMA QT adapters are optional when the same electrical
+connections are made directly.
+
+## Your first sensor link
+
+You need two supported boards, a suitable LoRa antenna for **each** board, one
+supported sensor, power, a USB data cable and a computer for installation. The
+receiver also needs 2.4 GHz Wi-Fi and a reachable MQTT broker. Both boards transmit:
+the receiver sends acknowledgements.
+
+1. **Prepare the monitoring application.** Start
+   [Cajuí Central and its included broker](https://github.com/cajui/cajui-central#try-it-without-hardware),
+   or use an existing broker with [Home Assistant](docs/home-assistant.md).
+2. **Build and install an image for each role.** This walkthrough describes `main`.
+   Use the build command below and [USB installation](docs/provisioning.md#build-and-install),
+   with the storage precautions in [installation and updates](docs/updates.md). Read the release notes when
+   using a published image; it can be older than the development code described here.
+   The Stick Lite target requires a source build and USB installation.
+3. **Configure the receiver.** Hold PRG for three seconds, join its temporary Wi-Fi
+   network, and open `http://192.168.4.1`. Save your Wi-Fi settings, then enter the
+   broker address and dedicated producer credentials. Check both connection states.
+4. **Pair the transmitter.** Open a pairing window on the receiver and hold PRG on
+   the transmitter for three seconds to request joining. Approve the candidate as
+   described in [radio pairing](docs/radio-pairing.md). [USB enrollment](docs/provisioning.md)
+   is also available.
+5. **Verify the first reading.** Check radio acceptance, then the measurement in
+   your application. The normal transmitter cycle is five minutes; low-battery
+   modes change this schedule. Name the device and sensor in the application.
+
+To build the development images without accessing any device, install Git,
+Python 3.10+ and [uv](https://docs.astral.sh/uv/), then run:
 
 ```sh
-# macOS dependency
-brew install openssl@3
-# Ubuntu/Debian alternative
-# sudo apt-get install build-essential libssl-dev
-
-uv run --python 3.12 python scripts/check_protocol.py
-uv run --python 3.12 python scripts/check_protocol.py --lint
+git clone https://github.com/cajui/cajui-firmware.git
+cd cajui-firmware
+uvx --from platformio==6.2.0 pio run -e runtime_rx -e runtime_tx_stick_lite
 ```
 
-`--lint` checks formatting, clang-tidy, Python, shell scripts and workflow YAML.
-It uses `uvx` to run pinned clang-format, clang-tidy, ruff, ShellCheck and actionlint.
-The actionlint environment also includes ShellCheck for embedded workflow scripts.
-Without `uv`, create a virtual environment and install the versions listed in
-`.github/requirements/lint.in` before running the script.
+Use `-e runtime_tx` instead of `-e runtime_tx_stick_lite` for a WiFi LoRa 32 V3
+transmitter with DHT22. Building does not install firmware. Initial installation
+and updates have different storage requirements: preserve enrollment and counters
+when updating an enrolled device. Do not erase its storage to troubleshoot it.
 
-For LLVM coverage, install Clang and LLVM (Xcode command-line tools on macOS):
+The default radio profile is 915.2 MHz and defaults to a bench transmit power of
+−9 dBm. Frequency, power and antenna must suit your region; the firmware does not
+select a regional configuration automatically. Minimum power does not make
+transmitting without an antenna safe.
 
-```sh
-CC=clang CXX=clang++ uv run --python 3.12 --with coverage==7.16.2 \
-  python scripts/check_protocol.py --coverage
-```
+## Security and validation
 
-The coverage gate applies to each host implementation file listed in
-`scripts/check_protocol.py` on its own: at least 95% line and 85% branch coverage, with
-one documented exception for OpenSSL failure branches in `crypto.cpp`. The Python client
-and release tools each need 95% line and branch coverage using the same interpreter
-as the ordinary tests. Coverage does not measure the ESP32 backend, radio behavior or
-the NVS backend itself. See [testing](docs/testing.md).
+Use the setup page and broker on a trusted network. The temporary setup access
+point is open while enabled, MQTT transport is plaintext, and radio pairing does
+not authenticate against an active nearby attacker. Frame encryption does not
+remove these boundaries. See [security](SECURITY.md) and [implementation status](docs/status.md).
 
-Compile the same tests for ESP32 without uploading or executing them:
+Host tests cover protocol, storage failure handling and sensor decoding. CI also
+compiles the ESP32 targets. Those checks do not measure radio range, power use or
+physical flash behavior. Home Assistant Discovery has automated checks; a complete
+installation against Home Assistant still needs integration validation.
 
-```sh
-uvx --from platformio==6.2.0 pio test -e protocol_esp32 --without-uploading --without-testing
-```
+## Documentation
 
-This builds a test image, not an operational node. The current compile target is
-ESP32-S3; the protocol core does not depend on a radio driver.
+| Task | Guide |
+| --- | --- |
+| Understand the complete system | [Cajuí documentation](https://github.com/cajui/docs) |
+| Wire sensors and understand board behavior | [Radio applications](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) |
+| Enroll, recover or revoke a transmitter | [USB administration](docs/provisioning.md) · [Radio pairing](docs/radio-pairing.md) |
+| Install and update firmware | [Updates and storage precautions](docs/updates.md) |
+| Use Home Assistant or MQTT management | [Home Assistant](docs/home-assistant.md) · [Management contract](docs/management-v1.md) |
+| Understand the implementation | [Protocol](docs/protocol-v1.md) · [Runtime](docs/runtime.md) · [Persistence](docs/persistence.md) |
+| Build, test or add support | [Development](docs/development.md) · [Testing](docs/testing.md) |
+| Check what remains unvalidated | [Implementation status](docs/status.md) · [Roadmap](docs/roadmap.md) |
 
-## Structure
+## Contributing
 
-```text
-lib/CajuiProtocol/src/    Shared wire format, sender/receiver logic and crypto adapters
-lib/CajuiApplication/src/ Receiver loop and measurement normalization
-lib/CajuiRuntime/src/     Send-cycle state machine and radio/clock/jitter contracts
-lib/CajuiStorage/src/     Persistent records, v1 migration and NVS adapter
-lib/CajuiProvisioning/src/ Bounded USB command handler
-lib/CajuiPairing/src/     Radio pairing frames and state machines
-lib/CajuiUplink/src/      Uplink settings, Central JSON formatting and MQTT forwarding
-lib/CajuiSetup/src/       Setup page rendering, session checks and field validation
-lib/CajuiDevice/src/      Boot-mode, fault-retry and transmit-power decisions
-lib/CajuiFirmware/src/    Signed firmware update verification
-src/                     Transmitter and receiver applications and board adapters
-tools/                   USB enrollment client and firmware packaging
-site/                    Web installer page, published by the release workflow
-scripts/                 Native build configuration and test runner
-test/test_protocol/      Unity tests and fault-injection storage doubles
-tests_python/            USB client and recovery-file tests
-docs/                    Protocol contract, testing and integration roadmap
-```
-
-[Protocol specification](docs/protocol-v1.md) · [Roadmap](docs/roadmap.md) ·
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
-
-[Cajuí Central](https://github.com/cajui/cajui-central) is the separate monitoring
-application. The receiver publishes to the MQTT broker that Central consumes.
+Report reproducible failures, improve setup instructions, or contribute sensor
+support with tests and a documented board configuration. See
+[CONTRIBUTING.md](CONTRIBUTING.md) before changing protocols or storage formats.
+Keep credentials and identifying deployment data out of issues and logs.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Dependencies retain their respective licenses;
-Unity, OpenSSL and the ESP32 framework are fetched through the build environment,
-not vendored here. Test keys are public fixtures, never provisioning credentials.
+[Apache-2.0](LICENSE). Dependencies retain their own licenses. Test keys are public
+fixtures and must never be used as device credentials.

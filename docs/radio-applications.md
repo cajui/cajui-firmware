@@ -3,7 +3,7 @@
 `runtime_tx` and `runtime_rx` target the Heltec WiFi LoRa 32 V3 (ESP32-S3/SX1262).
 They are development images, not a production release. The separate
 [Wireless Stick Lite V3 transmitter target](stick-lite.md) uses SHT4x.
-See the [current implementation status](../README.md#pending-and-unvalidated).
+See the [current implementation status](status.md#pending-and-unvalidated).
 
 ```sh
 pio run -e runtime_tx -e runtime_rx

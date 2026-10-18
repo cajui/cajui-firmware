@@ -12,5 +12,6 @@ Run `scripts/check_protocol.py --lint`, native tests with sanitizers and coverag
 compile the ESP32 test target without uploading. CI runs all three checks. Include the problem, resulting behavior,
 validation and remaining limitations in the pull request.
 
-Write code comments and documentation in English. Do not include secrets, device
-identifiers or environment-specific files. Contributions are under Apache-2.0.
+Write code comments and technical documentation in English. Keep README.md and
+README.pt-BR.md equivalent when changing user-facing instructions. Do not include
+secrets, device identifiers or environment-specific files. Contributions are under Apache-2.0.
