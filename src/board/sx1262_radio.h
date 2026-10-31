@@ -9,8 +9,6 @@
 #include "cajui_service.h"
 
 namespace board {
-constexpr uint8_t RadioCs = 8, RadioClock = 9, RadioMiso = 11, RadioMosi = 10;
-constexpr uint8_t RadioReset = 12, RadioBusy = 13, RadioDio = 14;
 constexpr uint16_t RadioProfile = 1;
 
 // One statically allocated adapter for the physical radio; never destroyed while active.

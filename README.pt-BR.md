@@ -2,7 +2,7 @@
 
 [English](README.md) | Português brasileiro
 
-**Firmware para placas Heltec ESP32/SX1262: a mesma base de código faz uma placa
+**Firmware para placas ESP32/SX1262 compatíveis: a mesma base de código faz uma placa
 funcionar como transmissor de sensor a bateria ou como a receptora que entrega as
 medições por MQTT.**
 
@@ -51,7 +51,7 @@ confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
 - Mantém uma fila persistente de até 128 amostras enquanto o MQTT está indisponível
   e remove cada amostra após a confirmação do broker. Uma fila cheia descarta a mais antiga.
 - Oferece uma página na receptora para Wi-Fi, broker, pareamento e revogação.
-- Informa tensão da bateria e sinal do rádio junto das medições e publica
+- Informa tensão da bateria onde há suporte e sinal do rádio junto das medições e publica
   definições de MQTT Discovery para o Home Assistant.
 
 Uma confirmação de rádio indica aceitação pela receptora. A confirmação MQTT
@@ -66,13 +66,17 @@ explica tentativas, limites da fila e falhas.
 | Heltec WiFi LoRa 32 V3 | Receptora | Recebe transmissores pareados | `runtime_rx` |
 | Heltec WiFi LoRa 32 V3 | Transmissor | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmissor | SHT4x por I2C | `runtime_tx_stick_lite` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmissor | SHT4x por I2C | `runtime_tx_xiao_s3` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmissor | DHT22/AM2302 | `runtime_tx_xiao_s3_dht22` |
 
 Outro modelo de sensor exige suporte no driver e na aplicação; conectar um sensor
 qualquer não faz sua identificação ou configuração automática.
 
-A imagem da Stick Lite é instalada por USB e não faz parte dos artefatos de
-release assinados ou do instalador web. Use o [guia de ligação e instalação](docs/stick-lite.md);
-uma imagem da WiFi LoRa 32 não a substitui. Consulte as
+As imagens da Stick Lite e da XIAO são instaladas por USB e não fazem parte dos
+artefatos de release assinados ou do instalador web. Use o guia de ligação da
+[Stick Lite](docs/stick-lite.md) ou da [XIAO](docs/xiao-s3.md); uma imagem da WiFi
+LoRa 32 não as substitui. Este perfil XIAO não mede tensão da bateria, e sua
+integração física ainda não foi validada. Consulte as
 [aplicações de referência](docs/radio-applications.md) para a ligação do DHT22.
 Adaptadores Qwiic/STEMMA QT são opcionais quando as mesmas conexões elétricas
 são feitas diretamente.
@@ -91,12 +95,13 @@ um broker MQTT acessível. As duas placas transmitem: a receptora envia confirma
    Use o comando de compilação abaixo e a [instalação USB](docs/provisioning.md#build-and-install),
    com os cuidados de armazenamento de [instalação e atualizações](docs/updates.md). Leia as notas da release ao usar
    uma imagem publicada; ela pode ser anterior ao código de desenvolvimento
-   descrito aqui. A Stick Lite exige compilação do código e instalação por USB.
+   descrito aqui. Stick Lite e XIAO exigem compilação do código e instalação por USB.
 3. **Configure a receptora.** Segure PRG por três segundos, conecte à rede Wi-Fi
    temporária e abra `http://192.168.4.1`. Salve o Wi-Fi e depois informe o endereço
    do broker e as credenciais dedicadas de produtor. Confira as duas conexões.
 4. **Pareie o transmissor.** Abra uma janela de pareamento na receptora e segure
-   PRG no transmissor por três segundos para pedir entrada. Aprove o candidato
+   PRG no transmissor por três segundos para pedir entrada (na XIAO, use o botão
+   da expansão Wio). Aprove o candidato
    conforme o guia de [pareamento por rádio](docs/radio-pairing.md). Também há
    [cadastro por USB](docs/provisioning.md).
 5. **Confira a primeira leitura.** Verifique a aceitação pelo rádio e depois a
@@ -113,7 +118,9 @@ uvx --from platformio==6.2.0 pio run -e runtime_rx -e runtime_tx_stick_lite
 ```
 
 Use `-e runtime_tx` no lugar de `-e runtime_tx_stick_lite` para um transmissor
-WiFi LoRa 32 V3 com DHT22. Compilar não instala o firmware. Instalação inicial e
+WiFi LoRa 32 V3 com DHT22. Para XIAO, use `-e runtime_tx_xiao_s3` com SHT4x
+ou `-e runtime_tx_xiao_s3_dht22` com DHT22.
+Compilar não instala o firmware. Instalação inicial e
 atualização têm requisitos diferentes de armazenamento: preserve o cadastro e
 os contadores ao atualizar um dispositivo pareado. Não apague o armazenamento
 para tentar resolver uma falha.
@@ -144,7 +151,7 @@ também está disponível em português.
 | Tarefa | Guia |
 | --- | --- |
 | Entender o sistema completo | [Documentação Cajuí](https://github.com/cajui/docs/blob/main/README.pt-BR.md) |
-| Ligar sensores e entender as placas | [Aplicações de rádio](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) |
+| Ligar sensores e entender as placas | [Aplicações de rádio](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22](docs/xiao-s3.md) |
 | Cadastrar, recuperar ou revogar um transmissor | [Administração USB](docs/provisioning.md) · [Pareamento por rádio](docs/radio-pairing.md) |
 | Instalar e atualizar firmware | [Atualizações e cuidados com armazenamento](docs/updates.md) |
 | Usar Home Assistant ou gestão MQTT | [Home Assistant](docs/home-assistant.md) · [Contrato de gestão](docs/management-v1.md) |

@@ -73,3 +73,13 @@ docs/                    Protocol contract, testing and integration roadmap
 
 [Cajuí Central](https://github.com/cajui/cajui-central) is the separate monitoring
 application. The receiver publishes to the MQTT broker that Central consumes.
+
+## Board, role and sensor selection
+
+`platformio.ini` selects the application role, board profile and sensor driver
+independently. `src/board/profile.h` owns pin assignments and hardware capabilities;
+`power.cpp` prepares those pins at startup and sleep. `climate.cpp` selects the
+sensor driver independently of the board name. Protocol, enrollment and telemetry
+remain shared. Add build and board-lint coverage when introducing an environment.
+Unsupported sensor pin assignments and the unimplemented XIAO receiver role are
+rejected at compile time. See [XIAO](xiao-s3.md) for the B2B transmitter profile.

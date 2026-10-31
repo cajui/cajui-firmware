@@ -7,7 +7,7 @@
 namespace board {
 namespace {
 // Profile 1 is an experimental bench profile, not regional automatic configuration.
-constexpr float FrequencyMHz = 915.2, BandwidthKHz = 125, TcxoVoltage = 1.8;
+constexpr float FrequencyMHz = 915.2, BandwidthKHz = 125;
 constexpr uint8_t SpreadingFactor = 7, CodingRate = 5, SyncWord = 0x12;
 constexpr uint16_t PreambleSymbols = 8;
 constexpr float TenthsPerDb = 10;
@@ -37,6 +37,7 @@ bool Sx1262Radio::begin(int8_t powerDbm) {
     mutex_ = xSemaphoreCreateMutex();
     if (!mutex_) return false;
     SPI.begin(RadioClock, RadioMiso, RadioMosi, RadioCs);
+    if (RadioRfSwitch != NoPin) radio_.setRfSwitchPins(RadioRfSwitch, RADIOLIB_NC);
     if (radio_.begin(FrequencyMHz, BandwidthKHz, SpreadingFactor, CodingRate, SyncWord, powerDbm,
                      PreambleSymbols, TcxoVoltage) != RADIOLIB_ERR_NONE ||
         radio_.setCRC(true) != RADIOLIB_ERR_NONE) {
