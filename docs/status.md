@@ -42,8 +42,8 @@ field reliability. No production image is released.
 This page records implementation status and validation limits for the development
 branch. Released images may have an earlier feature set.
 
-- XIAO hardware integration, mixed-board radio operation and sleep current are
-  unvalidated. Battery voltage is unknown on XIAO; low-battery scheduling cannot
+- XIAO has passed initial pairing and acknowledged delivery to Heltec, but sensor
+  integration and sleep current remain unvalidated. Battery voltage is unknown; low-battery scheduling cannot
   act on it. This profile is USB-only and excluded from signed releases.
 - Battery thresholds and the divider correction are provisional until checked with a real
   LiPo 1S; on USB without a battery the bench board read the charger's 4.2–4.3 V.

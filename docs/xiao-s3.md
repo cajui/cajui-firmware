@@ -5,7 +5,8 @@ Wio-SX1262 **B2B** expansion and one SHT4x. The `runtime_tx_xiao_s3_dht22`
 image uses the same board with a DHT22/AM2302 instead. It uses the same Cajuí radio profile,
 enrollment and measurement format as the Heltec transmitters. The receiver remains
 `runtime_rx` on Heltec WiFi LoRa 32 V3; no Central or MQTT schema change is needed.
-Mixed-board radio operation has not yet been verified on hardware.
+Initial bench pairing and acknowledged delivery to Heltec have been verified;
+see the validation limits below.
 
 This profile does not cover XIAO nRF52840, ESP32-S3 Plus or the header-connected
 Wio expansion. The XIAO receiver role is not implemented.
@@ -99,8 +100,16 @@ The transmitter has no web firmware-upload endpoint.
 Host tests exercise GPIO preparation, sleep failure fallback and unavailable
 battery sensing. CI compiles all supported applications and runs board lint.
 Neither proves physical pin retention, RF delivery, power consumption or autonomy.
-XIAO sensor reads, pairing with Heltec, repeated wake/delivery and USB recovery
-must be checked on hardware before deployment.
+An initial bench check on 2026-10-31 paired a XIAO DHT22 transmitter with a Heltec
+receiver and delivered a packet with an acknowledgment on its first attempt at
+−9 dBm. The receiver forwarded the packet to MQTT. Both climate measurements
+reported sensor errors; the diagnostic driver timed out waiting for the initial
+low pulse to end. This confirms the radio path, not working DHT22 measurements.
+
+Sensor reads, uninterrupted repeated wake/delivery, USB recovery and current draw
+still need validation before deployment. During this check, reopening native USB
+could restart the transmitter, and USB disappeared in deep sleep. Keep the serial
+connection open during pairing; do not mistake a port reopening for a timer wake.
 
 References:
 

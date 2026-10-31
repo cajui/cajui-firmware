@@ -143,5 +143,6 @@ does not access any ADC or GPIO. Invalid board/sensor combinations fail to compi
 These checks do not emulate ESP32 pad retention, RF switching or analog accuracy.
 
 CI also builds and runs board lint for `runtime_tx_xiao_s3` and
-`runtime_tx_xiao_s3_dht22`, alongside all Heltec applications. XIAO pairing, reception
-by Heltec, USB behavior and battery sleep current still require hardware validation.
+`runtime_tx_xiao_s3_dht22`, alongside all Heltec applications. Initial XIAO radio bench results
+are recorded in [the board guide](xiao-s3.md); sustained operation, sensor reads,
+USB recovery and battery sleep current still require hardware validation.
