@@ -74,8 +74,10 @@ an arbitrary sensor does not identify or configure it automatically.
 The Stick Lite and XIAO images are installed over USB and excluded from signed/web
 release artifacts. Use the [Stick Lite](docs/stick-lite.md) or
 [XIAO wiring and installation guide](docs/xiao-s3.md); a WiFi LoRa 32 image is not a
-substitute. XIAO has no battery-voltage reading in this profile. Its hardware
-integration has not yet been validated. See [reference applications](docs/radio-applications.md)
+substitute. XIAO has no battery-voltage reading in this profile. Initial DHT22
+readings and delivery through a Heltec receiver have been verified on the bench;
+power consumption and extended operation remain unvalidated.
+See [reference applications](docs/radio-applications.md)
 for DHT22 wiring. Qwiic/STEMMA QT adapters are optional when the same electrical
 connections are made directly.
 

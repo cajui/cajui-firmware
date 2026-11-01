@@ -104,12 +104,24 @@ An initial bench check on 2026-10-31 paired a XIAO DHT22 transmitter with a Helt
 receiver and delivered a packet with an acknowledgment on its first attempt at
 −9 dBm. The receiver forwarded the packet to MQTT. Both climate measurements
 reported sensor errors; the diagnostic driver timed out waiting for the initial
-low pulse to end. This confirms the radio path, not working DHT22 measurements.
+low pulse to end. After replacing the sensor module, eight consecutive packets
+carried valid temperature and humidity readings over approximately 35 minutes,
+at roughly 300-second intervals. This does not establish overnight reliability
+or distinguish a faulty original module from a connection corrected when
+replacing it.
 
-Sensor reads, uninterrupted repeated wake/delivery, USB recovery and current draw
-still need validation before deployment. During this check, reopening native USB
-could restart the transmitter, and USB disappeared in deep sleep. Keep the serial
-connection open during pairing; do not mistake a port reopening for a timer wake.
+SHT4x reads on XIAO, extended uninterrupted wake/delivery, USB recovery and current
+draw still need validation before deployment. During this check, reopening native
+USB could restart the transmitter, and USB disappeared in deep sleep. Keep the
+serial connection open during pairing; do not mistake a port reopening for a
+timer wake.
+
+Before completing the initial hardware validation:
+
+- Verify that power cycling preserves enrollment and resumes delivery.
+- Verify delivery recovery after the receiver becomes temporarily unavailable.
+- Verify a repeatable USB bootloader and update procedure after deep sleep,
+  preserving enrollment.
 
 References:
 

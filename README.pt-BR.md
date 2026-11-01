@@ -75,8 +75,9 @@ qualquer não faz sua identificação ou configuração automática.
 As imagens da Stick Lite e da XIAO são instaladas por USB e não fazem parte dos
 artefatos de release assinados ou do instalador web. Use o guia de ligação da
 [Stick Lite](docs/stick-lite.md) ou da [XIAO](docs/xiao-s3.md); uma imagem da WiFi
-LoRa 32 não as substitui. Este perfil XIAO não mede tensão da bateria, e sua
-integração física ainda não foi validada. Consulte as
+LoRa 32 não as substitui. Este perfil XIAO não mede tensão da bateria. As primeiras
+leituras do DHT22 e a entrega por uma receptora Heltec foram verificadas em bancada;
+consumo e operação prolongada continuam sem validação. Consulte as
 [aplicações de referência](docs/radio-applications.md) para a ligação do DHT22.
 Adaptadores Qwiic/STEMMA QT são opcionais quando as mesmas conexões elétricas
 são feitas diretamente.
