@@ -133,3 +133,16 @@ Linux CI selects Clang/LLVM 18 explicitly for compilation, profile merging and c
 export. Distribution patch updates are still allowed; this is not a bit-reproducible
 toolchain lock. Local overrides are `CC`, `CXX`, `LLVM_PROFDATA` and `LLVM_COV`; use
 matching LLVM tools. macOS defaults use the corresponding Xcode tools through `xcrun`.
+
+## Board power adapters
+
+The Python suite compiles `src/board/power.cpp` and `battery.cpp` against a host
+GPIO fake for all three transmitter boards, including both XIAO sensor targets. It checks sleep/wake pin levels,
+radio-reset fallback, switched sensor power, and that unavailable battery sensing
+does not access any ADC or GPIO. Invalid board/sensor combinations fail to compile.
+These checks do not emulate ESP32 pad retention, RF switching or analog accuracy.
+
+CI also builds and runs board lint for `runtime_tx_xiao_s3` and
+`runtime_tx_xiao_s3_dht22`, alongside all Heltec applications. Initial XIAO radio bench results
+are recorded in [the board guide](xiao-s3.md); sustained operation, sensor reads,
+USB recovery and battery sleep current still require hardware validation.

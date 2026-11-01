@@ -2,13 +2,14 @@
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
 #include "climate.h"
 #include "profile.h"
+#include "power.h"
 #include "common.h"
 #include "display.h"
 #include "sx1262_radio.h"
 #include <Arduino.h>
 #include <driver/gpio.h>
 #include <limits>
-#ifdef CAJUI_BOARD_STICK_LITE
+#ifdef CAJUI_SENSOR_SHT4X
 #include <Wire.h>
 #include "cajui_sht4x.h"
 #else
@@ -17,7 +18,7 @@
 
 namespace board {
 namespace {
-#ifdef CAJUI_BOARD_STICK_LITE
+#ifdef CAJUI_SENSOR_SHT4X
 constexpr uint32_t SupplySettleMs = 100, BusFrequencyHz = 100000;
 constexpr uint16_t BusTimeoutMs = 50;
 bool busStarted = false;
@@ -44,7 +45,7 @@ void floating(uint8_t pin) {
 #endif
 } // namespace
 void climateOff() {
-#ifdef CAJUI_BOARD_STICK_LITE
+#ifdef CAJUI_SENSOR_SHT4X
     if (busStarted) Wire.end();
     busStarted = false;
     floating(SensorSda);
@@ -52,13 +53,13 @@ void climateOff() {
 #else
     pinMode(SensorData, INPUT);
 #endif
-    output(Vext, HIGH);
+    sensorPower(false);
 }
 void readClimate(float& temperature, float& humidity) {
     temperature = humidity = std::numeric_limits<float>::quiet_NaN();
-    output(Vext, LOW);
-#ifdef CAJUI_BOARD_STICK_LITE
-    delay(SupplySettleMs); // Allow the external breakout's supply to settle after Vext rises.
+    sensorPower(true);
+#ifdef CAJUI_SENSOR_SHT4X
+    if (Vext != NoPin) delay(SupplySettleMs); // Allow the switched supply to settle.
     busStarted = Wire.begin(SensorSda, SensorScl, BusFrequencyHz);
     if (busStarted) {
         Wire.setTimeOut(BusTimeoutMs);

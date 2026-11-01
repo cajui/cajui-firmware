@@ -20,6 +20,7 @@
 #include "board/battery.h"
 #include "board/climate.h"
 #include "board/profile.h"
+#include "board/power.h"
 #include "board/common.h"
 #include "board/display.h"
 #include "board/ota.h"
@@ -34,7 +35,6 @@ constexpr uint32_t CpuMhz = 80, MsPerSecond = 1000;
 constexpr uint64_t MicrosPerMs = 1000;
 using namespace board;
 constexpr uint32_t SampleSeconds = 300;
-constexpr uint8_t PairButton = 0; // PRG.
 constexpr uint32_t PairHoldMs = 3000, PairBlinkMs = 100;
 
 class TransmitterApp {
@@ -115,22 +115,20 @@ bool TransmitterApp::pairButtonHeld() {
         if (millis() - start >= PairHoldMs) return true;
     return false;
 }
-void hold(uint8_t pin, uint8_t level) {
-    output(pin, level);
-    gpio_hold_en(gpio_num_t(pin));
-}
 void TransmitterApp::sleepFor(uint32_t ms) {
     // Reset provides a fallback if the radio driver cannot confirm sleep.
-    if (!radio_.sleep()) hold(board::RadioReset, LOW);
+    const bool radioSleeping = radio_.sleep();
     board::climateOff();
-    hold(board::Vext, HIGH);
-    hold(board::Led, LOW);
-    hold(board::RadioCs, HIGH);
-    gpio_deep_sleep_hold_en();
-    // PRG wakes the node so a long press can start radio pairing.
-    rtc_gpio_pullup_en(gpio_num_t(PairButton));
+    board::prepareSleepPins(radioSleeping);
+    // The pairing button wakes the node so a long press can start radio pairing.
     rtc_gpio_pulldown_dis(gpio_num_t(PairButton));
-    esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
+    if (PairButtonExternalPullup) {
+        rtc_gpio_pullup_dis(gpio_num_t(PairButton));
+        esp_sleep_enable_ext1_wakeup(uint64_t(1) << PairButton, ESP_EXT1_WAKEUP_ANY_LOW);
+    } else {
+        rtc_gpio_pullup_en(gpio_num_t(PairButton));
+        esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
+    }
     esp_sleep_enable_timer_wakeup(uint64_t(ms) * MicrosPerMs);
     Serial.println("CJAPP SLEEP");
     Serial.flush();
