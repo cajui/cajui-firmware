@@ -3,6 +3,7 @@
 #include <driver/gpio.h>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include "board/profile.h"
 #include "board/power.h"
 #include "board/battery.h"
@@ -19,7 +20,7 @@ uint32_t adc = 750;
 int batteryIdle = LOW;
 Pin& get(int pin) {
     assert(pin >= 0 && pin < int(pins.size()));
-    auto& result = pins[size_t(pin)];
+    auto& result = pins[static_cast<std::size_t>(pin)];
     result.touched = true;
     ++calls;
     return result;
