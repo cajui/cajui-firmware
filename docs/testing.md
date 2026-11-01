@@ -138,8 +138,10 @@ matching LLVM tools. macOS defaults use the corresponding Xcode tools through `x
 
 The Python suite compiles `src/board/power.cpp` and `battery.cpp` against a host
 GPIO fake for all three transmitter boards, including both XIAO sensor targets. It checks sleep/wake pin levels,
-radio-reset fallback, switched sensor power, and that unavailable battery sensing
-does not access any ADC or GPIO. Invalid board/sensor combinations fail to compile.
+radio-reset fallback, switched sensor power, the pairing-button wake source each board
+needs, and that unavailable battery sensing does not access any ADC or GPIO. A build
+without a board directory, a board profile missing a name and invalid board/sensor
+combinations fail to compile.
 These checks do not emulate ESP32 pad retention, RF switching or analog accuracy.
 
 CI also builds and runs board lint for `runtime_tx_xiao_s3` and
