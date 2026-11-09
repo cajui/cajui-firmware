@@ -37,6 +37,18 @@ field reliability. No production image is released.
 - Experimental XIAO ESP32-S3 + Wio-SX1262 B2B transmitter profile with the shared
   SHT4x or DHT22 driver and explicit sleep-pin handling. See [XIAO](xiao-s3.md).
 
+## Tooling validation (2026-11-09)
+
+- Coverage tooling preserves Python 3.10 with coverage.py 7.16.2 and uses 7.17.0
+  on Python 3.11 or newer. Regression tests keep the runner and requirement locks
+  synchronized; unrelated dependency versions remain unchanged.
+- Local validation passed: full lint, 98 Python tests both with and without coverage
+  on Python 3.10.20 and 3.12.13, and 206 native tests with ASan/UBSan and LLVM coverage.
+  All per-file coverage gates passed. The ESP32 test target compiled without upload
+  or test execution; no physical devices were accessed.
+- Pending: remote CI on the corrected branch. Next step: run CI after an authorized
+  push before merging the dependency update.
+
 ## Pending and unvalidated
 
 This page records implementation status and validation limits for the development
