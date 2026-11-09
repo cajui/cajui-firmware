@@ -19,15 +19,13 @@
 #error Select a climate sensor for the transmitter.
 #endif
 
-// #error does not stop the compiler; the include below then fails as a fatal error, so a
-// build without a board ends with these two messages instead of one per board name used.
-#if !__has_include("board_profile.h")
-#error Add -Isrc/board/boards/<board> to the build_flags of the environment.
-#endif
 namespace board {
 constexpr uint8_t NoPin = 255;
 } // namespace board
-#include "board_profile.h"
+// Without a board directory this include is the single, fatal error, and compilers print this
+// line with it. An #error guarded by __has_include was tried: #error does not stop the build,
+// and after __has_include fails GCC 13 skips the include, so one error per board name followed.
+#include "board_profile.h" // From -Isrc/board/boards/<board> in the build_flags.
 
 namespace board {
 // Every board header defines these names; a missing one fails here, not inside a driver.

@@ -60,7 +60,7 @@ class BoardPowerTests(unittest.TestCase):
     def test_unsupported_profiles_fail_at_build_time(self):
         transmitter = ["CAJUI_RUNTIME_ROLE=1"]
         cases = (
-            (transmitter + ["CAJUI_SENSOR_DHT22"], None, "Add -Isrc/board/boards/<board>"),
+            (transmitter + ["CAJUI_SENSOR_DHT22"], None, "board_profile.h"),
             (transmitter, HELTEC, "Select a climate sensor"),
             (
                 transmitter + ["CAJUI_SENSOR_SHT4X", "CAJUI_SENSOR_DHT22"],

@@ -19,7 +19,8 @@ through interleaved `#ifdef`s.
   pin and capability of that board. The environment puts exactly one directory on the
   include path with `-Isrc/board/boards/<board>`; `profile.h` includes `"board_profile.h"`,
   checks that the full set of names is defined and adds the sensor constants. There is no
-  default board: without the flag the build stops at the profile with an error naming it.
+  default board: without the flag the build stops at the profile with a single fatal error
+  naming `board_profile.h`.
 - A limit of one board, such as the XIAO profile supporting transmitters only, is an
   `#error` in that board's header, not in shared code.
 - Each climate sensor driver is one file under `src/board/sensors/`, selected by
