@@ -19,7 +19,7 @@ TOOLS = {
     "clang-tidy": "clang-tidy==22.1.8",
     "ruff": "ruff==0.16.10",
     "shellcheck": "shellcheck-py==0.10.0.1",
-    "actionlint": "actionlint-py==1.7.7.24",
+    "actionlint": "actionlint-py==1.7.12.25",
 }
 PYTHON = ["tools", "tests_python", "tests_release", "scripts"]
 
