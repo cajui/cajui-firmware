@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+// Pin assignments and hardware capabilities of the selected board, and the climate sensor
+// choice. Each board is a directory under boards/ holding a board_profile.h; the build puts
+// exactly one of them on the include path with -I, so a new board is a new directory and a
+// new environment, with no edit to shared code. The sensor driver is selected separately
+// with CAJUI_SENSOR_*.
+//
+// The board header is reached by a literal include through the include path, not through a
+// macro (#include CAJUI_BOARD_PROFILE): PlatformIO's dependency scanner does not follow
+// macro includes, so editing a pin did not recompile anything until a clean build.
 #pragma once
 #include <cstdint>
 
-#if defined(CAJUI_BOARD_XIAO_S3) && defined(CAJUI_BOARD_STICK_LITE)
-#error Select exactly one board profile.
-#endif
 #if defined(CAJUI_SENSOR_SHT4X) && defined(CAJUI_SENSOR_DHT22)
 #error Select exactly one climate sensor.
 #endif
@@ -12,40 +18,25 @@
     !defined(CAJUI_SENSOR_DHT22)
 #error Select a climate sensor for the transmitter.
 #endif
-#if defined(CAJUI_BOARD_XIAO_S3) && CAJUI_RUNTIME_ROLE != 1
-#error The XIAO ESP32-S3 profile currently supports transmitters only.
-#endif
 
 namespace board {
 constexpr uint8_t NoPin = 255;
-#ifdef CAJUI_BOARD_XIAO_S3
-constexpr const char* BoardName = "xiao_esp32s3_wio_sx1262";
-constexpr uint8_t Vext = NoPin, Led = 48;
-constexpr uint8_t RadioCs = 41, RadioClock = 7, RadioMiso = 8, RadioMosi = 9;
-constexpr uint8_t RadioReset = 42, RadioBusy = 40, RadioDio = 39, RadioRfSwitch = 38;
-constexpr uint8_t PairButton = 21;
-constexpr bool PairButtonExternalPullup = true, HasDisplay = false, HasBatterySense = false;
-constexpr uint8_t BatterySense = NoPin, BatteryControl = NoPin;
-constexpr uint8_t SensorSda = 5, SensorScl = 6, SensorData = 1;
-#else
-constexpr uint8_t Vext = 36, Led = 35;
-constexpr uint8_t RadioCs = 8, RadioClock = 9, RadioMiso = 11, RadioMosi = 10;
-constexpr uint8_t RadioReset = 12, RadioBusy = 13, RadioDio = 14, RadioRfSwitch = NoPin;
-constexpr uint8_t PairButton = 0;
-constexpr bool PairButtonExternalPullup = false, HasBatterySense = true;
-constexpr uint8_t BatterySense = 1, BatteryControl = 37;
-// The WSL V3 and WiFi LoRa 32 V3 share the ESP32-S3FN8 and SX1262 wiring.
-// Sensor wiring and display presence differ; never drive OLED reset on the WSL.
-#ifdef CAJUI_BOARD_STICK_LITE
-constexpr bool HasDisplay = false;
-constexpr uint8_t SensorSda = 33, SensorScl = 34, SensorData = NoPin;
-constexpr const char* BoardName = "heltec_wireless_stick_lite_v3";
-#else
-constexpr uint8_t SensorData = 47, SensorSda = NoPin, SensorScl = NoPin;
-constexpr bool HasDisplay = true;
-constexpr const char* BoardName = "heltec_wifi_lora_32_v3";
-#endif
-#endif
+} // namespace board
+// Without a board directory this include is the single, fatal error, and compilers print this
+// line with it. An #error guarded by __has_include was tried: #error does not stop the build,
+// and after __has_include fails GCC 13 skips the include, so one error per board name followed.
+#include "board_profile.h" // From -Isrc/board/boards/<board> in the build_flags.
+
+namespace board {
+// Every board header defines these names; a missing one fails here, not inside a driver.
+namespace contract {
+constexpr uint8_t Pins[] = {Vext,       Led,          RadioCs,        RadioClock, RadioMiso,
+                            RadioMosi,  RadioReset,   RadioBusy,      RadioDio,   RadioRfSwitch,
+                            PairButton, BatterySense, BatteryControl, SensorSda,  SensorScl,
+                            SensorData, OledSda,      OledScl,        OledReset};
+constexpr bool Flags[] = {PairButtonExternalPullup, HasDisplay, HasBatterySense};
+static_assert(BoardName[0] != '\0', "A board profile needs a name");
+} // namespace contract
 constexpr float TcxoVoltage = 1.8f;
 constexpr uint8_t SensorAddress = 0x44;
 #ifdef CAJUI_SENSOR_SHT4X
