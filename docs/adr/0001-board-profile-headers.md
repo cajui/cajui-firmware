@@ -19,7 +19,7 @@ through interleaved `#ifdef`s.
   pin and capability of that board. The environment puts exactly one directory on the
   include path with `-Isrc/board/boards/<board>`; `profile.h` includes `"board_profile.h"`,
   checks that the full set of names is defined and adds the sensor constants. There is no
-  default board: without the flag the build stops with one error naming it.
+  default board: without the flag the build stops at the profile with an error naming it.
 - A limit of one board, such as the XIAO profile supporting transmitters only, is an
   `#error` in that board's header, not in shared code.
 - Each climate sensor driver is one file under `src/board/sensors/`, selected by
@@ -27,8 +27,9 @@ through interleaved `#ifdef`s.
 - Decisions that depend on a board capability stay in `src/board/`: `power.cpp` sets up and
   releases the pairing-button wake source. The applications use the profile's named pins
   but never branch on the board.
-- A new board is a directory, a `platformio.ini` environment, an entry in
-  `scripts/lint_board.py` and a case in `tests_python/test_board_power.py`.
+- A new board is a directory, a `platformio.ini` environment, an entry in the CI build
+  (`.github/workflows/ci.yml`) and in `scripts/lint_board.py`, and a case in
+  `tests_python/test_board_power.py`.
 
 ## Alternatives
 

@@ -90,7 +90,8 @@ applications use the profile's named pins but never branch on the board, and `li
 does not depend on it. Protocol, enrollment and telemetry remain shared.
 
 To add a board: create its directory and `board_profile.h`, add an environment with its
-`-I` flag, list the environment in `scripts/lint_board.py` and add its case to
+`-I` flag, add the environment to the `pio run` line of the esp32-build job in
+`.github/workflows/ci.yml` and to `scripts/lint_board.py`, and add its case to
 `tests_python/test_board_power.py`.
 A board that cannot fill a role says so with `#error` in its own header, as the XIAO
 profile does for the receiver. Unsupported sensor pin assignments are rejected at
