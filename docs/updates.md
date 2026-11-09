@@ -1,8 +1,14 @@
 # Firmware updates
 
-Two ways to install firmware: over USB from the web installer (any board, new or updated),
-and a signed update file installed from the receiver's setup page (no computer needed).
-Both keep the `cajui` storage partition: enrollment, counters and queued samples survive.
+Released Heltec WiFi LoRa 32 V3 images support installation over USB from the web
+installer and signed receiver updates from the setup page. The Stick Lite target
+requires a source build and USB installation; it is not included in those release
+artifacts. See [Stick Lite](stick-lite.md) and [source installation](provisioning.md#build-and-install).
+
+Updates preserve the `cajui` storage partition containing enrollment, counters and
+queued samples. The separate new-board procedure initializes that partition and
+must not be used on an enrolled device. Check the release notes: a published image
+can predate the features described on the development branch.
 
 ## Partition layout
 
