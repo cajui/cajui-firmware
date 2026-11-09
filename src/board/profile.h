@@ -19,9 +19,11 @@
 #error Select a climate sensor for the transmitter.
 #endif
 
+// #error does not stop the compiler; the include below then fails as a fatal error, so a
+// build without a board ends with these two messages instead of one per board name used.
 #if !__has_include("board_profile.h")
 #error Add -Isrc/board/boards/<board> to the build_flags of the environment.
-#else
+#endif
 namespace board {
 constexpr uint8_t NoPin = 255;
 } // namespace board
@@ -47,4 +49,3 @@ static_assert(SensorData != NoPin, "DHT22 requires a data pin");
 constexpr const char* SensorName = "dht22";
 #endif
 } // namespace board
-#endif

@@ -36,14 +36,10 @@ class BoardPowerTests(unittest.TestCase):
         if lifecycle:
             command += [*[str(path) for path in sources], "-o", str(output)]
             return subprocess.run(command, capture_output=True, text=True, check=False)
-        command += ["-fsyntax-only", "-x", "c++", "-"]
-        return subprocess.run(
-            command,
-            input='#include "board/profile.h"\n',
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        # A file that uses the board names, so a profile that is missing or incomplete shows
+        # whether the build stops at profile.h or reports every name a driver uses.
+        command += ["-fsyntax-only", str(ROOT / "src/board/power.cpp")]
+        return subprocess.run(command, capture_output=True, text=True, check=False)
 
     def test_sleep_wake_and_battery_access_for_each_transmitter(self):
         for board, sensor in (
@@ -81,6 +77,6 @@ class BoardPowerTests(unittest.TestCase):
                 result = self.compile(None, definitions, board, lifecycle=False)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
-                # One clear error: a missing profile stops before the board names are used.
+                # A missing profile stops at profile.h, before power.cpp uses any board name.
                 if board is None:
-                    self.assertNotIn("undeclared", result.stderr)
+                    self.assertNotIn("Vext", result.stderr)

@@ -3,7 +3,6 @@
 // Transmitter image: wakes, reads its climate sensor, delivers one sample and sleeps; or pairs by
 // radio when its button is held. See docs/radio-applications.md.
 #include <Arduino.h>
-#include <driver/gpio.h>
 #include <esp_random.h>
 #include <esp_attr.h>
 #include <esp_sleep.h>
