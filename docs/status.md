@@ -34,11 +34,17 @@ field reliability. No production image is released.
   X25519/HKDF key exchange; the transmitter joins after a long PRG press or `CJ1 PAIR`.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
+- Experimental XIAO ESP32-S3 + Wio-SX1262 B2B transmitter profile with the shared
+  SHT4x or DHT22 driver and explicit sleep-pin handling. See [XIAO](xiao-s3.md).
+
 ## Pending and unvalidated
 
 This page records implementation status and validation limits for the development
 branch. Released images may have an earlier feature set.
 
+- XIAO has passed initial pairing and acknowledged delivery to Heltec, but sensor
+  integration and sleep current remain unvalidated. Battery voltage is unknown; low-battery scheduling cannot
+  act on it. This profile is USB-only and excluded from signed releases.
 - Battery thresholds and the divider correction are provisional until checked with a real
   LiPo 1S; on USB without a battery the bench board read the charger's 4.2–4.3 V.
 - Without uplink settings, or while the broker is unreachable,

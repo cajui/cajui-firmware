@@ -2,7 +2,7 @@
 
 English | [Português brasileiro](README.pt-BR.md)
 
-**Firmware for Heltec ESP32/SX1262 boards: one code base turns a board into a
+**Firmware for supported ESP32/SX1262 boards: one code base turns a board into a
 battery-powered sensor transmitter or into the receiver that delivers the
 measurements over MQTT.**
 
@@ -50,7 +50,7 @@ before choosing it for an installation.
 - Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
   removes each sample after the broker acknowledges it. A full queue drops the oldest sample.
 - Offers a receiver setup page for Wi-Fi, broker configuration, pairing and revocation.
-- Reports battery voltage and radio signal alongside measurements, and publishes
+- Reports battery voltage where supported and radio signal alongside measurements, and publishes
   MQTT Discovery definitions for Home Assistant.
 
 A radio acknowledgement confirms receiver acceptance. An MQTT acknowledgement
@@ -65,13 +65,19 @@ retries, queue limits and failures.
 | Heltec WiFi LoRa 32 V3 | Receiver | Receives enrolled transmitters | `runtime_rx` |
 | Heltec WiFi LoRa 32 V3 | Transmitter | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmitter | SHT4x over I2C | `runtime_tx_stick_lite` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmitter | SHT4x over I2C | `runtime_tx_xiao_s3` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmitter | DHT22/AM2302 | `runtime_tx_xiao_s3_dht22` |
 
 Adding another sensor model requires driver and application support; plugging in
 an arbitrary sensor does not identify or configure it automatically.
 
-The Stick Lite image is installed over USB and is excluded from signed/web release
-artifacts. Use its [wiring and installation guide](docs/stick-lite.md); a WiFi LoRa
-32 image is not a substitute. See [reference applications](docs/radio-applications.md)
+The Stick Lite and XIAO images are installed over USB and excluded from signed/web
+release artifacts. Use the [Stick Lite](docs/stick-lite.md) or
+[XIAO wiring and installation guide](docs/xiao-s3.md); a WiFi LoRa 32 image is not a
+substitute. XIAO has no battery-voltage reading in this profile. Initial DHT22
+readings and delivery through a Heltec receiver have been verified on the bench;
+power consumption and extended operation remain unvalidated.
+See [reference applications](docs/radio-applications.md)
 for DHT22 wiring. Qwiic/STEMMA QT adapters are optional when the same electrical
 connections are made directly.
 
@@ -89,13 +95,13 @@ the receiver sends acknowledgements.
    Use the build command below and [USB installation](docs/provisioning.md#build-and-install),
    with the storage precautions in [installation and updates](docs/updates.md). Read the release notes when
    using a published image; it can be older than the development code described here.
-   The Stick Lite target requires a source build and USB installation.
+   The Stick Lite and XIAO targets require a source build and USB installation.
 3. **Configure the receiver.** Hold PRG for three seconds, join its temporary Wi-Fi
    network, and open `http://192.168.4.1`. Save your Wi-Fi settings, then enter the
    broker address and dedicated producer credentials. Check both connection states.
 4. **Pair the transmitter.** Open a pairing window on the receiver and hold PRG on
-   the transmitter for three seconds to request joining. Approve the candidate as
-   described in [radio pairing](docs/radio-pairing.md). [USB enrollment](docs/provisioning.md)
+   the transmitter for three seconds to request joining (use the Wio button on XIAO).
+   Approve the candidate as described in [radio pairing](docs/radio-pairing.md). [USB enrollment](docs/provisioning.md)
    is also available.
 5. **Verify the first reading.** Check radio acceptance, then the measurement in
    your application. The normal transmitter cycle is five minutes; low-battery
@@ -111,7 +117,9 @@ uvx --from platformio==6.2.0 pio run -e runtime_rx -e runtime_tx_stick_lite
 ```
 
 Use `-e runtime_tx` instead of `-e runtime_tx_stick_lite` for a WiFi LoRa 32 V3
-transmitter with DHT22. Building does not install firmware. Initial installation
+transmitter with DHT22. For XIAO, use `-e runtime_tx_xiao_s3` with SHT4x
+or `-e runtime_tx_xiao_s3_dht22` with DHT22.
+Building does not install firmware. Initial installation
 and updates have different storage requirements: preserve enrollment and counters
 when updating an enrolled device. Do not erase its storage to troubleshoot it.
 
@@ -137,7 +145,7 @@ installation against Home Assistant still needs integration validation.
 | Task | Guide |
 | --- | --- |
 | Understand the complete system | [Cajuí documentation](https://github.com/cajui/docs) |
-| Wire sensors and understand board behavior | [Radio applications](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) |
+| Wire sensors and understand board behavior | [Radio applications](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22](docs/xiao-s3.md) |
 | Enroll, recover or revoke a transmitter | [USB administration](docs/provisioning.md) · [Radio pairing](docs/radio-pairing.md) |
 | Install and update firmware | [Updates and storage precautions](docs/updates.md) |
 | Use Home Assistant or MQTT management | [Home Assistant](docs/home-assistant.md) · [Management contract](docs/management-v1.md) |

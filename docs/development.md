@@ -60,6 +60,8 @@ lib/CajuiSetup/src/       Setup page rendering, session checks and field validat
 lib/CajuiDevice/src/      Boot-mode, fault-retry and transmit-power decisions
 lib/CajuiFirmware/src/    Signed firmware update verification
 src/                     Transmitter and receiver applications and board adapters
+src/board/boards/        One directory per board with its board_profile.h: pins and capabilities
+src/board/sensors/       One driver per climate sensor
 tools/                   USB enrollment client and firmware packaging
 site/                    Web installer page, published by the release workflow
 scripts/                 Native build configuration and test runner
@@ -73,3 +75,25 @@ docs/                    Protocol contract, testing and integration roadmap
 
 [Cajuí Central](https://github.com/cajui/cajui-central) is the separate monitoring
 application. The receiver publishes to the MQTT broker that Central consumes.
+
+## Board, role and sensor selection
+
+`platformio.ini` selects the application role (`CAJUI_RUNTIME_ROLE`), the board and
+the sensor driver independently. Each board is a directory under `src/board/boards/`
+holding a `board_profile.h` with its pins and capabilities; the environment puts that
+directory on the include path (`-Isrc/board/boards/<board>`), and `src/board/profile.h`
+includes it, checks that the full set of names is defined and adds the sensor
+constants. `CAJUI_SENSOR_*` picks one driver file under `src/board/sensors/`. Decisions
+that depend on a capability stay in `src/board/` (`power.cpp` prepares the pins at
+startup and sleep and sets up and releases the pairing-button wake source). The
+applications use the profile's named pins but never branch on the board, and `lib/`
+does not depend on it. Protocol, enrollment and telemetry remain shared.
+
+To add a board: create its directory and `board_profile.h`, add an environment with its
+`-I` flag, add the environment to the `pio run` line of the esp32-build job in
+`.github/workflows/ci.yml` and to `scripts/lint_board.py`, and add its case to
+`tests_python/test_board_power.py`.
+A board that cannot fill a role says so with `#error` in its own header, as the XIAO
+profile does for the receiver. Unsupported sensor pin assignments are rejected at
+compile time. See [ADR 0001](adr/0001-board-profile-headers.md) for the rationale and
+[XIAO](xiao-s3.md) for the B2B transmitter profile.

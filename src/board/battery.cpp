@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
 #include "battery.h"
+#include "profile.h"
 #include <Arduino.h>
 #include <cmath>
 
@@ -11,13 +12,13 @@ namespace {
 // differs between board revisions; like Meshtastic (src/Power.cpp, variants/heltec_v3), the
 // line's idle level, set by its external resistor, is read and the opposite driven, then the
 // line returns to high impedance. The 1.045 correction is Meshtastic's, not measured here.
-constexpr uint8_t BatterySense = 1, BatteryControl = 37;
 constexpr float Divider = 4.9f * 1.045f;
 constexpr int Samples = 16;
 constexpr uint32_t SettleMs = 10;
 constexpr float MinCellMv = 2500, MaxCellMv = 4500;
 }
 uint16_t readBatteryMv() {
+    if (!HasBatterySense) return 0;
     pinMode(BatteryControl, INPUT);
     const int idle = digitalRead(BatteryControl);
     pinMode(BatteryControl, OUTPUT);

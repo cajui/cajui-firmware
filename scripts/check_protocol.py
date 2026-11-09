@@ -179,7 +179,16 @@ def check_native_coverage(export, expected=GATED_FILES, branchless=BRANCHLESS_FI
 
 
 def lint():
-    sources = tracked("lib/*.cpp", "lib/*.h", "src/*.cpp", "test/*.cpp", "test/*.h")
+    sources = tracked(
+        "lib/*.cpp",
+        "lib/*.h",
+        "src/*.cpp",
+        "src/*.h",
+        "test/*.cpp",
+        "test/*.h",
+        "tests_python/fixtures/*.cpp",
+        "tests_python/fixtures/*.h",
+    )
     run(tool("clang-format") + ["--dry-run", "--Werror"] + sources)
     run(tool("ruff") + ["format", "--check"] + PYTHON)
     run(tool("ruff") + ["check"] + PYTHON)

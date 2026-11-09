@@ -50,7 +50,7 @@ jobs:
       - name: Compile tests with the ESP32 crypto backend (no upload)
         run: pio test -e protocol_esp32 --without-uploading --without-testing
       - name: Compile experimental radio applications (no upload)
-        run: pio run -e runtime_tx -e runtime_rx -e runtime_tx_stick_lite
+        run: pio run -e runtime_tx -e runtime_rx -e runtime_tx_stick_lite -e runtime_tx_xiao_s3 -e runtime_tx_xiao_s3_dht22
       - run: python -m pip install --require-hashes -r .github/requirements/release.txt
       - name: Release assembly and signing with a disposable key (no upload)
         run: python -m unittest discover -s tests_release -v
