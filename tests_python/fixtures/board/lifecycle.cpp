@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Arduino.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
+#include <esp_sleep.h>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -12,12 +14,16 @@ namespace {
 struct Pin {
     int mode = INPUT, level = LOW, physical = LOW;
     bool held = false, touched = false;
+    int rtcPullup = -1, rtcPulldown = -1; // -1 untouched, 0 disabled, 1 enabled.
+    bool rtc = false;                     // Routed to the RTC domain for wake.
 };
 std::array<Pin, 49> pins;
 unsigned calls = 0;
 bool sleeping = false;
 uint32_t adc = 750;
 int batteryIdle = LOW;
+int ext0Pin = -1, ext0Level = -1, ext1Mode = -1;
+uint64_t ext1Mask = 0;
 Pin& get(int pin) {
     assert(pin >= 0 && pin < int(pins.size()));
     auto& result = pins[static_cast<std::size_t>(pin)];
@@ -68,6 +74,36 @@ void gpio_deep_sleep_hold_en() {
 void gpio_deep_sleep_hold_dis() {
     sleeping = false;
 }
+esp_err_t rtc_gpio_pulldown_dis(gpio_num_t pin) {
+    get(pin).rtcPulldown = 0;
+    return 0;
+}
+esp_err_t rtc_gpio_pullup_dis(gpio_num_t pin) {
+    auto& state = get(pin);
+    state.rtcPullup = 0;
+    state.rtc = true;
+    return 0;
+}
+esp_err_t rtc_gpio_pullup_en(gpio_num_t pin) {
+    auto& state = get(pin);
+    state.rtcPullup = 1;
+    state.rtc = true;
+    return 0;
+}
+esp_err_t rtc_gpio_deinit(gpio_num_t pin) {
+    get(pin).rtc = false;
+    return 0;
+}
+esp_err_t esp_sleep_enable_ext0_wakeup(gpio_num_t pin, int level) {
+    ext0Pin = pin;
+    ext0Level = level;
+    return 0;
+}
+esp_err_t esp_sleep_enable_ext1_wakeup(uint64_t mask, esp_sleep_ext1_wakeup_mode_t mode) {
+    ext1Mask = mask;
+    ext1Mode = mode;
+    return 0;
+}
 
 int main() {
     board::initializePowerPins();
@@ -108,4 +144,20 @@ int main() {
         adc = 1000;
         assert(board::readBatteryMv() == 0);
     }
+    // The wake source follows the button's pull-up: an external one uses the EXT1 mask with
+    // the internal pull-up off; otherwise EXT0 on a low level with the internal pull-up on.
+    board::enablePairButtonWake();
+    const auto& button = pins[board::PairButton];
+    assert(button.rtcPulldown == 0);
+    if (board::PairButtonExternalPullup) {
+        assert(button.rtcPullup == 0 && ext0Pin == -1);
+        assert(ext1Mask == (uint64_t(1) << board::PairButton) &&
+               ext1Mode == ESP_EXT1_WAKEUP_ANY_LOW);
+    } else {
+        assert(button.rtcPullup == 1 && ext1Mask == 0);
+        assert(ext0Pin == board::PairButton && ext0Level == 0);
+    }
+    assert(button.rtc);
+    board::releasePairButtonWake();
+    assert(!pins[board::PairButton].rtc);
 }

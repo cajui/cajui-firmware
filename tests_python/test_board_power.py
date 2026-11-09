@@ -8,10 +8,15 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests_python/fixtures/board"
+BOARDS = ROOT / "src/board/boards"
+HELTEC = BOARDS / "heltec_wifi_lora_32_v3"
+STICK_LITE = BOARDS / "heltec_wireless_stick_lite_v3"
+XIAO = BOARDS / "xiao_esp32s3_wio_sx1262"
+INCOMPLETE = FIXTURES / "incomplete_profile"
 
 
 class BoardPowerTests(unittest.TestCase):
-    def compile(self, output, definitions, *, lifecycle=True):
+    def compile(self, output, definitions, board=None, *, lifecycle=True):
         sources = [
             ROOT / "src/board/power.cpp",
             ROOT / "src/board/battery.cpp",
@@ -25,66 +30,53 @@ class BoardPowerTests(unittest.TestCase):
             "-Werror",
             f"-I{FIXTURES}",
             f"-I{ROOT / 'src'}",
+            *([f"-I{board}"] if board else []),
             *[f"-D{definition}" for definition in definitions],
         ]
         if lifecycle:
             command += [*[str(path) for path in sources], "-o", str(output)]
             return subprocess.run(command, capture_output=True, text=True, check=False)
-        command += ["-fsyntax-only", "-x", "c++", "-"]
-        return subprocess.run(
-            command,
-            input='#include "board/profile.h"\n',
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        # A file that uses the board names, so a profile that is missing or incomplete shows
+        # whether the build stops at profile.h or reports every name a driver uses.
+        command += ["-fsyntax-only", str(ROOT / "src/board/power.cpp")]
+        return subprocess.run(command, capture_output=True, text=True, check=False)
 
     def test_sleep_wake_and_battery_access_for_each_transmitter(self):
         for board, sensor in (
-            (None, "CAJUI_SENSOR_DHT22"),
-            ("CAJUI_BOARD_STICK_LITE", "CAJUI_SENSOR_SHT4X"),
-            ("CAJUI_BOARD_XIAO_S3", "CAJUI_SENSOR_SHT4X"),
-            ("CAJUI_BOARD_XIAO_S3", "CAJUI_SENSOR_DHT22"),
+            (HELTEC, "CAJUI_SENSOR_DHT22"),
+            (STICK_LITE, "CAJUI_SENSOR_SHT4X"),
+            (XIAO, "CAJUI_SENSOR_SHT4X"),
+            (XIAO, "CAJUI_SENSOR_DHT22"),
         ):
             with (
-                self.subTest(board=board, sensor=sensor),
+                self.subTest(board=board.name, sensor=sensor),
                 tempfile.TemporaryDirectory() as directory,
             ):
                 output = Path(directory) / "lifecycle"
-                definitions = ["CAJUI_RUNTIME_ROLE=1", sensor]
-                if board:
-                    definitions.append(board)
-                result = self.compile(output, definitions)
+                result = self.compile(output, ["CAJUI_RUNTIME_ROLE=1", sensor], board)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 subprocess.run([str(output)], check=True)
 
     def test_unsupported_profiles_fail_at_build_time(self):
+        transmitter = ["CAJUI_RUNTIME_ROLE=1"]
         cases = (
-            (["CAJUI_RUNTIME_ROLE=1"], "Select a climate sensor"),
+            (transmitter + ["CAJUI_SENSOR_DHT22"], None, "board_profile.h"),
+            (transmitter, HELTEC, "Select a climate sensor"),
             (
-                ["CAJUI_RUNTIME_ROLE=2", "CAJUI_BOARD_XIAO_S3"],
-                "supports transmitters only",
+                transmitter + ["CAJUI_SENSOR_SHT4X", "CAJUI_SENSOR_DHT22"],
+                HELTEC,
+                "Select exactly one climate sensor",
             ),
-            (
-                ["CAJUI_RUNTIME_ROLE=1", "CAJUI_SENSOR_SHT4X"],
-                "SHT4x requires I2C pins",
-            ),
-            (
-                ["CAJUI_RUNTIME_ROLE=1", "CAJUI_BOARD_STICK_LITE", "CAJUI_SENSOR_DHT22"],
-                "DHT22 requires a data pin",
-            ),
-            (
-                [
-                    "CAJUI_RUNTIME_ROLE=1",
-                    "CAJUI_BOARD_XIAO_S3",
-                    "CAJUI_BOARD_STICK_LITE",
-                    "CAJUI_SENSOR_SHT4X",
-                ],
-                "Select exactly one board",
-            ),
+            (["CAJUI_RUNTIME_ROLE=2"], XIAO, "supports transmitters only"),
+            (transmitter + ["CAJUI_SENSOR_SHT4X"], HELTEC, "SHT4x requires I2C pins"),
+            (transmitter + ["CAJUI_SENSOR_DHT22"], STICK_LITE, "DHT22 requires a data pin"),
+            (transmitter + ["CAJUI_SENSOR_SHT4X"], INCOMPLETE, "OledSda"),
         )
-        for definitions, message in cases:
-            with self.subTest(definitions=definitions):
-                result = self.compile(None, definitions, lifecycle=False)
+        for definitions, board, message in cases:
+            with self.subTest(definitions=definitions, board=board and board.name):
+                result = self.compile(None, definitions, board, lifecycle=False)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
+                # A missing profile stops at profile.h, before power.cpp uses any board name.
+                if board is None:
+                    self.assertNotIn("Vext", result.stderr)
