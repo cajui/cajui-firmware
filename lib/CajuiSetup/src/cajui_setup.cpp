@@ -342,7 +342,7 @@ void SetupSession::open(uint32_t now, const uint8_t (&random)[TokenBytes]) {
     static const char digits[] = "0123456789abcdef";
     constexpr uint8_t Nibble = 0xf;
     for (size_t i = 0; i < TokenBytes; ++i) {
-        token_[2 * i] = digits[random[i] >> 4];
+        token_[2 * i] = digits[random[i] >> 4u];
         token_[2 * i + 1] = digits[random[i] & Nibble];
     }
     token_[2 * TokenBytes] = 0;
@@ -364,7 +364,8 @@ bool SetupSession::validToken(const char* candidate) const {
     if (!active_ || !candidate) return false;
     uint8_t difference = 0;
     size_t i = 0;
-    for (; i < 2 * TokenBytes && candidate[i]; ++i) difference |= uint8_t(candidate[i] ^ token_[i]);
+    for (; i < 2 * TokenBytes && candidate[i]; ++i)
+        difference |= uint8_t(uint8_t(candidate[i]) ^ uint8_t(token_[i]));
     return i == 2 * TokenBytes && !candidate[i] && !difference;
 }
 bool allowedHost(const char* host, const char* address) {

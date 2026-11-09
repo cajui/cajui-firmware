@@ -20,7 +20,7 @@ struct Reader {
     const uint8_t* p;
     uint64_t number(size_t size) {
         uint64_t n = 0;
-        while (size--) n = (n << 8) | *p++;
+        while (size--) n = (n << 8u) | *p++;
         return n;
     }
     void block(uint8_t* dst, size_t size) {

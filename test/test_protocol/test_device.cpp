@@ -86,7 +86,7 @@ void test_power_record_round_trips_and_fails_closed() {
     for (size_t i = 0; i < RadioRecordSize; ++i) {
         SCENARIO(i);
         MemoryBlob damaged = blob;
-        damaged.bytes[i] ^= 0x40;
+        damaged.bytes[i] ^= 0x40u;
         EXPECT_RESULT(ReadResult::Error, loadPower(damaged, dbm));
         TEST_ASSERT_EQUAL_INT8(DefaultPowerDbm, dbm);
     }
@@ -95,10 +95,10 @@ void test_power_record_round_trips_and_fails_closed() {
     uint32_t crc = UINT32_MAX;
     for (size_t i = 0; i < 3; ++i) {
         crc ^= outOfRange.bytes[i];
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1u) ^ ((crc & 1u) ? 0xedb88320u : 0);
     }
     crc = ~crc;
-    for (int i = 0; i < 4; ++i) outOfRange.bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
+    for (unsigned i = 0; i < 4; ++i) outOfRange.bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
     EXPECT_RESULT(ReadResult::Error, loadPower(outOfRange, dbm));
     blob.size = RadioRecordSize - 1;
     EXPECT_RESULT(ReadResult::Error, loadPower(blob, dbm));

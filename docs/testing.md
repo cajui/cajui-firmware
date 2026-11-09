@@ -21,7 +21,7 @@ CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 pio test -e protocol_esp32 --without-uploading --without-testing
 ```
 
-`--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
+`--lint` runs clang-format, clang-tidy 23.1.4 and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
 record offsets are deliberate literals. `src/` is analyzed separately after the ESP32 builds, using their Arduino headers
 and compiler flags (see Board lint below).
@@ -122,7 +122,7 @@ It needs a clang with libFuzzer (Apple's has none) and OpenSSL; CI uses clang++-
 
 ## Tool and coverage policy
 
-`--lint` runs ShellCheck 0.10.0 and actionlint 1.7.7 through pinned PyPI wrappers,
+`--lint` runs ShellCheck 0.11.0 and actionlint 1.7.7 through pinned PyPI wrappers,
 using `uvx` locally and hash-locked requirements in CI. ShellCheck is also available
 to actionlint for checking embedded workflow scripts. All lint tools follow the
 same installation path; separate Homebrew packages are not required.

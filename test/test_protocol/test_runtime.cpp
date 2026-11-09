@@ -272,7 +272,7 @@ void test_runtime_bad_acks_do_not_extend_the_window() {
     r.radio.rx = ReceiveStatus::Received;
     const Frame good = ackFor(r.radio.sent[0]);
     r.radio.incoming = good;
-    r.radio.incoming.bytes[50] ^= 1;
+    r.radio.incoming.bytes[50] ^= 1u;
     r.controller.poll();
     r.radio.incoming = r.radio.sent[0];
     r.controller.poll(); // Authenticated DATA is not ACK.

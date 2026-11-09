@@ -28,7 +28,7 @@ bool parseNode(const char* text, uint64_t& node) {
         const char c = text[i];
         const int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
         if (digit < 0) return false;
-        value = value << 4 | uint64_t(digit);
+        value = value << 4u | uint64_t(digit);
     }
     node = value;
     return true;

@@ -46,8 +46,16 @@ field reliability. No production image is released.
   on Python 3.10.20 and 3.12.13, and 206 native tests with ASan/UBSan and LLVM coverage.
   All per-file coverage gates passed. The ESP32 test target compiled without upload
   or test execution; no physical devices were accessed.
-- Pending: remote CI on the corrected branch. Next step: run CI after an authorized
-  push before merging the dependency update.
+- Integration with main `1e741ac` passed local lint with clang-tidy 23.1.4 and
+  ShellCheck 0.11.0, 99 Python tests with coverage on both interpreters, and 206 native
+  tests with sanitizers and all per-file coverage gates. The ESP32 protocol target
+  and all five runtime profiles compiled; board lint passed for all five profiles.
+  Builds did not upload firmware or execute tests on devices.
+- Remote CI passed on correction `da343aa`: lint, native coverage, Python 3.10,
+  fuzzing and ESP32 builds, including real release-image assembly. See
+  [the CI run](https://github.com/cajui/cajui-firmware/actions/runs/42669406004).
+  These checks do not publish releases or validate physical devices; the hardware
+  milestones below remain unchanged.
 
 ## Pending and unvalidated
 
