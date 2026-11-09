@@ -1,5 +1,5 @@
-actionlint-py==1.7.7.24 \
-    --hash=sha256:9e3858630eefcc93489f9dc98b2d081c0789e61a7af73eb89e5266b096fef950
+actionlint-py==1.7.12.25 \
+    --hash=sha256:83f83be4cd317c79b15cbb7022787513a6994f00bfb2dd8da02fa4e62b4f640d
     # via -r .github/requirements/lint.in
 ajsonrpc==1.2.0 \
     --hash=sha256:0fa2c1cf8e619d18ffee96043822032d6520eda65d3b712f9540a3a63e9cac25 \
