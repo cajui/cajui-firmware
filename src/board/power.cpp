@@ -4,6 +4,8 @@
 #include "profile.h"
 #include <Arduino.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
+#include <esp_sleep.h>
 
 namespace board {
 namespace {
@@ -42,6 +44,19 @@ void prepareSleepPins(bool radioSleeping) {
     hold(RadioCs, HIGH);
     hold(RadioRfSwitch, LOW);
     gpio_deep_sleep_hold_en();
+}
+void enablePairButtonWake() {
+    rtc_gpio_pulldown_dis(gpio_num_t(PairButton));
+    if (PairButtonExternalPullup) {
+        rtc_gpio_pullup_dis(gpio_num_t(PairButton));
+        esp_sleep_enable_ext1_wakeup(uint64_t(1) << PairButton, ESP_EXT1_WAKEUP_ANY_LOW);
+    } else {
+        rtc_gpio_pullup_en(gpio_num_t(PairButton));
+        esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
+    }
+}
+void releasePairButtonWake() {
+    rtc_gpio_deinit(gpio_num_t(PairButton));
 }
 } // namespace board
 #endif
