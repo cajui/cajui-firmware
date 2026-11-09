@@ -198,7 +198,7 @@ void Sx1262Radio::handleInterrupt() {
     timestamp = irqAt_;
     portEXIT_CRITICAL(&irqLock_);
     const auto irq = radio_.getIrqFlags();
-    if (mode_ == Mode::Tx && (irq & RADIOLIB_SX126X_IRQ_TX_DONE)) {
+    if (mode_ == Mode::Tx && (irq & unsigned(RADIOLIB_SX126X_IRQ_TX_DONE))) {
         completedAt_ = timestamp;
         if (radio_.finishTransmit() != RADIOLIB_ERR_NONE ||
             radio_.startReceive() != RADIOLIB_ERR_NONE) {
@@ -208,8 +208,8 @@ void Sx1262Radio::handleInterrupt() {
         // Publish completion only after RX is armed; no dependency on application polling.
         mode_ = Mode::Rx;
         tx_ = cajui::TransmitStatus::Complete;
-    } else if (mode_ == Mode::Cad &&
-               (irq & (RADIOLIB_SX126X_IRQ_CAD_DONE | RADIOLIB_SX126X_IRQ_CAD_DETECTED))) {
+    } else if (mode_ == Mode::Cad && (irq & (unsigned(RADIOLIB_SX126X_IRQ_CAD_DONE) |
+                                             unsigned(RADIOLIB_SX126X_IRQ_CAD_DETECTED)))) {
         const auto result = radio_.getChannelScanResult();
         cad_ = result == RADIOLIB_CHANNEL_FREE    ? cajui::ChannelStatus::Clear
                : result == RADIOLIB_LORA_DETECTED ? cajui::ChannelStatus::Busy
@@ -224,7 +224,7 @@ void Sx1262Radio::handleInterrupt() {
             }
             mode_ = Mode::Rx;
         }
-    } else if (mode_ == Mode::Rx && (irq & RADIOLIB_SX126X_IRQ_RX_DONE)) {
+    } else if (mode_ == Mode::Rx && (irq & unsigned(RADIOLIB_SX126X_IRQ_RX_DONE))) {
         // Stop RX before querying length/readData so another packet cannot change length.
         // readData(len=0) would read the full hardware buffer; never call it for empty input.
         if (radio_.standby() != RADIOLIB_ERR_NONE) {

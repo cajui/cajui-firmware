@@ -25,8 +25,8 @@ std::string hexOf(const uint8_t* data, size_t size) {
     static const char digits[] = "0123456789abcdef";
     std::string out;
     for (size_t i = 0; i < size; ++i) {
-        out += digits[data[i] >> 4];
-        out += digits[data[i] & 15];
+        out += digits[data[i] >> 4u];
+        out += digits[data[i] & 15u];
     }
     return out;
 }
@@ -173,7 +173,7 @@ void test_pairing_frames_round_trip_and_reject_tampering() {
     for (size_t i = 0; i < 7; ++i) {
         SCENARIO(i);
         auto bad = request;
-        bad.bytes[badAt[i]] ^= (badAt[i] == 14 || badAt[i] == 22) ? 0 : 1;
+        bad.bytes[badAt[i]] ^= (badAt[i] == 14 || badAt[i] == 22) ? 0u : 1u;
         if (badAt[i] == 14) std::memset(bad.bytes.data() + 14, 0, 8); // Node zero.
         if (badAt[i] == 22) std::memset(bad.bytes.data() + 22, 0, 8); // Nonce zero.
         TEST_ASSERT_FALSE(parseRequest(bad, id, nonce, parsed));
@@ -217,7 +217,7 @@ void test_pairing_frames_round_trip_and_reject_tampering() {
     for (size_t i = 0; i < frame.size; ++i) {
         SCENARIO(i);
         auto bad = frame;
-        bad.bytes[i] ^= 0x01;
+        bad.bytes[i] ^= 0x01u;
         TEST_ASSERT_FALSE(verifyOffer(bad, key)); // Every byte is authenticated or checked.
     }
     TEST_ASSERT_FALSE(verifyOffer(frame, other));
@@ -627,7 +627,7 @@ void test_node_edge_cases() {
             if (field == 0) offer.node = 7;
             if (field == 2) offer.receiver = 2; // The node's own ID.
             if (field == 3) offer.profile = 2;
-            if (field == 4) offer.receiverPublic[0] ^= 0x80;
+            if (field == 4) offer.receiverPublic[0] ^= 0x80u;
             Frame frame{};
             TEST_ASSERT_TRUE(buildOffer(offer, key, frame));
             rig.txRadio.inbox.push_back(frame);
@@ -954,8 +954,8 @@ void test_node_ignores_forged_offers_and_resends_confirm_until_done() {
     Frame genuine = lossy.rxRadio.sent.front();
     lossy.rxRadio.sent.clear();
     Frame forged = genuine;
-    forged.bytes[32 + 32 + 8] ^= 1; // Generation byte.
-    lossy.client.poll();            // Finish the last request transmission; now listening.
+    forged.bytes[32 + 32 + 8] ^= 1u; // Generation byte.
+    lossy.client.poll();             // Finish the last request transmission; now listening.
     EXPECT_RESULT(ClientState::Listening, lossy.client.state());
     lossy.txRadio.inbox.push_back(forged);
     lossy.client.poll();

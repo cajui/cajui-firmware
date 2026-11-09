@@ -88,7 +88,7 @@ void test_all_bytes_are_authenticated() {
     for (size_t i = 0; i < original.size; ++i) {
         SCENARIO(i);
         auto modified = original;
-        modified.bytes[i] ^= 1;
+        modified.bytes[i] ^= 1u;
         Message m{};
         TEST_ASSERT_NOT_EQUAL(int(Result::Ok), int(open(vectorBinding(), modified, m)));
         TEST_ASSERT_EQUAL_UINT8(0, m.data.count);
@@ -98,7 +98,7 @@ void test_wrong_key_network_node_and_revocation() {
     auto f = packet();
     Message m{};
     auto b = vectorBinding();
-    b.key[0] ^= 1;
+    b.key[0] ^= 1u;
     EXPECT_RESULT(Result::CryptoError, open(b, f, m));
     b = vectorBinding();
     ++b.network;
@@ -248,7 +248,7 @@ void test_replay_conflict_and_invalid_input_do_not_commit() {
     // Deliberately misuse a counter to simulate a faulty sender.
     EXPECT_RESULT(Result::Ok, seal(vectorBinding(), conflict, changed));
     EXPECT_RESULT(Result::Conflict, receive(vectorBinding(), changed, journal, ack));
-    changed.bytes[50] ^= 1;
+    changed.bytes[50] ^= 1u;
     EXPECT_RESULT(Result::CryptoError, receive(vectorBinding(), changed, journal, ack));
     TEST_ASSERT_EQUAL_UINT32(1, journal.writes);
     TEST_ASSERT_EQUAL_UINT32(0, ack.size);
@@ -302,7 +302,7 @@ void test_ack_must_match_pending_data() {
     wrong.counter = 1;
     EXPECT_RESULT(Result::Ok, seal(vectorBinding(), wrong, ack));
     EXPECT_RESULT(Result::Invalid, tx.acknowledge(ack));
-    ack.bytes[ack.size - 1] ^= 1;
+    ack.bytes[ack.size - 1] ^= 1u;
     EXPECT_RESULT(Result::CryptoError, tx.acknowledge(ack));
     TEST_ASSERT_FALSE(tx.delivered());
     Frame ignored{};
@@ -342,9 +342,9 @@ void test_untrusted_lengths_and_bytes_under_sanitizers() {
         SCENARIO(trial);
         Frame f{};
         for (auto& byte : f.bytes) {
-            random ^= random << 13;
-            random ^= random >> 17;
-            random ^= random << 5;
+            random ^= random << 13u;
+            random ^= random >> 17u;
+            random ^= random << 5u;
             byte = uint8_t(random);
         }
         f.size = trial % (MaxFrame + 20);
@@ -406,7 +406,7 @@ void test_v2_ack_carries_an_authenticated_power_command_and_v1_still_works() {
         TEST_ASSERT_EQUAL_size_t(HeaderSize + TagSize + (version == WireV2 ? 1 : 0) + TagSize,
                                  ack.size);
         Frame tampered = ack;
-        tampered.bytes[HeaderSize + TagSize] ^= 1; // The command is authenticated.
+        tampered.bytes[HeaderSize + TagSize] ^= 1u; // The command is authenticated.
         EXPECT_RESULT(Result::CryptoError, sender.acknowledge(tampered));
         EXPECT_RESULT(Result::Ok, sender.acknowledge(ack));
         TEST_ASSERT_EQUAL_INT8(version == WireV2 ? 14 : KeepPower, sender.powerCommand());
@@ -459,7 +459,7 @@ void test_nist_aes_gcm_known_answer_and_failure_wipes_output() {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expectedTag, tag, 16);
     TEST_ASSERT_TRUE(decrypt(key, nonce, plain, 0, cipher, 16, tag, out));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(plain, out, 16);
-    tag[0] ^= 1;
+    tag[0] ^= 1u;
     std::memset(out, 0xff, 16);
     TEST_ASSERT_FALSE(decrypt(key, nonce, plain, 0, cipher, 16, tag, out));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(plain, out, 16);

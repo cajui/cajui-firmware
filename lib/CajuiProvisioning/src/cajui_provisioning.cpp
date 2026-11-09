@@ -19,7 +19,7 @@ bool hex(const char* text, size_t length, uint64_t& result) {
     for (size_t i = 0; i < length; ++i) {
         const int n = nibble(text[i]);
         if (n < 0) return false;
-        result = (result << 4) | unsigned(n);
+        result = (result << 4u) | unsigned(n);
     }
     return true;
 }
@@ -28,7 +28,7 @@ bool hexByte(const char* text, uint8_t& output) {
     const int high = nibble(text[0]);
     const int low = high < 0 ? -1 : nibble(text[1]);
     if (low < 0) return false;
-    output = uint8_t((high << 4) | low);
+    output = uint8_t((unsigned(high) << 4u) | unsigned(low));
     return true;
 }
 bool parseKey(const char* text, Key& key) {
