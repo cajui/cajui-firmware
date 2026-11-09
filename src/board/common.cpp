@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef CAJUI_RUNTIME_ROLE
 #include "common.h"
+#include "power.h"
 #include "sx1262_radio.h"
 #include <bootloader_random.h>
 #include <driver/gpio.h>
@@ -72,12 +73,7 @@ const char* resetReasonName() {
     }
 }
 void startBoard() {
-    gpio_deep_sleep_hold_dis();
-    for (auto pin : {Vext, Led, RadioCs, RadioReset}) gpio_hold_dis(gpio_num_t(pin));
-    output(RadioReset, LOW);
-    output(RadioCs, HIGH);
-    output(Vext, HIGH);
-    output(Led, LOW);
+    initializePowerPins();
     Serial.begin(SerialBaud);
     // USB serial carries the CJ1 console. ESP-IDF components log from other tasks and
     // interleaved an MQTT error into the middle of a HELLO reply on hardware; CJAPP lines

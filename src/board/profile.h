@@ -1,20 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
+// Pin assignments and hardware capabilities of the selected board, and the climate sensor
+// choice. Each board is a directory under boards/ holding a board_profile.h; the build puts
+// exactly one of them on the include path with -I, so a new board is a new directory and a
+// new environment, with no edit to shared code. The sensor driver is selected separately
+// with CAJUI_SENSOR_*.
+//
+// The board header is reached by a literal include through the include path, not through a
+// macro (#include CAJUI_BOARD_PROFILE): PlatformIO's dependency scanner does not follow
+// macro includes, so editing a pin did not recompile anything until a clean build.
 #pragma once
 #include <cstdint>
 
+#if defined(CAJUI_SENSOR_SHT4X) && defined(CAJUI_SENSOR_DHT22)
+#error Select exactly one climate sensor.
+#endif
+#if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1 && !defined(CAJUI_SENSOR_SHT4X) &&      \
+    !defined(CAJUI_SENSOR_DHT22)
+#error Select a climate sensor for the transmitter.
+#endif
+
 namespace board {
-constexpr uint8_t Vext = 36, Led = 35;
-// The WSL V3 and WiFi LoRa 32 V3 share the ESP32-S3FN8 and SX1262 wiring.
-// Sensor wiring and display presence differ; never drive OLED reset on the WSL.
-#ifdef CAJUI_BOARD_STICK_LITE
-constexpr bool HasDisplay = false;
-constexpr uint8_t SensorSda = 33, SensorScl = 34, SensorAddress = 0x44;
-constexpr const char* BoardName = "heltec_wireless_stick_lite_v3";
+constexpr uint8_t NoPin = 255;
+} // namespace board
+// Without a board directory this include is the single, fatal error, and compilers print this
+// line with it. An #error guarded by __has_include was tried: #error does not stop the build,
+// and after __has_include fails GCC 13 skips the include, so one error per board name followed.
+#include "board_profile.h" // From -Isrc/board/boards/<board> in the build_flags.
+
+namespace board {
+// Every board header defines these names; a missing one fails here, not inside a driver.
+namespace contract {
+constexpr uint8_t Pins[] = {Vext,       Led,          RadioCs,        RadioClock, RadioMiso,
+                            RadioMosi,  RadioReset,   RadioBusy,      RadioDio,   RadioRfSwitch,
+                            PairButton, BatterySense, BatteryControl, SensorSda,  SensorScl,
+                            SensorData, OledSda,      OledScl,        OledReset};
+constexpr bool Flags[] = {PairButtonExternalPullup, HasDisplay, HasBatterySense};
+static_assert(BoardName[0] != '\0', "A board profile needs a name");
+} // namespace contract
+constexpr float TcxoVoltage = 1.8f;
+constexpr uint8_t SensorAddress = 0x44;
+#ifdef CAJUI_SENSOR_SHT4X
+static_assert(SensorSda != NoPin && SensorScl != NoPin, "SHT4x requires I2C pins");
 constexpr const char* SensorName = "sht4x";
-#else
-constexpr uint8_t SensorData = 47;
-constexpr bool HasDisplay = true;
-constexpr const char* BoardName = "heltec_wifi_lora_32_v3";
+#elif defined(CAJUI_SENSOR_DHT22)
+static_assert(SensorData != NoPin, "DHT22 requires a data pin");
 constexpr const char* SensorName = "dht22";
 #endif
 } // namespace board

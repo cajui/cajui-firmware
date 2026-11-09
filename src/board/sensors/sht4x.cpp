@@ -1,23 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-#if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
-#include "climate.h"
-#include "profile.h"
-#include "common.h"
-#include "display.h"
-#include "sx1262_radio.h"
+// Sensirion SHT4x over I2C, behind the board's switched sensor supply where it has one.
+#if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1 && defined(CAJUI_SENSOR_SHT4X)
+#include "board/climate.h"
+#include "board/power.h"
+#include "board/profile.h"
+#include "cajui_sht4x.h"
 #include <Arduino.h>
+#include <Wire.h>
 #include <driver/gpio.h>
 #include <limits>
-#ifdef CAJUI_BOARD_STICK_LITE
-#include <Wire.h>
-#include "cajui_sht4x.h"
-#else
-#include <DHT.h>
-#endif
 
 namespace board {
 namespace {
-#ifdef CAJUI_BOARD_STICK_LITE
 constexpr uint32_t SupplySettleMs = 100, BusFrequencyHz = 100000;
 constexpr uint16_t BusTimeoutMs = 50;
 bool busStarted = false;
@@ -41,39 +35,24 @@ void floating(uint8_t pin) {
     gpio_pullup_dis(gpio_num_t(pin));
     gpio_pulldown_dis(gpio_num_t(pin));
 }
-#endif
 } // namespace
 void climateOff() {
-#ifdef CAJUI_BOARD_STICK_LITE
     if (busStarted) Wire.end();
     busStarted = false;
     floating(SensorSda);
     floating(SensorScl);
-#else
-    pinMode(SensorData, INPUT);
-#endif
-    output(Vext, HIGH);
+    sensorPower(false);
 }
 void readClimate(float& temperature, float& humidity) {
     temperature = humidity = std::numeric_limits<float>::quiet_NaN();
-    output(Vext, LOW);
-#ifdef CAJUI_BOARD_STICK_LITE
-    delay(SupplySettleMs); // Allow the external breakout's supply to settle after Vext rises.
+    sensorPower(true);
+    if (Vext != NoPin) delay(SupplySettleMs); // Allow the switched supply to settle.
     busStarted = Wire.begin(SensorSda, SensorScl, BusFrequencyHz);
     if (busStarted) {
         Wire.setTimeOut(BusTimeoutMs);
         WireSensorBus bus;
         cajui::readSht4x(bus, SensorAddress, temperature, humidity);
     }
-#else
-    if (HasDisplay) output(OledReset, LOW);
-    DHT sensor(SensorData, DHT22);
-    sensor.begin();
-    constexpr uint32_t DhtWarmupMs = 2200;
-    delay(DhtWarmupMs);
-    humidity = sensor.readHumidity();
-    temperature = sensor.readTemperature();
-#endif
     climateOff();
 }
 } // namespace board
