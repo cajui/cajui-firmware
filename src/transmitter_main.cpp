@@ -3,8 +3,6 @@
 // Transmitter image: wakes, reads its climate sensor, delivers one sample and sleeps; or pairs by
 // radio when its button is held. See docs/radio-applications.md.
 #include <Arduino.h>
-#include <driver/gpio.h>
-#include <driver/rtc_io.h>
 #include <esp_random.h>
 #include <esp_attr.h>
 #include <esp_sleep.h>
@@ -121,14 +119,7 @@ void TransmitterApp::sleepFor(uint32_t ms) {
     board::climateOff();
     board::prepareSleepPins(radioSleeping);
     // The pairing button wakes the node so a long press can start radio pairing.
-    rtc_gpio_pulldown_dis(gpio_num_t(PairButton));
-    if (PairButtonExternalPullup) {
-        rtc_gpio_pullup_dis(gpio_num_t(PairButton));
-        esp_sleep_enable_ext1_wakeup(uint64_t(1) << PairButton, ESP_EXT1_WAKEUP_ANY_LOW);
-    } else {
-        rtc_gpio_pullup_en(gpio_num_t(PairButton));
-        esp_sleep_enable_ext0_wakeup(gpio_num_t(PairButton), 0);
-    }
+    board::enablePairButtonWake();
     esp_sleep_enable_timer_wakeup(uint64_t(ms) * MicrosPerMs);
     Serial.println("CJAPP SLEEP");
     Serial.flush();
@@ -179,7 +170,7 @@ void TransmitterApp::setup() {
     startBoard();
     reportFirmware();
     Serial.printf("CJAPP BOARD model=%s sensor=%s\n", board::BoardName, board::SensorName);
-    rtc_gpio_deinit(gpio_num_t(PairButton));
+    board::releasePairButtonWake();
     const cajui::BootRequest request = takeBootRequest();
     const bool mounted = records_.begin() && store_.mount();
     // The button is read (for up to three seconds) only when pairing is possible.
