@@ -122,7 +122,7 @@ It needs a clang with libFuzzer (Apple's has none) and OpenSSL; CI uses clang++-
 
 ## Tool and coverage policy
 
-`--lint` runs ShellCheck 0.11.0 and actionlint 1.7.7 through pinned PyPI wrappers,
+`--lint` runs ShellCheck 0.11.0 and actionlint 1.7.12 through pinned PyPI wrappers,
 using `uvx` locally and hash-locked requirements in CI. ShellCheck is also available
 to actionlint for checking embedded workflow scripts. All lint tools follow the
 same installation path; separate Homebrew packages are not required.
