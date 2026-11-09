@@ -62,18 +62,18 @@ PYTHON_FLOORS = {
         "tools/release_publish.py",
     )
 }
-COVERAGE_VERSION = "7.16.2"
+COVERAGE_VERSION = "7.17.0"
+COVERAGE_PYTHON_310_VERSION = "7.16.2"
 
 
 def python_coverage_command():
+    required = COVERAGE_PYTHON_310_VERSION if sys.version_info < (3, 11) else COVERAGE_VERSION
     try:
         installed = importlib.metadata.version("coverage")
     except importlib.metadata.PackageNotFoundError:
         installed = None
-    if installed != COVERAGE_VERSION:
-        raise SystemExit(
-            f"Install coverage=={COVERAGE_VERSION} in {sys.executable} before --coverage."
-        )
+    if installed != required:
+        raise SystemExit(f"Install coverage=={required} in {sys.executable} before --coverage.")
     return [sys.executable, "-m", "coverage"]
 
 

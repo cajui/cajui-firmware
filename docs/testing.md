@@ -77,10 +77,14 @@ sizes, and signatures made with disposable keys. A regression test checks requir
 job IDs against the CI workflow and rejects custom job names or matrices until the
 gate supports them. Publication tests simulate GitHub; they do not create releases.
 
-Use `uv run --python 3.12 --with coverage==7.16.2 python scripts/check_protocol.py --coverage`
-or install coverage.py 7.16.2 in a virtual environment. Covered and ordinary tests use the
-same interpreter. CI tests the minimum Python 3.10 separately; native coverage uses 3.12.
-`--python-only` runs Python tests without compiling C++.
+Use `uv run --python 3.12 --with coverage==7.17.0 python scripts/check_protocol.py --coverage`
+or install coverage.py 7.17.0 in a virtual environment with Python 3.11 or newer.
+Python 3.10 uses coverage.py 7.16.2 because 7.17.0 requires Python 3.11 or newer:
+`uv run --python 3.10 --with-requirements .github/requirements/python.txt python scripts/check_protocol.py --python-only --coverage`.
+Covered and ordinary tests use the same interpreter. CI tests the minimum Python 3.10
+separately; native coverage uses 3.12. Regression tests check version selection, rejection
+of missing or mismatched coverage installations, and synchronization with both requirement
+inputs and locks. `--python-only` runs Python tests without compiling C++.
 
 After building `runtime_tx` and `runtime_rx`, CI also runs
 `python -m unittest discover -s tests_release -v` with the release requirements installed.

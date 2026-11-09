@@ -199,25 +199,74 @@ class CoveragePolicyTests(unittest.TestCase):
         ):
             checks.check_python_coverage(data)
 
-    def test_coverage_uses_the_calling_interpreter(self):
-        with patch.object(
-            checks.importlib.metadata, "version", return_value=checks.COVERAGE_VERSION
-        ):
-            self.assertEqual(
-                [checks.sys.executable, "-m", "coverage"], checks.python_coverage_command()
-            )
-        for value in ("0.1", None):
+    def test_coverage_uses_the_calling_interpreter_and_compatible_version(self):
+        for python, version in (((3, 10), "7.16.2"), ((3, 11), "7.17.0"), ((3, 12), "7.17.0")):
             with (
-                patch.object(checks.importlib.metadata, "version", return_value=value),
-                self.assertRaises(SystemExit),
+                self.subTest(python=python),
+                patch.object(checks.sys, "version_info", python),
+                patch.object(checks.importlib.metadata, "version", return_value=version),
             ):
-                checks.python_coverage_command()
-        with (
-            patch.object(
-                checks.importlib.metadata,
-                "version",
-                side_effect=checks.importlib.metadata.PackageNotFoundError,
-            ),
-            self.assertRaises(SystemExit),
+                self.assertEqual(
+                    [checks.sys.executable, "-m", "coverage"], checks.python_coverage_command()
+                )
+
+    def test_coverage_rejects_wrong_versions_with_the_compatible_installation_hint(self):
+        for python, required, wrong in (
+            ((3, 10), "7.16.2", "7.17.0"),
+            ((3, 11), "7.17.0", "7.16.2"),
+            ((3, 12), "7.17.0", "7.16.2"),
         ):
-            checks.python_coverage_command()
+            for installed in (wrong, "0.1", None):
+                with (
+                    self.subTest(python=python, installed=installed),
+                    patch.object(checks.sys, "version_info", python),
+                    patch.object(checks.importlib.metadata, "version", return_value=installed),
+                ):
+                    with self.assertRaises(SystemExit) as error:
+                        checks.python_coverage_command()
+                    self.assertEqual(
+                        f"Install coverage=={required} in {checks.sys.executable} before --coverage.",
+                        str(error.exception),
+                    )
+
+    def test_missing_coverage_has_the_compatible_installation_hint(self):
+        for python, required in (((3, 10), "7.16.2"), ((3, 12), "7.17.0")):
+            with (
+                self.subTest(python=python),
+                patch.object(checks.sys, "version_info", python),
+                patch.object(
+                    checks.importlib.metadata,
+                    "version",
+                    side_effect=checks.importlib.metadata.PackageNotFoundError,
+                ),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    checks.python_coverage_command()
+                self.assertEqual(
+                    f"Install coverage=={required} in {checks.sys.executable} before --coverage.",
+                    str(error.exception),
+                )
+
+    def test_coverage_requirements_and_locks_match_the_runner(self):
+        for name, python in (("python", (3, 10)), ("native", (3, 12))):
+            with self.subTest(requirements=name):
+                pins = []
+                for suffix in ("in", "txt"):
+                    path = checks.ROOT / ".github/requirements" / f"{name}.{suffix}"
+                    matches = [
+                        line.split()[0]
+                        for line in path.read_text().splitlines()
+                        if line.startswith("coverage==")
+                    ]
+                    self.assertEqual(1, len(matches))
+                    pins.append(matches[0])
+                self.assertEqual(pins[0], pins[1])
+                with (
+                    patch.object(checks.sys, "version_info", python),
+                    patch.object(
+                        checks.importlib.metadata, "version", return_value=pins[0].split("==")[1]
+                    ),
+                ):
+                    self.assertEqual(
+                        [checks.sys.executable, "-m", "coverage"], checks.python_coverage_command()
+                    )
