@@ -209,7 +209,7 @@ bool DiscoveryReporter::poll() {
         return true;
     }
     for (auto& n : nodes_) {
-        const uint8_t due = uint8_t(n.known & ~n.published);
+        const uint8_t due = uint8_t(n.known & ~unsigned(n.published));
         if (!n.node || !due) continue;
         for (unsigned i = 0; i < NodeEntities; ++i) {
             if (!(due & (1u << i))) continue;

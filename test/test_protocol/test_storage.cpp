@@ -675,7 +675,7 @@ void test_migrates_a_v1_snapshot_once() {
     TEST_ASSERT_TRUE(store->reserve(binding(), counter));
     TEST_ASSERT_EQUAL_UINT64(58, counter);
     MemoryRecords damaged;
-    bytes[20] ^= 1;
+    bytes[20] ^= 1u;
     damaged.records["snapshot"] = bytes;
     store = remount(damaged);
     EXPECT_HEALTH(Health::Corrupt, *store);
@@ -743,7 +743,7 @@ void test_semantically_invalid_registries_fail_closed_even_with_valid_crc() {
     store = remount(records);
     EXPECT_HEALTH(Health::Corrupt, *store);
     records.bytes("registry") = good;
-    records.bytes("registry")[5] ^= 1;
+    records.bytes("registry")[5] ^= 1u;
     store = remount(records);
     EXPECT_HEALTH(Health::Corrupt, *store);
     records.bytes("registry") = good;
@@ -887,7 +887,7 @@ void test_corrupt_receiver_receipts_and_queued_frames_are_rejected() {
     EXPECT_RESULT(Result::StorageError, store->forwarded(2, 10, 1));
     records.failReadOf.clear();
     store = remount(records, Role::Receiver);
-    records.bytes("q00")[QueueFrame + 40] ^= 1;
+    records.bytes("q00")[QueueFrame + 40] ^= 1u;
     TEST_ASSERT_FALSE(store->peek(q));
     EXPECT_HEALTH(Health::Corrupt, *store);
     store = remount(records, Role::Receiver);
@@ -1175,7 +1175,7 @@ void test_v1_snapshot_decoder_still_fails_closed() {
     repairChecksum(bytes);
     EXPECT_RESULT(Health::Invalid, decodeV1(bytes, Role::Transmitter));
     bytes = tx;
-    bytes[20] ^= 1;
+    bytes[20] ^= 1u;
     EXPECT_RESULT(Health::Corrupt, decodeV1(bytes, Role::Transmitter));
     bytes.resize(12);
     EXPECT_RESULT(Health::Corrupt, decodeV1(bytes, Role::Transmitter));
@@ -1189,7 +1189,7 @@ void test_v1_snapshot_decoder_still_fails_closed() {
     for (size_t offset : flipped) {
         SCENARIO(offset);
         bytes = rx;
-        bytes[offset] ^= 0xff;
+        bytes[offset] ^= 0xffu;
         repairChecksum(bytes);
         TEST_ASSERT_TRUE(decodeV1(bytes, Role::Receiver) != Health::Ready);
     }

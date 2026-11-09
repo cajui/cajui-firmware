@@ -50,7 +50,7 @@ uint64_t deviceId() {
     uint8_t mac[MacBytes]{};
     if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;
     uint64_t id = 0;
-    for (auto byte : mac) id = (id << 8) | byte;
+    for (auto byte : mac) id = (id << 8u) | byte;
     return id;
 }
 void output(uint8_t pin, uint8_t level) {

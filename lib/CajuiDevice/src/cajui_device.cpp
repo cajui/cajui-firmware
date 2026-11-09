@@ -62,7 +62,7 @@ ReadResult loadPower(AtomicBlob& blob, int8_t& dbm) {
     const ReadResult read = blob.read(bytes, sizeof(bytes), size);
     if (read != ReadResult::Ok) return read;
     uint32_t crc = 0;
-    for (size_t i = 3; i < RadioRecordSize; ++i) crc = (crc << 8) | bytes[i];
+    for (size_t i = 3; i < RadioRecordSize; ++i) crc = (crc << 8u) | bytes[i];
     // The stored byte is a two's-complement dBm value.
     const int value = bytes[2] < 0x80 ? int(bytes[2]) : int(bytes[2]) - 0x100;
     if (size != RadioRecordSize || bytes[0] != PowerKind || bytes[1] != PowerVersion ||
@@ -75,7 +75,7 @@ bool savePower(AtomicBlob& blob, int8_t dbm) {
     if (!validPower(dbm)) return false;
     uint8_t bytes[RadioRecordSize] = {PowerKind, PowerVersion, uint8_t(dbm)};
     const uint32_t crc = crc32(bytes, 3);
-    for (int i = 0; i < 4; ++i) bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
+    for (unsigned i = 0; i < 4; ++i) bytes[3 + i] = uint8_t(crc >> (8 * (3 - i)));
     return blob.replace(bytes, sizeof(bytes));
 }
 int8_t currentPower(const PowerState* state, int8_t configured) {

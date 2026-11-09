@@ -72,7 +72,7 @@ void test_every_signed_byte_is_protected() {
     for (size_t offset : offsets) {
         SCENARIO(offset);
         auto bytes = update();
-        bytes[offset] ^= 0x01;
+        bytes[offset] ^= 0x01u;
         MemorySink sink;
         UpdateReceiver receiver(sink, FirmwareTestKey, sizeof(FirmwareTestKey),
                                 UpdateRole::Receiver, 0, MaxImage);

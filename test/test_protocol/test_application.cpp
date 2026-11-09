@@ -79,8 +79,8 @@ void test_receiver_routes_only_enrolled_authenticated_data() {
     const auto writes = r.blob.writes;
     for (int scenario = 0; scenario < 4; ++scenario) {
         auto frame = fixtures::data(1, scenario == 0 ? 3 : 2);
-        if (scenario == 1) frame.bytes[6] ^= 1; // same node, foreign network
-        if (scenario == 2) frame.bytes[frame.size - 1] ^= 1;
+        if (scenario == 1) frame.bytes[6] ^= 1u; // same node, foreign network
+        if (scenario == 2) frame.bytes[frame.size - 1] ^= 1u;
         if (scenario == 3) frame.size = SIZE_MAX;
         r.radio.deliver(frame);
         r.controller.poll();
@@ -236,7 +236,7 @@ void test_routing_hint_is_bounded_and_never_authentication() {
     }
     for (size_t offset : {size_t(0), size_t(4), size_t(5), size_t(30), size_t(31)}) {
         auto frame = valid;
-        frame.bytes[offset] ^= 4;
+        frame.bytes[offset] ^= 4u;
         TEST_ASSERT_EQUAL_UINT64(0, untrustedDataNode(frame));
     }
     auto malformed = valid;
@@ -248,7 +248,7 @@ void test_routing_hint_is_bounded_and_never_authentication() {
     TEST_ASSERT_EQUAL_UINT64(0, untrustedDataNode(malformed));
     // A forged tag can have a plausible routing hint. It is not an authenticated identity.
     auto forged = valid;
-    forged.bytes[forged.size - 1] ^= 1;
+    forged.bytes[forged.size - 1] ^= 1u;
     TEST_ASSERT_EQUAL_UINT64(2, untrustedDataNode(forged));
 }
 void test_climate_values_preserve_zero_and_flag_invalid_measurements() {
