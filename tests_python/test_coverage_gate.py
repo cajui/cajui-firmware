@@ -144,6 +144,12 @@ class CoveragePolicyTests(unittest.TestCase):
             checks.check_coverage_inventory(["a"], ["a"], {}, {"gone"}),
         )
 
+    def test_local_linter_pins_match_ci_requirements(self):
+        requirements = (checks.ROOT / ".github/requirements/lint.in").read_text().splitlines()
+        for name, pin in checks.TOOLS.items():
+            with self.subTest(tool=name):
+                self.assertIn(pin, requirements)
+
     def test_local_actionlint_has_shellcheck_in_its_environment(self):
         with (
             patch.dict(checks.os.environ, {}, clear=True),
