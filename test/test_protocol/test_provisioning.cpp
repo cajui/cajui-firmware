@@ -183,7 +183,7 @@ void test_usb_hello_reports_why_storage_is_unavailable() {
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("invalid", health(*other).c_str());
     blob.bytes("registry") = good;
-    blob.bytes("registry")[20] ^= 1;
+    blob.bytes("registry")[20] ^= 1u;
     other = mounted(blob);
     TEST_ASSERT_EQUAL_STRING("corrupt", health(*other).c_str());
     blob.bytes("registry") = good;
@@ -292,7 +292,7 @@ void test_usb_power_is_stored_and_changed_only_in_admin_mode() {
     COMMAND(admin, "CJ1 POWER 0000000000000002 -9", "CJ1 OK POWER -9");
     COMMAND(admin, "CJ1 POWER 0000000000000002 22", "CJ1 OK POWER 22");
     COMMAND(run, "CJ1 POWER 0000000000000002", "CJ1 OK POWER 22");
-    radio.bytes[2] ^= 1; // Damaged record: reported, never replaced by the default.
+    radio.bytes[2] ^= 1u; // Damaged record: reported, never replaced by the default.
     COMMAND(run, "CJ1 POWER 0000000000000002", "CJ1 ERR STORAGE");
     radio.failBefore = true;
     COMMAND(admin, "CJ1 POWER 0000000000000002 5", "CJ1 ERR STORAGE");

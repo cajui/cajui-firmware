@@ -68,7 +68,7 @@ void test_uplink_settings_round_trip_and_fail_closed() {
     for (size_t i = 0; i < 4; ++i) {
         SCENARIO(i);
         blob.bytes = good;
-        blob.bytes[corruptAt[i]] ^= 1;
+        blob.bytes[corruptAt[i]] ^= 1u;
         EXPECT_RESULT(ReadResult::Error, loadUplink(blob, loaded));
         TEST_ASSERT_EQUAL_STRING("", loaded.password);
     }
@@ -536,8 +536,8 @@ std::string hexOf(const char* text) {
     static const char digits[] = "0123456789abcdef";
     std::string out;
     for (const char* c = text; *c; ++c) {
-        out += digits[uint8_t(*c) >> 4];
-        out += digits[uint8_t(*c) & 15];
+        out += digits[uint8_t(*c) >> 4u];
+        out += digits[uint8_t(*c) & 15u];
     }
     return out;
 }

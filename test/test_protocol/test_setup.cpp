@@ -116,6 +116,11 @@ void test_session_expires_on_idle_and_absolute_limits() {
     TEST_ASSERT_FALSE(session.validToken("a0a1"));
     TEST_ASSERT_FALSE(session.validToken(""));
     TEST_ASSERT_FALSE(session.validToken(nullptr));
+    std::string nonAscii = session.token();
+    for (unsigned byte = 0x80; byte <= 0xff; ++byte) {
+        nonAscii[0] = char(byte);
+        TEST_ASSERT_FALSE(session.validToken(nonAscii.c_str()));
+    }
     TEST_ASSERT_FALSE(session.expired(start + SetupSession::IdleMs - 1));
     TEST_ASSERT_TRUE(session.expired(start + SetupSession::IdleMs));
     // Activity extends the idle limit but never the absolute one.

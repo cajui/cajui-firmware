@@ -43,7 +43,7 @@ struct Reader {
             return 0;
         }
         uint64_t n = 0;
-        while (size--) n = (n << 8) | *p++;
+        while (size--) n = (n << 8u) | *p++;
         return n;
     }
     void block(uint8_t* destination, size_t size) {
@@ -85,7 +85,7 @@ bool frame(Reader& r, Frame& f) {
 void name(char prefix, uint64_t index, char (&output)[NameCapacity]) {
     constexpr uint64_t Nibble = 0xf;
     output[0] = prefix;
-    output[1] = Hex[(index >> 4) & Nibble];
+    output[1] = Hex[(index >> 4u) & Nibble];
     output[2] = Hex[index & Nibble];
     output[3] = 0;
 }
@@ -312,7 +312,7 @@ bool fingerprint(const Key& key, uint64_t& output) {
     if (!hkdfSha256(key.data(), key.size(), reinterpret_cast<const uint8_t*>(Salt),
                     sizeof(Salt) - 1, nullptr, 0, digest, sizeof(digest)))
         return false;
-    for (auto byte : digest) output = (output << 8) | byte;
+    for (auto byte : digest) output = (output << 8u) | byte;
     return true;
 }
 bool isRetired(const RetiredList& list, uint64_t generation, uint64_t print) {

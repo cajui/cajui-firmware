@@ -15,12 +15,13 @@ uint8_t checksum(const uint8_t* word) {
     for (size_t i = 0; i < 2; ++i) {
         crc ^= word[i];
         for (unsigned bit = 0; bit < 8; ++bit)
-            crc = uint8_t((crc & 0x80) ? (crc << 1) ^ CrcPolynomial : crc << 1);
+            crc = uint8_t((crc & 0x80u) ? (unsigned(crc) << 1u) ^ CrcPolynomial
+                                        : unsigned(crc) << 1u);
     }
     return crc;
 }
 uint16_t ticks(const uint8_t* word) {
-    return uint16_t(uint16_t(word[0]) << 8 | word[1]);
+    return uint16_t(unsigned(word[0]) << 8u | word[1]);
 }
 } // namespace
 bool readSht4x(SensorBus& bus, uint8_t address, float& temperature, float& humidity) {

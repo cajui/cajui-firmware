@@ -27,7 +27,7 @@ ENVS = (
 )
 # The same pin as check_protocol.py: uvx locally, the hash-pinned install in CI.
 CLANG_TIDY = (
-    ["uvx", "--from", "clang-tidy==22.1.8", "clang-tidy"]
+    ["uvx", "--from", "clang-tidy==23.1.4", "clang-tidy"]
     if shutil.which("uvx") and not os.environ.get("CI")
     else ["clang-tidy"]
 )

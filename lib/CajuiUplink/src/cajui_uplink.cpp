@@ -155,11 +155,11 @@ bool saveUplink(AtomicBlob& blob, const UplinkConfig& c) {
         validUplink(c) ? UplinkVersion : UplinkWifiOnlyVersion; // v2 permits Wi-Fi-only records.
     for (const char* value : {c.ssid, c.wifiPassword, c.host, c.username, c.password})
         w.text(value);
-    *w.p++ = uint8_t(c.port >> 8);
+    *w.p++ = uint8_t(c.port >> 8u);
     *w.p++ = uint8_t(c.port);
     const size_t payload = size_t(w.p - bytes);
     const uint32_t crc = crc32(bytes, payload);
-    for (int i = 3; i >= 0; --i) *w.p++ = uint8_t(crc >> (i * 8));
+    for (int i = 3; i >= 0; --i) *w.p++ = uint8_t(crc >> (unsigned(i) * 8u));
     const bool saved = blob.replace(bytes, payload + 4);
     volatile uint8_t* clear = bytes;
     for (size_t i = 0; i < sizeof(bytes); ++i) clear[i] = 0;
@@ -174,7 +174,7 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
     if (read == ReadResult::Ok) result = ReadResult::Error;
     if (read == ReadResult::Ok && size >= MinUplinkSize && size <= sizeof(bytes)) {
         uint32_t stored = 0;
-        for (size_t i = 0; i < 4; ++i) stored = (stored << 8) | bytes[size - 4 + i];
+        for (size_t i = 0; i < 4; ++i) stored = (stored << 8u) | bytes[size - 4 + i];
         Reader r{bytes + sizeof(UplinkMagic) + 1, bytes + size - 4};
         if (std::memcmp(bytes, UplinkMagic, sizeof(UplinkMagic)) == 0 &&
             (bytes[sizeof(UplinkMagic)] == UplinkVersion ||
@@ -183,7 +183,7 @@ ReadResult loadUplink(AtomicBlob& blob, UplinkConfig& c) {
             r.text(c.wifiPassword, WifiPasswordCapacity) && r.text(c.host, HostCapacity) &&
             r.text(c.username, UsernameCapacity) && r.text(c.password, MqttPasswordCapacity) &&
             r.end - r.p == 2) {
-            c.port = uint16_t((r.p[0] << 8) | r.p[1]);
+            c.port = uint16_t((unsigned(r.p[0]) << 8u) | r.p[1]);
             if (bytes[sizeof(UplinkMagic)] == UplinkVersion ? validUplink(c) : validSettings(c))
                 result = ReadResult::Ok;
         }

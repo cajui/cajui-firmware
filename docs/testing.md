@@ -21,7 +21,7 @@ CC=clang CXX=clang++ python3 scripts/check_protocol.py --coverage
 pio test -e protocol_esp32 --without-uploading --without-testing
 ```
 
-`--lint` runs clang-format, clang-tidy and ruff with pinned versions. Library code uses
+`--lint` runs clang-format, clang-tidy 23.1.4 and ruff with pinned versions. Library code uses
 `.clang-tidy`; tests use the bug-finding subset in `test/.clang-tidy`, since fixtures and
 record offsets are deliberate literals. `src/` is analyzed separately after the ESP32 builds, using their Arduino headers
 and compiler flags (see Board lint below).

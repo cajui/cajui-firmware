@@ -11,7 +11,7 @@ constexpr size_t FormatAt = 4, RoleAt = 5, ReservedAt = 6, VersionAt = 8, SizeAt
                  SignatureLengthAt = 16, SignatureAt = 17;
 uint32_t read32(const uint8_t* p) {
     uint32_t value = 0;
-    for (size_t i = 0; i < 4; ++i) value = (value << 8) | p[i];
+    for (size_t i = 0; i < 4; ++i) value = (value << 8u) | p[i];
     return value;
 }
 } // namespace
