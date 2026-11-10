@@ -47,7 +47,12 @@ its own table of metric and unit names. This replaces the sensor selection descr
 ## Consequences
 
 - One image per transmitter board, and one target fewer to build, lint and release.
-  Every transmitter image links the DHT library, also on a board without a data pin.
+  The DHT22 is read by `cajui_dht22`, not the Adafruit DHT library: that library keeps
+  interrupts off for all 80 pulses even after one times out, and bounds each wait by loop
+  iterations, not time. With detection it runs on every board with a data pin, whatever
+  is attached, and something other than a DHT22 on that pin made the interrupt watchdog
+  restart a XIAO at every detection pass. Each wait is now bounded in microseconds and
+  the read stops at the first timeout.
 - **A DHT22 changes identity**: it was sensor 1 and is sensor 2. Consumers see a new
   sensor after the update, and the earlier history stays under the old ID.
 - Adding or removing a sensor takes effect at the next power-on or reset, not while the

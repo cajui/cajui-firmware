@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include "cajui_dht22.h"
 #include "cajui_registry.h"
 #include "cajui_sensors.h"
 #include "cajui_sht4x.h"
@@ -308,6 +309,87 @@ void test_frame_capacity_and_unregistered_metrics_bound_the_sample() {
     sample = cajui::collectSample(overlong, 1, cut, 300, 0);
     TEST_ASSERT_EQUAL_UINT(cajui::MaxChannels, sample.count);
 }
+// Plays back a DHT22 transmission as level durations, checking each wait asks for the level
+// the line is at. A duration above the wait's timeout means the line stopped changing.
+class Wire final : public cajui::Dht22Line {
+public:
+    struct Level {
+        bool high;
+        uint32_t micros;
+    };
+    Level levels[90]{};
+    size_t count = 0, next = 0;
+    void add(bool high, uint32_t micros) { levels[count++] = {high, micros}; }
+    uint32_t hold(bool high, uint32_t timeoutMicros) override {
+        TEST_ASSERT_LESS_THAN_size_t(count, next);
+        const Level level = levels[next++];
+        TEST_ASSERT_EQUAL(level.high, high);
+        return level.micros > timeoutMicros ? timeoutMicros + 1 : level.micros;
+    }
+};
+// A complete answer: the end of the start signal, the gap, the response and 40 bits.
+Wire transmission(const uint8_t frame[5]) {
+    Wire wire;
+    wire.add(false, 3);
+    wire.add(true, 30);
+    wire.add(false, 80);
+    wire.add(true, 80);
+    for (size_t bit = 0; bit < 40; ++bit) {
+        wire.add(false, 50);
+        wire.add(true, (unsigned(frame[bit / 8]) >> (7u - bit % 8u)) & 1u ? 70 : 27);
+    }
+    return wire;
+}
+// The datasheet's example frame: 65.2 %RH and 35.1 degrees.
+const uint8_t Example[5] = {0x02, 0x8c, 0x01, 0x5f, 0xee};
+void test_dht22_reads_the_datasheet_example_and_negative_temperatures() {
+    auto wire = transmission(Example);
+    float t = 0, h = 0;
+    TEST_ASSERT_TRUE(cajui::readDht22(wire, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 35.1f, t);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 65.2f, h);
+    TEST_ASSERT_EQUAL_size_t(wire.count, wire.next);
+    // The sign bit and magnitude: 0x8065 is -10.1 degrees.
+    const uint8_t cold[5] = {0x01, 0x90, 0x80, 0x65, uint8_t(0x01 + 0x90 + 0x80 + 0x65)};
+    TEST_ASSERT_TRUE(cajui::decodeDht22(cold, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -10.1f, t);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 40.0f, h);
+}
+void test_dht22_checksum_mismatch_is_never_a_measurement() {
+    for (size_t byte = 0; byte < 5; ++byte) {
+        uint8_t frame[5];
+        std::memcpy(frame, Example, sizeof(frame));
+        frame[byte] = uint8_t(unsigned(frame[byte]) ^ 0x10u);
+        auto wire = transmission(frame);
+        float t = 0, h = 0;
+        TEST_ASSERT_FALSE(cajui::readDht22(wire, t, h));
+        TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    }
+}
+void test_dht22_stops_at_the_first_level_that_does_not_end() {
+    // A stuck line at every wait: the read stops there and asks for nothing more, so the
+    // time spent with interrupts off is bounded by the waits already made.
+    const auto complete = transmission(Example);
+    for (size_t stuck = 0; stuck < complete.count; ++stuck) {
+        Wire wire = complete;
+        wire.levels[stuck].micros = 100000;
+        wire.count = stuck + 1;
+        float t = 0, h = 0;
+        TEST_ASSERT_FALSE(cajui::readDht22(wire, t, h));
+        TEST_ASSERT_EQUAL_size_t(stuck + 1, wire.next);
+        TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    }
+    // The end of the start signal has its own, shorter bound.
+    Wire slow = complete;
+    slow.levels[0].micros = 51;
+    slow.count = 1;
+    float t = 0, h = 0;
+    TEST_ASSERT_FALSE(cajui::readDht22(slow, t, h));
+    // A level that lasts exactly the timeout still counts as ended.
+    Wire edge = complete;
+    edge.levels[3].micros = cajui::Dht22LevelTimeoutMicros;
+    TEST_ASSERT_TRUE(cajui::readDht22(edge, t, h));
+}
 } // namespace
 void runSensorTests() {
     UnitySetTestFile(__FILE__);
@@ -317,6 +399,9 @@ void runSensorTests() {
     RUN_TEST(test_a_known_sensor_that_stops_answering_reports_errors_and_is_never_forgotten);
     RUN_TEST(test_with_nothing_attached_the_first_driver_reports_the_fault_and_detection_repeats);
     RUN_TEST(test_frame_capacity_and_unregistered_metrics_bound_the_sample);
+    RUN_TEST(test_dht22_reads_the_datasheet_example_and_negative_temperatures);
+    RUN_TEST(test_dht22_checksum_mismatch_is_never_a_measurement);
+    RUN_TEST(test_dht22_stops_at_the_first_level_that_does_not_end);
     RUN_TEST(test_sht4x_valid_response_and_addresses);
     RUN_TEST(test_sht4x_crc_corruption_never_becomes_measurement);
     RUN_TEST(test_sht4x_bus_failures_and_retry);

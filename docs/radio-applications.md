@@ -83,7 +83,10 @@ restarts and one transmitter can carry several sensors of the same metric.
   are sent as `Error`, since a sample needs at least one reading.
 - Sensors whose readings would not fit in the eight readings of a frame are not read.
 
-The DHT22 driver powers the sensor from Vext where the board has it, allows 2.2 seconds
+The DHT22 driver (`lib/CajuiSensors/src/cajui_dht22.cpp`, no third-party library) skips
+the read when the idle line is low, bounds each level of the answer to 120 µs and stops at
+the first that does not end, so a wrong device on the pin costs at most a few milliseconds
+with interrupts off. It powers the sensor from Vext where the board has it, allows 2.2 seconds
 to settle and reads its data pin; a WiFi LoRa 32 V3 keeps the OLED in reset. That wait
 is also spent on each detection pass of a board with a data pin and no DHT22 attached.
 
