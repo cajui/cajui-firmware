@@ -3,8 +3,10 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include "cajui_dht22.h"
+#include "cajui_registry.h"
+#include "cajui_sensors.h"
 #include "cajui_sht4x.h"
-#include "cajui_application.h"
 
 namespace {
 class Bus final : public cajui::SensorBus {
@@ -50,11 +52,6 @@ void test_sht4x_crc_corruption_never_becomes_measurement() {
             float t = 25, h = 50;
             TEST_ASSERT_FALSE(cajui::readSht4x(bus, 0x44, t, h));
             TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
-            const auto sample = cajui::climateSample(t, h, 300, 0);
-            TEST_ASSERT_EQUAL_UINT8(unsigned(cajui::Status::Error),
-                                    unsigned(sample.readings[0].status));
-            TEST_ASSERT_EQUAL_UINT8(unsigned(cajui::Status::Error),
-                                    unsigned(sample.readings[1].status));
         }
     }
 }
@@ -104,9 +101,317 @@ void test_sht4x_endpoints_and_humidity_clamping() {
     TEST_ASSERT_EQUAL_FLOAT(130.0f, t);
     TEST_ASSERT_EQUAL_FLOAT(100.0f, h);
 }
+// A driver double: answers with fixed values, or not at all.
+class Fake final : public cajui::Sensor {
+public:
+    cajui::SensorInfo description;
+    float values[cajui::MaxChannels] = {0, 0, 0, 0};
+    bool attached = true;
+    unsigned reads = 0, probes = 0, offs = 0;
+    Fake(uint16_t id, uint16_t first, uint16_t second = 0)
+        : description{"fake", id, uint8_t(second ? 2 : 1), {{first, -40, 80}, {second, 0, 100}}} {}
+    const cajui::SensorInfo& info() const override { return description; }
+    bool read(float* output, bool probing) override {
+        ++reads;
+        if (probing) ++probes;
+        if (!attached) return false;
+        std::memcpy(output, values, sizeof(values));
+        return true;
+    }
+    void off() override { ++offs; }
+};
+cajui::Detection powerOn() {
+    cajui::Detection state;
+    std::memset(&state, 0xff, sizeof(state)); // RTC memory is arbitrary before reset().
+    cajui::reset(state);
+    return state;
+}
+void test_registry_names_known_metrics_and_units_only() {
+    using namespace cajui;
+    TEST_ASSERT_EQUAL_STRING("temperature", quantity(metric::Temperature)->name);
+    TEST_ASSERT_EQUAL_UINT8(unit::Celsius, quantity(metric::Temperature)->unit);
+    TEST_ASSERT_EQUAL_STRING("humidity", quantity(metric::Humidity)->name);
+    TEST_ASSERT_EQUAL_UINT8(unit::Percent, quantity(metric::Humidity)->unit);
+    TEST_ASSERT_EQUAL_STRING("voltage", quantity(metric::Voltage)->name);
+    TEST_ASSERT_EQUAL_UINT8(unit::Volt, quantity(metric::Voltage)->unit);
+    TEST_ASSERT_NULL(quantity(0));
+    TEST_ASSERT_NULL(quantity(4));
+    TEST_ASSERT_EQUAL_STRING("degC", unitName(unit::Celsius));
+    TEST_ASSERT_EQUAL_STRING("%", unitName(unit::Percent));
+    TEST_ASSERT_EQUAL_STRING("V", unitName(unit::Volt));
+    TEST_ASSERT_NULL(unitName(0));
+    TEST_ASSERT_NULL(unitName(4));
+}
+void test_detection_keeps_only_the_sensors_that_answer() {
+    Fake climate(1, cajui::metric::Temperature, cajui::metric::Humidity);
+    Fake absent(2, cajui::metric::Temperature, cajui::metric::Humidity);
+    Fake analog(3, cajui::metric::Voltage);
+    climate.values[0] = -12.345f;
+    climate.values[1] = 0;
+    analog.values[0] = 2.134f;
+    absent.attached = false;
+    cajui::Sensor* sensors[] = {&climate, &absent, &analog};
+    auto state = powerOn();
+    auto sample = cajui::collectSample(sensors, 3, state, 300, 3912);
+    TEST_ASSERT_EQUAL_UINT16(3912, sample.batteryMv);
+    TEST_ASSERT_EQUAL_UINT32(300, sample.nextSeconds);
+    TEST_ASSERT_EQUAL_UINT8(0x05, state.present);
+    TEST_ASSERT_EQUAL_UINT(3, sample.count);
+    TEST_ASSERT_EQUAL_UINT16(1, sample.readings[0].sensor);
+    TEST_ASSERT_EQUAL_UINT16(cajui::metric::Temperature, sample.readings[0].metric);
+    TEST_ASSERT_EQUAL_UINT8(cajui::unit::Celsius, sample.readings[0].unit);
+    TEST_ASSERT_EQUAL_INT32(-12345, sample.readings[0].milliValue);
+    // Zero is a measurement, not a missing value.
+    TEST_ASSERT_EQUAL_INT(int(cajui::Status::Ok), int(sample.readings[1].status));
+    TEST_ASSERT_EQUAL_INT32(0, sample.readings[1].milliValue);
+    TEST_ASSERT_EQUAL_UINT16(3, sample.readings[2].sensor);
+    TEST_ASSERT_EQUAL_UINT8(cajui::unit::Volt, sample.readings[2].unit);
+    TEST_ASSERT_EQUAL_INT32(2134, sample.readings[2].milliValue);
+    // Each driver was asked once, as a probe.
+    TEST_ASSERT_EQUAL_UINT(1, climate.probes);
+    TEST_ASSERT_EQUAL_UINT(1, absent.probes);
+    // Later samples read the known sensors only, without probing.
+    sample = cajui::collectSample(sensors, 3, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(3, sample.count);
+    TEST_ASSERT_EQUAL_UINT(0, sample.batteryMv);
+    TEST_ASSERT_EQUAL_UINT(2, climate.reads);
+    TEST_ASSERT_EQUAL_UINT(1, climate.probes);
+    TEST_ASSERT_EQUAL_UINT(1, absent.reads);
+    TEST_ASSERT_EQUAL_UINT(1, analog.probes);
+}
+void test_invalid_values_become_errors_never_measurements() {
+    Fake climate(1, cajui::metric::Temperature, cajui::metric::Humidity);
+    cajui::Sensor* sensors[] = {&climate};
+    auto state = powerOn();
+    const float outside[] = {NAN, INFINITY, -INFINITY, -41, 81};
+    for (float value : outside) {
+        climate.values[0] = value;
+        climate.values[1] = 50;
+        const auto sample = cajui::collectSample(sensors, 1, state, 300, 0);
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[0].status));
+        TEST_ASSERT_EQUAL_INT32(0, sample.readings[0].milliValue);
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Ok), int(sample.readings[1].status));
+    }
+    for (float value : {-1.0f, 101.0f, NAN}) {
+        climate.values[0] = 0;
+        climate.values[1] = value;
+        const auto sample = cajui::collectSample(sensors, 1, state, 300, 0);
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Ok), int(sample.readings[0].status));
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[1].status));
+        TEST_ASSERT_EQUAL_INT32(0, sample.readings[1].milliValue);
+    }
+    climate.values[0] = -40;
+    climate.values[1] = 100;
+    auto sample = cajui::collectSample(sensors, 1, state, 300, 0);
+    TEST_ASSERT_EQUAL_INT32(-40000, sample.readings[0].milliValue);
+    TEST_ASSERT_EQUAL_INT32(100000, sample.readings[1].milliValue);
+    climate.values[0] = 80;
+    sample = cajui::collectSample(sensors, 1, state, 300, 0);
+    TEST_ASSERT_EQUAL_INT32(80000, sample.readings[0].milliValue);
+}
+void test_a_known_sensor_that_stops_answering_reports_errors_and_is_never_forgotten() {
+    Fake climate(1, cajui::metric::Temperature, cajui::metric::Humidity);
+    Fake late(2, cajui::metric::Voltage);
+    late.attached = false;
+    climate.values[0] = 20;
+    climate.values[1] = 50;
+    cajui::Sensor* sensors[] = {&climate, &late};
+    auto state = powerOn();
+    cajui::collectSample(sensors, 2, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT8(0x01, state.present);
+    climate.attached = false;
+    late.attached = true;
+    late.values[0] = 1.5f;
+    // Three missed samples: errors for the known sensor, and nobody else is tried.
+    for (uint8_t miss = 1; miss <= cajui::RedetectAfter; ++miss) {
+        const auto sample = cajui::collectSample(sensors, 2, state, 300, 0);
+        TEST_ASSERT_EQUAL_UINT(2, sample.count);
+        TEST_ASSERT_EQUAL_UINT16(1, sample.readings[0].sensor);
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[0].status));
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[1].status));
+        TEST_ASSERT_EQUAL_UINT8(miss, state.misses[0]);
+        TEST_ASSERT_EQUAL_UINT(1, late.reads);
+    }
+    // The next sample looks again: the other sensor joins, the missing one stays reported.
+    auto sample = cajui::collectSample(sensors, 2, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT8(0x03, state.present);
+    TEST_ASSERT_EQUAL_UINT8(0, state.misses[0]);
+    TEST_ASSERT_EQUAL_UINT(3, sample.count);
+    TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[0].status));
+    TEST_ASSERT_EQUAL_UINT16(2, sample.readings[2].sensor);
+    TEST_ASSERT_EQUAL_INT32(1500, sample.readings[2].milliValue);
+    // Answering again clears the count; only reset() forgets a sensor.
+    cajui::collectSample(sensors, 2, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT8(1, state.misses[0]);
+    climate.attached = true;
+    sample = cajui::collectSample(sensors, 2, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, state.misses[0]);
+    TEST_ASSERT_EQUAL_INT(int(cajui::Status::Ok), int(sample.readings[0].status));
+    cajui::reset(state);
+    TEST_ASSERT_EQUAL_UINT8(0, state.present);
+}
+void test_with_nothing_attached_the_first_driver_reports_the_fault_and_detection_repeats() {
+    Fake climate(1, cajui::metric::Temperature, cajui::metric::Humidity);
+    Fake analog(3, cajui::metric::Voltage);
+    climate.attached = analog.attached = false;
+    cajui::Sensor* sensors[] = {&climate, &analog};
+    auto state = powerOn();
+    for (unsigned pass = 1; pass <= 2; ++pass) {
+        const auto sample = cajui::collectSample(sensors, 2, state, 300, 0);
+        TEST_ASSERT_EQUAL_UINT(2, sample.count);
+        TEST_ASSERT_EQUAL_UINT16(1, sample.readings[0].sensor);
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[0].status));
+        TEST_ASSERT_EQUAL_INT(int(cajui::Status::Error), int(sample.readings[1].status));
+        TEST_ASSERT_EQUAL_UINT8(0, state.present);
+        TEST_ASSERT_EQUAL_UINT(pass, analog.probes);
+    }
+    analog.attached = true;
+    analog.values[0] = 3.3f;
+    const auto sample = cajui::collectSample(sensors, 2, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(1, sample.count);
+    TEST_ASSERT_EQUAL_UINT16(3, sample.readings[0].sensor);
+    // No driver at all gives an empty sample, which the sender refuses.
+    auto none = powerOn();
+    TEST_ASSERT_EQUAL_UINT(0, cajui::collectSample(sensors, 0, none, 300, 0).count);
+}
+void test_frame_capacity_and_unregistered_metrics_bound_the_sample() {
+    // Five two-channel sensors: the fifth does not fit in eight readings and is not read.
+    Fake a(1, 1, 2), b(2, 1, 2), c(3, 1, 2), d(4, 1, 2), e(5, 1, 2);
+    cajui::Sensor* five[] = {&a, &b, &c, &d, &e};
+    auto state = powerOn();
+    auto sample = cajui::collectSample(five, 5, state, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(cajui::MaxReadings, sample.count);
+    TEST_ASSERT_EQUAL_UINT8(0x0f, state.present);
+    TEST_ASSERT_EQUAL_UINT(0, e.reads);
+    // More drivers than the state can track: the extra ones are ignored.
+    Fake single(9, cajui::metric::Voltage);
+    cajui::Sensor* many[cajui::MaxSensors + 1];
+    for (auto& sensor : many) sensor = &single;
+    auto wide = powerOn();
+    sample = cajui::collectSample(many, cajui::MaxSensors + 1, wide, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(cajui::MaxSensors, single.reads);
+    TEST_ASSERT_EQUAL_UINT8(0xff, wide.present);
+    // A channel outside the registry has no unit to travel with and is left out.
+    Fake odd(7, 99, cajui::metric::Humidity);
+    odd.values[1] = 40;
+    cajui::Sensor* one[] = {&odd};
+    auto fresh = powerOn();
+    sample = cajui::collectSample(one, 1, fresh, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(1, sample.count);
+    TEST_ASSERT_EQUAL_UINT16(cajui::metric::Humidity, sample.readings[0].metric);
+    TEST_ASSERT_EQUAL_INT32(40000, sample.readings[0].milliValue);
+    // A description claiming more channels than it can hold is cut at the limit.
+    Fake long_(8, cajui::metric::Voltage);
+    long_.description.count = cajui::MaxChannels + 1;
+    for (auto& channel : long_.description.channels) channel = {cajui::metric::Voltage, 0, 5};
+    cajui::Sensor* overlong[] = {&long_};
+    auto cut = powerOn();
+    sample = cajui::collectSample(overlong, 1, cut, 300, 0);
+    TEST_ASSERT_EQUAL_UINT(cajui::MaxChannels, sample.count);
+}
+// Plays back a DHT22 transmission as level durations, checking each wait asks for the level
+// the line is at. A duration above the wait's timeout means the line stopped changing.
+class Wire final : public cajui::Dht22Line {
+public:
+    struct Level {
+        bool high;
+        uint32_t micros;
+    };
+    Level levels[90]{};
+    size_t count = 0, next = 0;
+    void add(bool high, uint32_t micros) { levels[count++] = {high, micros}; }
+    uint32_t hold(bool high, uint32_t timeoutMicros) override {
+        TEST_ASSERT_LESS_THAN_size_t(count, next);
+        const Level level = levels[next++];
+        TEST_ASSERT_EQUAL(level.high, high);
+        return level.micros > timeoutMicros ? timeoutMicros + 1 : level.micros;
+    }
+};
+// A complete answer: the end of the start signal, the gap, the response and 40 bits.
+Wire transmission(const uint8_t frame[5]) {
+    Wire wire;
+    wire.add(false, 3);
+    wire.add(true, 30);
+    wire.add(false, 80);
+    wire.add(true, 80);
+    for (size_t bit = 0; bit < 40; ++bit) {
+        wire.add(false, 50);
+        wire.add(true, (unsigned(frame[bit / 8]) >> (7u - bit % 8u)) & 1u ? 70 : 27);
+    }
+    return wire;
+}
+// The datasheet's example frame: 65.2 %RH and 35.1 degrees.
+const uint8_t Example[5] = {0x02, 0x8c, 0x01, 0x5f, 0xee};
+void test_dht22_reads_the_datasheet_example_and_negative_temperatures() {
+    auto wire = transmission(Example);
+    float t = 0, h = 0;
+    TEST_ASSERT_TRUE(cajui::readDht22(wire, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 35.1f, t);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 65.2f, h);
+    TEST_ASSERT_EQUAL_size_t(wire.count, wire.next);
+    // The sign bit and magnitude: 0x8065 is -10.1 degrees.
+    const uint8_t cold[5] = {0x01, 0x90, 0x80, 0x65, uint8_t(0x01 + 0x90 + 0x80 + 0x65)};
+    TEST_ASSERT_TRUE(cajui::decodeDht22(cold, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -10.1f, t);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 40.0f, h);
+}
+void test_dht22_checksum_mismatch_is_never_a_measurement() {
+    for (size_t byte = 0; byte < 5; ++byte) {
+        uint8_t frame[5];
+        std::memcpy(frame, Example, sizeof(frame));
+        frame[byte] = uint8_t(unsigned(frame[byte]) ^ 0x10u);
+        auto wire = transmission(frame);
+        float t = 0, h = 0;
+        TEST_ASSERT_FALSE(cajui::readDht22(wire, t, h));
+        TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    }
+    // A line toggling with short highs reads as zeros, whose checksum matches.
+    const uint8_t zeros[5]{};
+    auto toggling = transmission(zeros);
+    float t = 0, h = 0;
+    TEST_ASSERT_FALSE(cajui::readDht22(toggling, t, h));
+    TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    // One set bit anywhere is a frame again: 0.1 %RH at 0 degrees.
+    const uint8_t driest[5] = {0x00, 0x01, 0x00, 0x00, 0x01};
+    TEST_ASSERT_TRUE(cajui::decodeDht22(driest, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.1f, h);
+}
+void test_dht22_stops_at_the_first_level_that_does_not_end() {
+    // A stuck line at every wait: the read stops there and asks for nothing more, so the
+    // time spent with interrupts off is bounded by the waits already made.
+    const auto complete = transmission(Example);
+    for (size_t stuck = 0; stuck < complete.count; ++stuck) {
+        Wire wire = complete;
+        wire.levels[stuck].micros = 100000;
+        wire.count = stuck + 1;
+        float t = 0, h = 0;
+        TEST_ASSERT_FALSE(cajui::readDht22(wire, t, h));
+        TEST_ASSERT_EQUAL_size_t(stuck + 1, wire.next);
+        TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    }
+    // The end of the start signal has its own, shorter bound.
+    Wire slow = complete;
+    slow.levels[0].micros = 51;
+    slow.count = 1;
+    float t = 0, h = 0;
+    TEST_ASSERT_FALSE(cajui::readDht22(slow, t, h));
+    // A level that lasts exactly the timeout still counts as ended.
+    Wire edge = complete;
+    edge.levels[3].micros = cajui::Dht22LevelTimeoutMicros;
+    TEST_ASSERT_TRUE(cajui::readDht22(edge, t, h));
+}
 } // namespace
 void runSensorTests() {
     UnitySetTestFile(__FILE__);
+    RUN_TEST(test_registry_names_known_metrics_and_units_only);
+    RUN_TEST(test_detection_keeps_only_the_sensors_that_answer);
+    RUN_TEST(test_invalid_values_become_errors_never_measurements);
+    RUN_TEST(test_a_known_sensor_that_stops_answering_reports_errors_and_is_never_forgotten);
+    RUN_TEST(test_with_nothing_attached_the_first_driver_reports_the_fault_and_detection_repeats);
+    RUN_TEST(test_frame_capacity_and_unregistered_metrics_bound_the_sample);
+    RUN_TEST(test_dht22_reads_the_datasheet_example_and_negative_temperatures);
+    RUN_TEST(test_dht22_checksum_mismatch_is_never_a_measurement);
+    RUN_TEST(test_dht22_stops_at_the_first_level_that_does_not_end);
     RUN_TEST(test_sht4x_valid_response_and_addresses);
     RUN_TEST(test_sht4x_crc_corruption_never_becomes_measurement);
     RUN_TEST(test_sht4x_bus_failures_and_retry);

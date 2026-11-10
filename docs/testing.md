@@ -32,8 +32,9 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, firmware updates, SHT4x, device decisions and
-service safety and setup-save retries) needs 95% lines and 85% branches. One exception
+provisioning, uplink, setup, pairing, firmware updates, SHT4x, DHT22 decoding, sensor
+detection, the metric registry, device decisions and service safety and setup-save retries) needs 95%
+lines and 85% branches. One exception
 is documented in the script: the host branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
 allocation and EVP failure returns that no test can trigger without fault injection into
 the library; known-answer vectors cover its success paths. A file missing from the
@@ -141,14 +142,16 @@ matching LLVM tools. macOS defaults use the corresponding Xcode tools through `x
 ## Board power adapters
 
 The Python suite compiles `src/board/power.cpp` and `battery.cpp` against a host
-GPIO fake for all three transmitter boards, including both XIAO sensor targets. It checks sleep/wake pin levels,
+GPIO fake for all three transmitter boards. It checks sleep/wake pin levels,
 radio-reset fallback, switched sensor power, the pairing-button wake source each board
 needs, and that unavailable battery sensing does not access any ADC or GPIO. A build
-without a board directory, a board profile missing a name and invalid board/sensor
-combinations fail to compile.
+without a board directory, a board profile missing a name and a transmitter profile
+without any sensor pin fail to compile. The sensor drivers themselves are not compiled
+there: detection is tested on the host through driver doubles (`test_sensors.cpp`), and
+the Arduino-facing drivers are only compiled and linted.
 These checks do not emulate ESP32 pad retention, RF switching or analog accuracy.
 
-CI also builds and runs board lint for `runtime_tx_xiao_s3` and
-`runtime_tx_xiao_s3_dht22`, alongside all Heltec applications. Initial XIAO radio bench results
+CI also builds and runs board lint for `runtime_tx_xiao_s3`, alongside all Heltec
+applications. Initial XIAO radio bench results
 are recorded in [the board guide](xiao-s3.md); sustained operation, sensor reads,
 USB recovery and battery sleep current still require hardware validation.

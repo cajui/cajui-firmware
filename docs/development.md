@@ -78,12 +78,14 @@ application. The receiver publishes to the MQTT broker that Central consumes.
 
 ## Board, role and sensor selection
 
-`platformio.ini` selects the application role (`CAJUI_RUNTIME_ROLE`), the board and
-the sensor driver independently. Each board is a directory under `src/board/boards/`
+`platformio.ini` selects the application role (`CAJUI_RUNTIME_ROLE`) and the board.
+Sensors are not selected at build time. Each board is a directory under `src/board/boards/`
 holding a `board_profile.h` with its pins and capabilities; the environment puts that
 directory on the include path (`-Isrc/board/boards/<board>`), and `src/board/profile.h`
-includes it, checks that the full set of names is defined and adds the sensor
-constants. `CAJUI_SENSOR_*` picks one driver file under `src/board/sensors/`. Decisions
+includes it and checks that the full set of names is defined. Every driver under
+`src/board/sensors/` is built into every transmitter image; the profile's `Sensor*` pins
+say which ones the board can carry and the transmitter detects which are attached
+([ADR 0002](adr/0002-sensors-detected-at-run-time.md)). Decisions
 that depend on a capability stay in `src/board/` (`power.cpp` prepares the pins at
 startup and sleep and sets up and releases the pairing-button wake source). The
 applications use the profile's named pins but never branch on the board, and `lib/`
@@ -93,6 +95,14 @@ To add a board: create its directory and `board_profile.h`, add an environment w
 `-I` flag, add the environment to the `pio run` line of the esp32-build job in
 `.github/workflows/ci.yml` and to `scripts/lint_board.py`, and add its case to
 `tests_python/test_board_power.py`.
+
+To add a sensor: write one driver file under `src/board/sensors/` implementing
+`cajui::Sensor` (`lib/CajuiSensors/src/cajui_sensors.h`), give it the next sensor ID in
+`sensors.h` and list it at the end of `sensorDrivers()` in `sensors.cpp`, behind the pin
+it needs. A quantity that is not in the registry yet gets the next metric and unit IDs in
+`lib/CajuiProtocol/src/cajui_registry.h` and [the protocol](protocol-v1.md); IDs are never
+reused. The receiver forwards an ID it does not know under a generic name, so it does not
+need the new firmware for the readings to arrive.
 A board that cannot fill a role says so with `#error` in its own header, as the XIAO
 profile does for the receiver. Unsupported sensor pin assignments are rejected at
 compile time. See [ADR 0001](adr/0001-board-profile-headers.md) for the rationale and

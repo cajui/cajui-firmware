@@ -18,5 +18,6 @@ constexpr uint8_t PairButton = 21;
 constexpr bool PairButtonExternalPullup = true, HasDisplay = false, HasBatterySense = false;
 constexpr uint8_t BatterySense = NoPin, BatteryControl = NoPin;
 constexpr uint8_t OledSda = NoPin, OledScl = NoPin, OledReset = NoPin;
-constexpr uint8_t SensorSda = 5, SensorScl = 6, SensorData = 1;
+// D4/D5 for I2C, D0 for a one-wire data sensor and D1 (ADC1 channel 1) for an analog one.
+constexpr uint8_t SensorSda = 5, SensorScl = 6, SensorData = 1, SensorAnalog = 2;
 } // namespace board

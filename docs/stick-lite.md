@@ -1,6 +1,7 @@
 # Wireless Stick Lite V3 transmitter
 
-The experimental `runtime_tx_stick_lite` image reads one SHT4x over I2C. The existing
+The experimental `runtime_tx_stick_lite` image has pins for one SHT4x over I2C, which it
+[detects](radio-applications.md#sensors) after power-on or reset. The existing
 `runtime_tx` and `runtime_rx` images keep their WiFi LoRa 32 V3 behavior. All use the same
 radio profile, enrollment protocol and climate metrics; no receiver schema change is needed.
 
@@ -15,7 +16,7 @@ radio profile, enrollment protocol and climate metrics; no receiver schema chang
 
 Qwiic/STEMMA QT adapters are optional passive wiring. Direct wires work identically.
 The board profile selects address `0x44` and 100 kHz. The sensor driver supports SHT4x
-addresses `0x44` through `0x46`, but this image configures one sensor, not automatic discovery.
+addresses `0x44` through `0x46`, but this image looks for one sensor at `0x44` only.
 GPIO35 is the onboard LED and must not be used for I2C.
 
 Vext is enabled through GPIO36 low, with 100 ms supply settling. Each high-repeatability

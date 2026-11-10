@@ -16,8 +16,9 @@ The link is Cajuí's own LoRa protocol, point to point with the receiver. One of
 same boards, running this firmware, does the receiving; there is no LoRaWAN gateway
 or network server, and the system does not join LoRaWAN networks.
 
-The reference builds read one climate sensor per transmitter, SHT4x or DHT22/AM2302,
-on the boards in the [compatibility table](#compatible-boards-and-sensors). This
+Each transmitter image carries every sensor driver and finds out by itself which
+sensors are attached: SHT4x, DHT22/AM2302 or an analog voltage, on the boards in the
+[compatibility table](#compatible-boards-and-sensors). This
 repository is the radio layer of [Cajuí](https://github.com/cajui/docs); the project
 documentation explains the whole system and where it is heading.
 
@@ -43,8 +44,8 @@ before choosing it for an installation.
 ## What it does
 
 - Runs periodic measurement cycles with deep sleep between transmissions.
-- Reads the supported sensor on each transmitter; current drivers measure
-  temperature and humidity.
+- Detects and reads the supported sensors attached to each transmitter; current drivers
+  measure temperature, humidity and an analog voltage.
 - Sends authenticated, encrypted radio frames and retries within a bounded delivery cycle.
 - Stores accepted samples in the receiver before acknowledging them over LoRa.
 - Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
@@ -60,16 +61,18 @@ retries, queue limits and failures.
 
 ## Compatible boards and sensors
 
-| Board | Role | Sensor | Build target |
+| Board | Role | Sensors the board has pins for | Build target |
 | --- | --- | --- | --- |
 | Heltec WiFi LoRa 32 V3 | Receiver | Receives enrolled transmitters | `runtime_rx` |
 | Heltec WiFi LoRa 32 V3 | Transmitter | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmitter | SHT4x over I2C | `runtime_tx_stick_lite` |
-| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmitter | SHT4x over I2C | `runtime_tx_xiao_s3` |
-| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmitter | DHT22/AM2302 | `runtime_tx_xiao_s3_dht22` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmitter | SHT4x over I2C, DHT22/AM2302, analog voltage | `runtime_tx_xiao_s3` |
 
-Adding another sensor model requires driver and application support; plugging in
-an arbitrary sensor does not identify or configure it automatically.
+A transmitter image is chosen by board, not by sensor. After power-on or a reset the
+transmitter tries each driver its board has pins for and keeps the sensors that answer;
+several can share one transmitter. Adding another sensor model still requires a driver:
+plugging in an unsupported sensor does not identify it. See
+[sensors](docs/radio-applications.md#sensors).
 
 The Stick Lite and XIAO images are installed over USB and excluded from signed/web
 release artifacts. Use the [Stick Lite](docs/stick-lite.md) or
@@ -117,8 +120,7 @@ uvx --from platformio==6.2.0 pio run -e runtime_rx -e runtime_tx_stick_lite
 ```
 
 Use `-e runtime_tx` instead of `-e runtime_tx_stick_lite` for a WiFi LoRa 32 V3
-transmitter with DHT22. For XIAO, use `-e runtime_tx_xiao_s3` with SHT4x
-or `-e runtime_tx_xiao_s3_dht22` with DHT22.
+transmitter, or `-e runtime_tx_xiao_s3` for XIAO.
 Building does not install firmware. Initial installation
 and updates have different storage requirements: preserve enrollment and counters
 when updating an enrolled device. Do not erase its storage to troubleshoot it.
@@ -145,7 +147,7 @@ installation against Home Assistant still needs integration validation.
 | Task | Guide |
 | --- | --- |
 | Understand the complete system | [Cajuí documentation](https://github.com/cajui/docs) |
-| Wire sensors and understand board behavior | [Radio applications](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22](docs/xiao-s3.md) |
+| Wire sensors and understand board behavior | [Radio applications](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22 / analog](docs/xiao-s3.md) |
 | Enroll, recover or revoke a transmitter | [USB administration](docs/provisioning.md) · [Radio pairing](docs/radio-pairing.md) |
 | Install and update firmware | [Updates and storage precautions](docs/updates.md) |
 | Use Home Assistant or MQTT management | [Home Assistant](docs/home-assistant.md) · [Management contract](docs/management-v1.md) |

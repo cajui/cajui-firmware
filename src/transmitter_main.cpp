@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 1
-// Transmitter image: wakes, reads its climate sensor, delivers one sample and sleeps; or pairs by
-// radio when its button is held. See docs/radio-applications.md.
+// Transmitter image: wakes, reads its sensors, delivers one sample and sleeps; or pairs by radio
+// when its button is held. See docs/radio-applications.md.
 #include <Arduino.h>
 #include <esp_random.h>
 #include <esp_attr.h>
@@ -13,15 +13,16 @@
 #include "cajui_nvs.h"
 #include "cajui_pairing.h"
 #include "cajui_provisioning.h"
+#include "cajui_sensors.h"
 #include "cajui_setup.h"
 #include "board/admin_console.h"
 #include "board/battery.h"
-#include "board/climate.h"
 #include "board/profile.h"
 #include "board/power.h"
 #include "board/common.h"
 #include "board/display.h"
 #include "board/ota.h"
+#include "board/sensors/sensors.h"
 #include "board/sx1262_radio.h"
 
 namespace {
@@ -29,6 +30,12 @@ namespace {
 constexpr uint32_t BatteryMagic = 0x42415454; // "BATT"
 RTC_NOINIT_ATTR uint32_t batteryMagic;
 RTC_NOINIT_ATTR uint8_t batteryModeRtc;
+// The sensors found attached, across deep sleep. Anything but a wake from deep sleep (power-on,
+// the reset button, a restart after pairing or an update) looks for sensors again, so that is
+// how a sensor is added, replaced or removed.
+constexpr uint32_t SensorMagic = 0x53454e53; // "SENS"
+RTC_NOINIT_ATTR uint32_t sensorMagic;
+RTC_NOINIT_ATTR cajui::Detection sensorState;
 constexpr uint32_t CpuMhz = 80, MsPerSecond = 1000;
 constexpr uint64_t MicrosPerMs = 1000;
 using namespace board;
@@ -116,7 +123,7 @@ bool TransmitterApp::pairButtonHeld() {
 void TransmitterApp::sleepFor(uint32_t ms) {
     // Reset provides a fallback if the radio driver cannot confirm sleep.
     const bool radioSleeping = radio_.sleep();
-    board::climateOff();
+    board::sensorsOff();
     board::prepareSleepPins(radioSleeping);
     // The pairing button wakes the node so a long press can start radio pairing.
     board::enablePairButtonWake();
@@ -135,6 +142,14 @@ void TransmitterApp::fault(const char* reason) {
                   unsigned(delay / MsPerSecond));
     sleepFor(delay);
 }
+// The board and the sensor drivers it has pins for; which ones are attached shows in each sample.
+void reportBoard() {
+    cajui::Sensor* drivers[cajui::MaxSensors]{};
+    const size_t count = board::sensorDrivers(drivers, cajui::MaxSensors);
+    Serial.printf("CJAPP BOARD model=%s drivers=", board::BoardName);
+    for (size_t i = 0; i < count; ++i) Serial.printf("%s%s", i ? "," : "", drivers[i]->info().name);
+    Serial.println();
+}
 void TransmitterApp::sample(cajui::Binding& binding) {
     const uint16_t batteryMv = board::readBatteryMv();
     // The previous mode survives deep sleep in RTC memory; after power-on it starts Normal.
@@ -151,14 +166,21 @@ void TransmitterApp::sample(cajui::Binding& binding) {
         sleepFor(cajui::LowBatterySeconds * MsPerSecond);
     }
     intervalS_ = battery == cajui::BatteryMode::Low ? cajui::LowBatterySeconds : SampleSeconds;
-    float temperature = 0;
-    float humidity = 0;
-    board::readClimate(temperature, humidity);
-    const auto data = cajui::climateSample(temperature, humidity, intervalS_, batteryMv);
-    Serial.printf("CJAPP SAMPLE temperature_status=%u humidity_status=%u power=%d battery_mv=%u "
-                  "interval_s=%u\n",
-                  unsigned(data.readings[0].status), unsigned(data.readings[1].status), int(power_),
+    cajui::Sensor* drivers[cajui::MaxSensors]{};
+    const size_t count = board::sensorDrivers(drivers, cajui::MaxSensors);
+    if (sensorMagic != SensorMagic || esp_reset_reason() != ESP_RST_DEEPSLEEP)
+        cajui::reset(sensorState);
+    sensorMagic = SensorMagic;
+    const auto data = cajui::collectSample(drivers, count, sensorState, intervalS_, batteryMv);
+    Serial.printf("CJAPP SAMPLE readings=%u sensors=0x%02x power=%d battery_mv=%u interval_s=%u\n",
+                  unsigned(data.count), unsigned(sensorState.present), int(power_),
                   unsigned(batteryMv), unsigned(intervalS_));
+    for (size_t i = 0; i < data.count; ++i) {
+        const auto& reading = data.readings[i];
+        Serial.printf("CJAPP READING sensor=%u metric=%u status=%u milli=%ld\n",
+                      unsigned(reading.sensor), unsigned(reading.metric), unsigned(reading.status),
+                      long(reading.milliValue));
+    }
     if (sender_.start(binding, data, store_) != cajui::StartResult::Started) fault("SEND_START");
 }
 void TransmitterApp::setup() {
@@ -169,7 +191,7 @@ void TransmitterApp::setup() {
     setCpuFrequencyMhz(CpuMhz);
     startBoard();
     reportFirmware();
-    Serial.printf("CJAPP BOARD model=%s sensor=%s\n", board::BoardName, board::SensorName);
+    reportBoard();
     board::releasePairButtonWake();
     const cajui::BootRequest request = takeBootRequest();
     const bool mounted = records_.begin() && store_.mount();

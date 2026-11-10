@@ -62,10 +62,15 @@ must encode a zero value, which consumers must ignore based on status. A zero
 value with OK status is a valid measurement. There is no wall-clock measurement
 time in this format; an expected interval is not a timestamp.
 
-Initial semantic registry: metric 1=temperature, metric 2=relative humidity;
-unit 1=degrees Celsius, unit 2=percent relative humidity. The codec accepts other
-positive IDs for extension; drivers and consumers must understand their meaning.
-A physical connector does not imply automatic sensor discovery.
+Semantic registry (`lib/CajuiProtocol/src/cajui_registry.h`): metric 1=temperature,
+metric 2=relative humidity, metric 3=voltage; unit 1=degrees Celsius, unit 2=percent
+relative humidity, unit 3=volts. The registry is append-only: an ID is never reused and
+never changes meaning. A metric has exactly one unit, so a driver converts what its part
+reports. The codec accepts other positive IDs for extension; drivers and consumers must
+understand their meaning, and the reference receiver forwards unknown ones as
+`metric-<id>` and `unit-<id>`. A physical connector does not imply automatic sensor
+discovery; the reference transmitter's detection is described in
+[sensors](radio-applications.md#sensors).
 
 DATA occupies 65–135 bytes including header and tag; two metrics occupy 75 bytes.
 A version 1 ACK occupies 64 bytes. It carries the DATA sample counter and an encrypted

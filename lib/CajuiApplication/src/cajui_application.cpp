@@ -1,33 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cajui_application.h"
-#include <cmath>
 
 namespace cajui {
 namespace {
 constexpr uint32_t AckTransmitTimeoutMs = 3000;
-constexpr float MinTemperature = -40, MaxTemperature = 80, MaxHumidity = 100;
-constexpr float MilliScale = 1000;
-Reading measurement(uint16_t metric, float value, float minimum, float maximum) {
-    Reading reading{};
-    reading.sensor = 1;
-    reading.metric = metric;
-    reading.unit = uint8_t(metric);
-    if (!std::isfinite(value) || value < minimum || value > maximum) {
-        reading.status = Status::Error;
-    } else {
-        reading.milliValue = int32_t(std::lround(value * MilliScale));
-    }
-    return reading;
-}
-}
-Data climateSample(float temperature, float humidity, uint32_t nextSeconds, uint16_t batteryMv) {
-    Data data{};
-    data.batteryMv = batteryMv;
-    data.nextSeconds = nextSeconds;
-    data.count = 2;
-    data.readings[0] = measurement(1, temperature, MinTemperature, MaxTemperature);
-    data.readings[1] = measurement(2, humidity, 0, MaxHumidity);
-    return data;
 }
 bool DuplicateAckLimiter::allow(uint64_t node, uint32_t now) {
     Slot* slot = nullptr;
