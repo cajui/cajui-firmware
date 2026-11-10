@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cajui_uplink.h"
 #include "cajui_crc32.h"
+#include "cajui_registry.h"
 #include "cajui_text.h"
 #include <cinttypes>
 #include <cstdio>
@@ -23,20 +24,6 @@ bool validSecret(const char* text, size_t minimum, size_t capacity) {
     const size_t length = bounded(text, capacity);
     return length >= minimum && length <= capacity;
 }
-const char* metricName(uint16_t metric) {
-    switch (metric) {
-    case 1: return "temperature";
-    case 2: return "humidity";
-    default: return nullptr;
-    }
-}
-const char* unitName(uint8_t unit) {
-    switch (unit) {
-    case 1: return "degC";
-    case 2: return "%";
-    default: return nullptr;
-    }
-}
 const char* statusName(Status status) {
     switch (status) {
     case Status::Ok: return "ok";
@@ -48,9 +35,9 @@ const char* statusName(Status status) {
 using Text = TextBuffer;
 void addReading(Text& text, const Reading& reading) {
     text.format("{\"sensor_id\":\"sensor-%u\",", unsigned(reading.sensor));
-    const char* metric = metricName(reading.metric);
-    if (metric)
-        text.format("\"metric\":\"%s\",", metric);
+    const Quantity* known = quantity(reading.metric);
+    if (known)
+        text.format("\"metric\":\"%s\",", known->name);
     else
         text.format("\"metric\":\"metric-%u\",", unsigned(reading.metric));
     if (reading.status == Status::Ok) {

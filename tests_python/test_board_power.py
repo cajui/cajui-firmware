@@ -13,6 +13,7 @@ HELTEC = BOARDS / "heltec_wifi_lora_32_v3"
 STICK_LITE = BOARDS / "heltec_wireless_stick_lite_v3"
 XIAO = BOARDS / "xiao_esp32s3_wio_sx1262"
 INCOMPLETE = FIXTURES / "incomplete_profile"
+NO_SENSOR = FIXTURES / "no_sensor_profile"
 
 
 class BoardPowerTests(unittest.TestCase):
@@ -42,35 +43,23 @@ class BoardPowerTests(unittest.TestCase):
         return subprocess.run(command, capture_output=True, text=True, check=False)
 
     def test_sleep_wake_and_battery_access_for_each_transmitter(self):
-        for board, sensor in (
-            (HELTEC, "CAJUI_SENSOR_DHT22"),
-            (STICK_LITE, "CAJUI_SENSOR_SHT4X"),
-            (XIAO, "CAJUI_SENSOR_SHT4X"),
-            (XIAO, "CAJUI_SENSOR_DHT22"),
-        ):
+        for board in (HELTEC, STICK_LITE, XIAO):
             with (
-                self.subTest(board=board.name, sensor=sensor),
+                self.subTest(board=board.name),
                 tempfile.TemporaryDirectory() as directory,
             ):
                 output = Path(directory) / "lifecycle"
-                result = self.compile(output, ["CAJUI_RUNTIME_ROLE=1", sensor], board)
+                result = self.compile(output, ["CAJUI_RUNTIME_ROLE=1"], board)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 subprocess.run([str(output)], check=True)
 
     def test_unsupported_profiles_fail_at_build_time(self):
         transmitter = ["CAJUI_RUNTIME_ROLE=1"]
         cases = (
-            (transmitter + ["CAJUI_SENSOR_DHT22"], None, "board_profile.h"),
-            (transmitter, HELTEC, "Select a climate sensor"),
-            (
-                transmitter + ["CAJUI_SENSOR_SHT4X", "CAJUI_SENSOR_DHT22"],
-                HELTEC,
-                "Select exactly one climate sensor",
-            ),
+            (transmitter, None, "board_profile.h"),
             (["CAJUI_RUNTIME_ROLE=2"], XIAO, "supports transmitters only"),
-            (transmitter + ["CAJUI_SENSOR_SHT4X"], HELTEC, "SHT4x requires I2C pins"),
-            (transmitter + ["CAJUI_SENSOR_DHT22"], STICK_LITE, "DHT22 requires a data pin"),
-            (transmitter + ["CAJUI_SENSOR_SHT4X"], INCOMPLETE, "OledSda"),
+            (transmitter, INCOMPLETE, "OledSda"),
+            (transmitter, NO_SENSOR, "needs at least one sensor pin"),
         )
         for definitions, board, message in cases:
             with self.subTest(definitions=definitions, board=board and board.name):

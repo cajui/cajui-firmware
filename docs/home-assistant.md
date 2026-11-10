@@ -53,7 +53,12 @@ changes.
 ## Limits
 
 - Entity names are in English; rename them in Home Assistant.
-- Only the registry's metrics are announced. Other metrics still arrive in telemetry.
+- Only temperature and humidity are announced, and only for the first sensor of a
+  transmitter that reports them. A second climate sensor, voltage readings and other
+  metrics still arrive in telemetry.
+- The entity's unique ID includes the sensor ID. A DHT22 reported as sensor 1 by
+  firmware that chose the sensor at build time; it is sensor 2 now, so its entities are
+  announced again under new IDs.
 - Checked against the Home Assistant MQTT Discovery documentation and on the bench: a
   receiver published all seven configurations to Mosquitto 2.0.22, and their value
   templates, rendered with Jinja2 over a real sample and state, gave the expected values.

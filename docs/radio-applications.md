@@ -54,13 +54,50 @@ its backing store.
 
 ## Transmitter
 
-The board application powers the DHT22 from Vext, allows 2.2 seconds to settle and
-reads its data pin on GPIO47. The OLED is kept in reset. The CPU runs at 80 MHz while awake; current draw at this clock has not been measured. Sensor 1 supplies metric 1
-(temperature, unit 1 = degrees Celsius) and metric 2 (humidity, unit 2 = percent).
-Wire values are thousandths of those units. Invalid/non-finite/out-of-range readings
-carry `Error` and zero payload, distinguishable from a valid zero measurement.
-This is the initial application metric registry, not a restriction to those sensors
-in the protocol.
+The CPU runs at 80 MHz while awake; current draw at this clock has not been measured.
+Wire values are thousandths of each metric's unit. Invalid/non-finite/out-of-range
+readings carry `Error` and zero payload, distinguishable from a valid zero measurement.
+
+### Sensors
+
+Every transmitter image contains every sensor driver. The board profile says which
+drivers have pins, and the transmitter finds out which sensors are attached:
+
+| Sensor ID | Driver | Pins | Metrics | How presence is known |
+| --- | --- | --- | --- | --- |
+| 1 | SHT4x over I2C, address `0x44` | `SensorSda`, `SensorScl` | temperature, humidity | A measurement with both CRC bytes valid |
+| 2 | DHT22 / AM2302 | `SensorData` | temperature, humidity | A 40-bit answer with a valid checksum |
+| 3 | Analog input | `SensorAnalog` | voltage, 0 to 3.3 V | With the internal pull-down on, the pin stays above a threshold, checked on every read |
+
+Sensor IDs are fixed per driver and append-only, so a sensor keeps its identity across
+restarts and one transmitter can carry several sensors of the same metric.
+
+- After power-on, the reset button or any restart that is not a wake from deep sleep,
+  the transmitter tries every driver its board has pins for and keeps those that answer.
+  That is how a sensor is added, replaced or removed.
+- On later wakes it reads only the known sensors. A known sensor that does not answer is
+  reported with `Error` readings and is never dropped on its own, so a broken sensor or
+  cable stays visible. After three such samples in a row the next one tries the other
+  drivers again, adding any sensor that now answers.
+- With no sensor known, detection repeats on every wake and the first driver's metrics
+  are sent as `Error`, since a sample needs at least one reading.
+- Sensors whose readings would not fit in the eight readings of a frame are not read.
+
+The DHT22 driver powers the sensor from Vext where the board has it, allows 2.2 seconds
+to settle and reads its data pin; a WiFi LoRa 32 V3 keeps the OLED in reset. That wait
+is also spent on each detection pass of a board with a data pin and no DHT22 attached.
+
+The analog input reports the pin's voltage and nothing about what produces it. Meaning
+and calibration (soil moisture, light, a level) belong to the consumer. Its presence test
+runs on every read, so a sensor whose cable comes loose is reported as `Error` instead of
+a floating voltage. On a XIAO bench check a capacitive soil moisture sensor passed it and
+read 2.69 V in air and 1.04 V in water. That an unconnected pin reads below the threshold
+is **not yet measured**, and a source that legitimately rests near 0 V is not detected.
+
+`CJAPP BOARD model=<board> drivers=<names>` lists the drivers the board has pins for.
+`CJAPP SAMPLE readings=<n> sensors=<mask>` shows the known sensors as a bit mask in that
+order, followed by one `CJAPP READING sensor=<id> metric=<id> status=<n> milli=<value>`
+per reading.
 
 Each wake measures the battery through the board's divider (GPIO1, enabled by GPIO37; see
 `src/board/battery.cpp` for sources) and sends it in DATA; the receiver forwards it as a

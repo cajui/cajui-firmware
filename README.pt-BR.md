@@ -16,8 +16,9 @@ O enlace é o protocolo LoRa próprio do Cajuí, ponto a ponto com a receptora. 
 das mesmas placas, rodando este firmware, faz a recepção; não há gateway nem
 servidor de rede LoRaWAN, e o sistema não entra em redes LoRaWAN.
 
-As compilações de referência leem um sensor de clima por transmissor, SHT4x ou
-DHT22/AM2302, nas placas da [tabela de compatibilidade](#placas-e-sensores-compatíveis).
+Cada imagem de transmissor leva todos os drivers de sensor e descobre sozinha quais
+sensores estão ligados: SHT4x, DHT22/AM2302 ou uma tensão analógica, nas placas da
+[tabela de compatibilidade](#placas-e-sensores-compatíveis).
 Este repositório é a camada de rádio do
 [Cajuí](https://github.com/cajui/docs/blob/main/README.pt-BR.md); a documentação
 do projeto explica o conjunto e para onde ele vai.
@@ -44,8 +45,8 @@ confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
 ## O que ele faz
 
 - Executa ciclos periódicos de medição com sono profundo entre transmissões.
-- Lê o sensor compatível de cada transmissor; os drivers atuais medem
-  temperatura e umidade.
+- Detecta e lê os sensores compatíveis ligados a cada transmissor; os drivers atuais
+  medem temperatura, umidade e uma tensão analógica.
 - Envia quadros de rádio autenticados e criptografados, com tentativas limitadas por ciclo.
 - Grava as amostras aceitas na receptora antes de confirmá-las pelo LoRa.
 - Mantém uma fila persistente de até 128 amostras enquanto o MQTT está indisponível
@@ -61,16 +62,18 @@ explica tentativas, limites da fila e falhas.
 
 ## Placas e sensores compatíveis
 
-| Placa | Papel | Sensor | Alvo de compilação |
+| Placa | Papel | Sensores para os quais a placa tem pinos | Alvo de compilação |
 | --- | --- | --- | --- |
 | Heltec WiFi LoRa 32 V3 | Receptora | Recebe transmissores pareados | `runtime_rx` |
 | Heltec WiFi LoRa 32 V3 | Transmissor | DHT22 / AM2302 | `runtime_tx` |
 | Heltec Wireless Stick Lite V3 | Transmissor | SHT4x por I2C | `runtime_tx_stick_lite` |
-| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmissor | SHT4x por I2C | `runtime_tx_xiao_s3` |
-| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmissor | DHT22/AM2302 | `runtime_tx_xiao_s3_dht22` |
+| XIAO ESP32-S3 + Wio-SX1262 (B2B) | Transmissor | SHT4x por I2C, DHT22/AM2302, tensão analógica | `runtime_tx_xiao_s3` |
 
-Outro modelo de sensor exige suporte no driver e na aplicação; conectar um sensor
-qualquer não faz sua identificação ou configuração automática.
+A imagem do transmissor é escolhida pela placa, não pelo sensor. Depois de ligar ou de
+um reset, o transmissor tenta cada driver para o qual a placa tem pinos e fica com os
+sensores que respondem; vários podem dividir um transmissor. Outro modelo de sensor
+ainda exige um driver: conectar um sensor sem suporte não faz sua identificação.
+Consulte [sensores](docs/radio-applications.md#sensors).
 
 As imagens da Stick Lite e da XIAO são instaladas por USB e não fazem parte dos
 artefatos de release assinados ou do instalador web. Use o guia de ligação da
@@ -119,8 +122,7 @@ uvx --from platformio==6.2.0 pio run -e runtime_rx -e runtime_tx_stick_lite
 ```
 
 Use `-e runtime_tx` no lugar de `-e runtime_tx_stick_lite` para um transmissor
-WiFi LoRa 32 V3 com DHT22. Para XIAO, use `-e runtime_tx_xiao_s3` com SHT4x
-ou `-e runtime_tx_xiao_s3_dht22` com DHT22.
+WiFi LoRa 32 V3, ou `-e runtime_tx_xiao_s3` para XIAO.
 Compilar não instala o firmware. Instalação inicial e
 atualização têm requisitos diferentes de armazenamento: preserve o cadastro e
 os contadores ao atualizar um dispositivo pareado. Não apague o armazenamento
@@ -152,7 +154,7 @@ também está disponível em português.
 | Tarefa | Guia |
 | --- | --- |
 | Entender o sistema completo | [Documentação Cajuí](https://github.com/cajui/docs/blob/main/README.pt-BR.md) |
-| Ligar sensores e entender as placas | [Aplicações de rádio](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22](docs/xiao-s3.md) |
+| Ligar sensores e entender as placas | [Aplicações de rádio](docs/radio-applications.md) · [Stick Lite / SHT4x](docs/stick-lite.md) · [XIAO / SHT4x / DHT22 / analógico](docs/xiao-s3.md) |
 | Cadastrar, recuperar ou revogar um transmissor | [Administração USB](docs/provisioning.md) · [Pareamento por rádio](docs/radio-pairing.md) |
 | Instalar e atualizar firmware | [Atualizações e cuidados com armazenamento](docs/updates.md) |
 | Usar Home Assistant ou gestão MQTT | [Home Assistant](docs/home-assistant.md) · [Contrato de gestão](docs/management-v1.md) |

@@ -205,12 +205,13 @@ void test_sample_matches_the_central_mqtt_contract() {
 void test_sample_values_statuses_and_unknown_registry_entries() {
     Data data{};
     data.nextSeconds = 700000; // Clamped to Central's seven-day maximum.
-    data.count = 5;
+    data.count = 6;
     data.readings[0] = reading(1, 1, 1, Status::Ok, -1250);
     data.readings[1] = reading(1, 2, 2, Status::Ok, 0);
     data.readings[2] = reading(2, 1, 1, Status::Error, 0);
     data.readings[3] = reading(3, 9, 7, Status::Skipped, 0);
     data.readings[4] = reading(4, 1, 1, Status::Ok, INT32_MIN);
+    data.readings[5] = reading(3, 3, 3, Status::Ok, 2134);
     TEST_ASSERT_EQUAL_STRING(
         "{\"version\":1,\"source_id\":\"receiver-1\",\"device_id\":\"0000000000000002\","
         "\"sample_id\":\"000000000000000a.7\",\"expected_interval_seconds\":604800,"
@@ -224,7 +225,9 @@ void test_sample_values_statuses_and_unknown_registry_entries() {
         "{\"sensor_id\":\"sensor-3\",\"metric\":\"metric-9\",\"unit\":\"unit-7\","
         "\"status\":\"skipped\"},"
         "{\"sensor_id\":\"sensor-4\",\"metric\":\"temperature\",\"value\":-2147483.648,"
-        "\"unit\":\"degC\",\"status\":\"ok\"}]}",
+        "\"unit\":\"degC\",\"status\":\"ok\"},"
+        "{\"sensor_id\":\"sensor-3\",\"metric\":\"voltage\",\"value\":2.134,"
+        "\"unit\":\"V\",\"status\":\"ok\"}]}",
         format(queued(data)).c_str());
 }
 void test_radio_link_travels_as_readings_of_a_radio_sensor() {

@@ -24,7 +24,10 @@ field reliability. No production image is released.
 - A nonblocking send controller with injected radio, clock and jitter, bounded
   channel waits, ACK deadlines and cancellation.
 - SX1262 CAD/TX/RX adapter with task-driven interrupt handling, a durable receiver
-  loop, DHT22 sampling and a five-minute transmitter sleep schedule.
+  loop and a five-minute transmitter sleep schedule.
+- One transmitter image per board carrying every sensor driver (SHT4x, DHT22, analog
+  voltage), with the attached sensors detected after power-on or reset and several
+  sensors per transmitter ([sensors](radio-applications.md#sensors)).
 - Receiver forwarding to an MQTT broker over Wi-Fi in Cajuí Central's JSON contract,
   removing each queued sample only after its PUBACK, with USB-provisioned settings.
 - A receiver setup page on a temporary access point opened by holding the PRG button:
@@ -35,7 +38,7 @@ field reliability. No production image is released.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.
 
 - Experimental XIAO ESP32-S3 + Wio-SX1262 B2B transmitter profile with the shared
-  SHT4x or DHT22 driver and explicit sleep-pin handling. See [XIAO](xiao-s3.md).
+  sensor drivers and explicit sleep-pin handling. See [XIAO](xiao-s3.md).
 
 ## Tooling validation (2026-11-09)
 
@@ -62,6 +65,13 @@ field reliability. No production image is released.
 This page records implementation status and validation limits for the development
 branch. Released images may have an earlier feature set.
 
+- Run-time sensor detection is covered by host tests with driver doubles and compiles
+  for every board. On one XIAO it detected a capacitive soil moisture sensor on the analog
+  input after a reset, read it again after a deep-sleep wake and delivered through the
+  receiver; SHT4x and DHT22 detection, a disconnected analog input and the other boards
+  have not run on hardware. Analog readings are uncalibrated.
+  Home Assistant Discovery still announces only the first temperature/humidity sensor of
+  a transmitter.
 - XIAO has passed initial pairing and acknowledged delivery to Heltec, but sensor
   integration and sleep current remain unvalidated. Battery voltage is unknown; low-battery scheduling cannot
   act on it. This profile is USB-only and excluded from signed releases.

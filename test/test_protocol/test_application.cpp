@@ -251,30 +251,6 @@ void test_routing_hint_is_bounded_and_never_authentication() {
     forged.bytes[forged.size - 1] ^= 1u;
     TEST_ASSERT_EQUAL_UINT64(2, untrustedDataNode(forged));
 }
-void test_climate_values_preserve_zero_and_flag_invalid_measurements() {
-    TEST_ASSERT_EQUAL_UINT16(3912, climateSample(20, 50, 300, 3912).batteryMv);
-    auto sample = climateSample(-12.345f, 0, 300);
-    TEST_ASSERT_EQUAL_UINT(2, sample.count);
-    TEST_ASSERT_EQUAL_UINT(0, sample.batteryMv);
-    TEST_ASSERT_EQUAL_INT32(-12345, sample.readings[0].milliValue);
-    TEST_ASSERT_EQUAL_INT(int(Status::Ok), int(sample.readings[1].status));
-    const float values[] = {NAN, INFINITY, -INFINITY, -41, 81};
-    for (float value : values) {
-        sample = climateSample(value, value, 300);
-        TEST_ASSERT_EQUAL_INT(int(Status::Error), int(sample.readings[0].status));
-        TEST_ASSERT_EQUAL_INT32(0, sample.readings[0].milliValue);
-    }
-    for (float value : {-1.0f, 101.0f, NAN}) {
-        sample = climateSample(0, value, 300);
-        TEST_ASSERT_EQUAL_INT(int(Status::Error), int(sample.readings[1].status));
-        TEST_ASSERT_EQUAL_INT32(0, sample.readings[1].milliValue);
-    }
-    sample = climateSample(-40, 100, 300);
-    TEST_ASSERT_EQUAL_INT32(-40000, sample.readings[0].milliValue);
-    TEST_ASSERT_EQUAL_INT32(100000, sample.readings[1].milliValue);
-    sample = climateSample(80, 0, 300);
-    TEST_ASSERT_EQUAL_INT(int(Status::Ok), int(sample.readings[0].status));
-}
 }
 void runApplicationTests() {
     UnitySetTestFile(__FILE__);
@@ -287,5 +263,4 @@ void runApplicationTests() {
     RUN_TEST(test_late_poll_after_completed_ack_keeps_listening);
     RUN_TEST(test_receiver_start_requires_healthy_receiver_storage_and_radio);
     RUN_TEST(test_routing_hint_is_bounded_and_never_authentication);
-    RUN_TEST(test_climate_values_preserve_zero_and_flag_invalid_measurements);
 }

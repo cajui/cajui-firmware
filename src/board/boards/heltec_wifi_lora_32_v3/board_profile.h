@@ -13,5 +13,5 @@ constexpr uint8_t PairButton = 0; // PRG.
 constexpr bool PairButtonExternalPullup = false, HasDisplay = true, HasBatterySense = true;
 constexpr uint8_t BatterySense = 1, BatteryControl = 37;
 constexpr uint8_t OledSda = 17, OledScl = 18, OledReset = 21;
-constexpr uint8_t SensorData = 47, SensorSda = NoPin, SensorScl = NoPin;
+constexpr uint8_t SensorData = 47, SensorSda = NoPin, SensorScl = NoPin, SensorAnalog = NoPin;
 } // namespace board

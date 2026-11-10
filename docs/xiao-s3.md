@@ -1,8 +1,9 @@
 # XIAO ESP32-S3 + Wio-SX1262 transmitter
 
 The experimental `runtime_tx_xiao_s3` image targets the XIAO ESP32-S3 with the
-Wio-SX1262 **B2B** expansion and one SHT4x. The `runtime_tx_xiao_s3_dht22`
-image uses the same board with a DHT22/AM2302 instead. It uses the same Cajuí radio profile,
+Wio-SX1262 **B2B** expansion. It has pins for an SHT4x, a DHT22/AM2302 and one analog
+input, and [detects](radio-applications.md#sensors) which of them are attached after
+power-on or reset. It uses the same Cajuí radio profile,
 enrollment and measurement format as the Heltec transmitters. The receiver remains
 `runtime_rx` on Heltec WiFi LoRa 32 V3; no Central or MQTT schema change is needed.
 Initial bench pairing and acknowledged delivery to Heltec have been verified;
@@ -30,7 +31,7 @@ checks both CRC bytes. Missing sensors and failed reads produce sensor-error
 telemetry. QT/Qwiic adapters are optional passive wiring. Use external I2C pull-ups
 to 3.3 V; no 5 V signals. No heater command is sent.
 
-For a DHT22/AM2302 module, use the `runtime_tx_xiao_s3_dht22` image:
+For a DHT22/AM2302 module:
 
 | XIAO header | DHT22 module |
 | --- | --- |
@@ -40,9 +41,20 @@ For a DHT22/AM2302 module, use the `runtime_tx_xiao_s3_dht22` image:
 
 Follow the module's labels, not its physical pin order. DATA needs a pull-up to
 3.3 V; check whether the module includes one, and add 10 kΩ if it does not.
-The sensor is selected when building, not detected automatically. The DHT22
-stays powered during sleep on XIAO, unlike the switched supply on Heltec.
+The DHT22 stays powered during sleep on XIAO, unlike the switched supply on Heltec.
 Its standby draw and any module LED must be included in battery estimates.
+
+For a sensor with an analog voltage output:
+
+| XIAO header | Analog sensor |
+| --- | --- |
+| 3V3 | Supply |
+| GND | GND |
+| D1 / GPIO2 | Output, never above 3.3 V |
+
+Power the sensor from 3V3 so its output cannot exceed the pin's limit. The firmware
+reports the voltage only; see [sensors](radio-applications.md#sensors) for the
+unvalidated presence test. Like the DHT22, the sensor stays powered during sleep.
 
 ## Pin assignments and sleep
 
@@ -82,13 +94,27 @@ does not apply. Do not connect a battery directly to an ADC pin.
 
 ```sh
 uvx --from platformio==6.2.0 pio run -e runtime_tx_xiao_s3
-uvx --from platformio==6.2.0 pio run -e runtime_tx_xiao_s3_dht22
 ```
 
-Build and install only the target matching the connected sensor, explicitly over USB. Follow the new-board storage procedure
+Install explicitly over USB. Follow the new-board storage procedure
 in [updates](updates.md) for a factory board, and preserve enrollment/counter
 storage on subsequent updates. Native USB CDC can disappear during deep sleep;
 use a data cable and enter the bootloader when necessary for USB installation.
+
+The port reappears while the node is awake, and esptool's default reset then puts the
+chip in download mode. On the bench, the flasher stub could not verify the flash
+afterwards ("Unable to verify flash chip connection"); `--no-stub` worked:
+
+```sh
+esptool.py --chip esp32s3 --before default_reset --after no_reset --no-stub \
+  write_flash 0x10000 .pio/build/runtime_tx_xiao_s3/firmware.bin
+```
+
+Writing only the application at `0x10000` keeps enrollment and counters. The ROM loader
+reads only the first 2 MiB until the flash size is set, so `read_flash --no-stub` cannot
+back up the `cajui` partition at `0x310000`; esptool's `flash_set_parameters` (SPI_SET_PARAMS)
+with the 8 MiB size lifts that limit. Opening a serial console with DTR low and RTS high
+resets the chip; keep both lines high to watch a cycle without restarting it.
 
 This target is excluded from signed releases and the web installer. The current
 signed format identifies role, not board, so a signed Heltec transmitter package
@@ -110,7 +136,8 @@ at roughly 300-second intervals. This does not establish overnight reliability
 or distinguish a faulty original module from a connection corrected when
 replacing it.
 
-SHT4x reads on XIAO, extended uninterrupted wake/delivery, USB recovery and current
+That check used the earlier image that selected the DHT22 at build time. Run-time
+detection, SHT4x and analog reads on XIAO, extended uninterrupted wake/delivery, USB recovery and current
 draw still need validation before deployment. During this check, reopening native
 USB could restart the transmitter, and USB disappeared in deep sleep. Keep the
 serial connection open during pairing; do not mistake a port reopening for a
