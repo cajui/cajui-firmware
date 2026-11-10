@@ -22,6 +22,7 @@ constexpr uint32_t Dht22LevelTimeoutMicros = 120;
 // while reading does so for at most 84 waits. Both outputs are NaN on any failure.
 bool readDht22(Dht22Line&, float& temperature, float& humidity);
 // Frame: humidity x10 (u16), temperature x10 (sign bit and magnitude), checksum of the
-// first four bytes. False, with NaN outputs, when the checksum does not match.
+// first four bytes. False, with NaN outputs, when the checksum does not match or the frame
+// is all zeros.
 bool decodeDht22(const uint8_t frame[5], float& temperature, float& humidity);
 } // namespace cajui

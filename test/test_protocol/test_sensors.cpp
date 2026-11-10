@@ -365,6 +365,16 @@ void test_dht22_checksum_mismatch_is_never_a_measurement() {
         TEST_ASSERT_FALSE(cajui::readDht22(wire, t, h));
         TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
     }
+    // A line toggling with short highs reads as zeros, whose checksum matches.
+    const uint8_t zeros[5]{};
+    auto toggling = transmission(zeros);
+    float t = 0, h = 0;
+    TEST_ASSERT_FALSE(cajui::readDht22(toggling, t, h));
+    TEST_ASSERT_TRUE(std::isnan(t) && std::isnan(h));
+    // One set bit anywhere is a frame again: 0.1 %RH at 0 degrees.
+    const uint8_t driest[5] = {0x00, 0x01, 0x00, 0x00, 0x01};
+    TEST_ASSERT_TRUE(cajui::decodeDht22(driest, t, h));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.1f, h);
 }
 void test_dht22_stops_at_the_first_level_that_does_not_end() {
     // A stuck line at every wait: the read stops there and asks for nothing more, so the

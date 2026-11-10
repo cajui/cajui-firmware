@@ -21,6 +21,9 @@ bool decodeDht22(const uint8_t frame[FrameBytes], float& temperature, float& hum
     temperature = humidity = std::numeric_limits<float>::quiet_NaN();
     const uint8_t sum = uint8_t(frame[0] + frame[1] + frame[2] + frame[3]);
     if (sum != frame[4]) return false;
+    // Forty highs shorter than their lows decode to zeros, and zeros pass the checksum: a
+    // line toggling with no part on it. 0 %RH at 0 degrees is that, not a measurement.
+    if (!frame[0] && !frame[1] && !frame[2] && !frame[3]) return false;
     humidity = float(unsigned(frame[0]) << 8u | frame[1]) / Tenths;
     temperature = float(unsigned(frame[2] & MagnitudeMask) << 8u | frame[3]) / Tenths;
     if (frame[2] & SignBit) temperature = -temperature;
