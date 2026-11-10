@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cajui_discovery.h"
+#include "cajui_registry.h"
 #include "cajui_text.h"
 #include <cinttypes>
 #include <cstring>
@@ -7,7 +8,6 @@
 namespace cajui {
 namespace {
 using Text = TextBuffer;
-constexpr uint16_t TemperatureMetric = 1, HumidityMetric = 2;
 constexpr uint32_t ExpiryIntervals = 3; // As the silence alert: three missed samples.
 constexpr unsigned IdSuffixDigits = 4;
 constexpr uint64_t IdSuffixMask = 0xffff;
@@ -164,9 +164,9 @@ void DiscoveryReporter::sampleForwarded(const QueuedSample& sample) {
     slot->intervalS = sample.data.nextSeconds;
     for (size_t i = 0; i < sample.data.count && i < MaxReadings; ++i) {
         const Reading& reading = sample.data.readings[i];
-        const Entity entity = reading.metric == TemperatureMetric ? Entity::Temperature
-                              : reading.metric == HumidityMetric  ? Entity::Humidity
-                                                                  : Entity::Rssi;
+        const Entity entity = reading.metric == metric::Temperature ? Entity::Temperature
+                              : reading.metric == metric::Humidity  ? Entity::Humidity
+                                                                    : Entity::Rssi;
         if (entity == Entity::Rssi) continue; // Only the registry's known metrics.
         // One sensor per transmitter in the current registry; the first one that reads names
         // it. An error does not: with nothing detected, a transmitter reports its first
