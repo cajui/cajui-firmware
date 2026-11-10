@@ -69,9 +69,10 @@ branch. Released images may have an earlier feature set.
   for every board. On one XIAO it detected a capacitive soil moisture sensor on the analog
   input after a reset, read it again after a deep-sleep wake and delivered through the
   receiver, reported a disconnected input as an error and ran on a Stick Lite with its
-  SHT4x. The DHT22 reader that replaced the Adafruit library has only run without a DHT22
-  attached, where it reported no sensor instead of restarting the chip. Analog readings are
-  uncalibrated.
+  SHT4x. The DHT22 reader that replaced the Adafruit library detected a DHT22 on that
+  XIAO and read it after power-on and after a deep-sleep wake, close to an SHT4x beside it;
+  with an analog sensor on the data pin instead it gave up without restarting the chip. It
+  has not run on a WiFi LoRa 32 V3 transmitter. Analog readings are uncalibrated.
   Home Assistant Discovery still announces only the first temperature/humidity sensor of
   a transmitter.
 - XIAO has passed initial pairing and acknowledged delivery to Heltec, but sensor
