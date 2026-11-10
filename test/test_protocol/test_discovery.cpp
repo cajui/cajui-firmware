@@ -219,6 +219,29 @@ void test_reporter_retries_refusals_and_follows_the_source() {
     reporter.sampleForwarded(sample(1, 300, false)); // Still known: nothing new.
     TEST_ASSERT_EQUAL_INT(0, drain(reporter));
 }
+void test_a_sensor_that_only_failed_does_not_name_the_transmitter() {
+    Publisher publisher;
+    DiscoveryReporter reporter(publisher, Receiver, "receiver-1");
+    publisher.connect();
+    drain(reporter);
+    publisher.topics.clear();
+    // Nothing detected yet: the first driver's channels arrive as errors.
+    QueuedSample undetected = sample(Node, 300, false);
+    for (auto& reading : undetected.data.readings) reading.status = Status::Error;
+    reporter.sampleForwarded(undetected);
+    TEST_ASSERT_EQUAL_INT(0, drain(reporter));
+    // The sensor found later, under another ID, is the one announced.
+    QueuedSample detected = sample(Node, 300, false);
+    for (auto& reading : detected.data.readings) reading.sensor = 2;
+    reporter.sampleForwarded(detected);
+    TEST_ASSERT_EQUAL_INT(2, drain(reporter));
+    TEST_ASSERT_NOT_NULL(std::strstr(publisher.topics.front().c_str(), "_temperature_2/"));
+    // Once named, the sensor keeps its entities while it fails.
+    for (auto& reading : detected.data.readings) reading.status = Status::Error;
+    reporter.sampleForwarded(detected);
+    reporter.sampleForwarded(undetected);
+    TEST_ASSERT_EQUAL_INT(0, drain(reporter));
+}
 } // namespace
 
 void runDiscoveryTests() {
@@ -230,4 +253,5 @@ void runDiscoveryTests() {
     RUN_TEST(test_invalid_configurations_are_rejected);
     RUN_TEST(test_reporter_publishes_the_receiver_then_learned_transmitters);
     RUN_TEST(test_reporter_retries_refusals_and_follows_the_source);
+    RUN_TEST(test_a_sensor_that_only_failed_does_not_name_the_transmitter);
 }

@@ -168,8 +168,10 @@ void DiscoveryReporter::sampleForwarded(const QueuedSample& sample) {
                               : reading.metric == HumidityMetric  ? Entity::Humidity
                                                                   : Entity::Rssi;
         if (entity == Entity::Rssi) continue; // Only the registry's known metrics.
-        // One sensor per transmitter in the current registry; the first one seen names it.
-        if (!slot->sensor) slot->sensor = reading.sensor;
+        // One sensor per transmitter in the current registry; the first one that reads names
+        // it. An error does not: with nothing detected, a transmitter reports its first
+        // driver's channels as errors, which would hide the sensor detected later.
+        if (!slot->sensor && reading.status == Status::Ok) slot->sensor = reading.sensor;
         if (reading.sensor == slot->sensor) slot->known |= uint8_t(1u << unsigned(entity));
     }
     if (sample.link.known)
