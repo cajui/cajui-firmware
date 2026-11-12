@@ -46,6 +46,10 @@ bool showSetup(const char* ssid, const char* qrText, const char* address) {
     digitalWrite(OledReset, HIGH);
     delay(ResetPulseMs);
     if (!oled.init()) return false;
+    // Rotated 180°: the receiver enclosure (cajui-hardware) is read from the RST side of the
+    // board, with the USB-C on the left and the antenna at the back. The bare board held
+    // with the USB-C down shows the text upside down.
+    oled.flipScreenVertically();
     powered = true;
     oled.clear();
     drawn = false;
