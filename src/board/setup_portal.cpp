@@ -117,6 +117,8 @@ void SetupPortal::open() {
     savedCurrent_ = stored_;
     scanFailures_ = 0;
     scanFailed_ = scanRetryDue_ = scanPending_ = false;
+    // Searches asked for by an earlier session belong to it; this one starts its own.
+    discoverPending_ = discoverQueued_ = false;
     trial_ = trialFailed_ = reconnect_ = closing_ = false;
     WiFi.persistent(false);
     WiFi.mode(WIFI_AP_STA);
@@ -177,7 +179,8 @@ void SetupPortal::close() {
     cancelSearch_.store(true); // Nobody is left to read the page's list.
     saveRetry_.reset();
     if (scanning_) esp_wifi_scan_stop();
-    scanning_ = scanRetryDue_ = scanPending_ = false;
+    // A search waiting for the abandoned scan would otherwise show as running for good.
+    scanning_ = scanRetryDue_ = scanPending_ = discoverPending_ = false;
     WiFi.scanDelete();
     WiFi.setAutoReconnect(true);
     server_.stop();
@@ -233,6 +236,8 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
+        // The new network gets its own search once it settles.
+        discoverPending_ = false;
         cancelSearch_.store(true); // The station leaves the network being searched.
         uplink_.suspend();
         recovery_.suspend();

@@ -626,6 +626,9 @@ void test_broker_search_box_says_what_happens_and_refreshes_only_while_searching
     TEST_ASSERT_TRUE(html.find("<div id=\"brokers\">") < html.find("action=\"/broker\""));
     TEST_ASSERT_TRUE(contains(html, "live('brokers','/brokers')"));
     TEST_ASSERT_TRUE(contains(html, "getAttribute('data-host')"));
+    TEST_ASSERT_TRUE(contains(html, "redirect:'manual'"));           // No discarded page render.
+    TEST_ASSERT_TRUE(contains(html, "if(busy){again=true;return}")); // One refresh at a time.
+    TEST_ASSERT_TRUE(contains(html, "getElementById('user')||h).focus()"));
     TEST_ASSERT_EQUAL_size_t(1, count(html, "<script>"));
 }
 void test_confirmation_and_closed_pages() {

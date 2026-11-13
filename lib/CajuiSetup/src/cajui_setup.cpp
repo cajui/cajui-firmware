@@ -346,22 +346,27 @@ void firmware(Html& page, const SetupView& v) {
                 "</small></p></section>");
 }
 // Refreshes the broker search box and the transmitters section every second while each is
-// live, and submits their forms in place. Choosing a found broker fills in the address and
-// port without reloading, so what was typed in the form stays. Without JavaScript the forms
-// and links reload the page as before.
+// live, and submits their forms in place. One refresh at a time per section, so a late
+// answer never overwrites a newer one; a refresh asked for meanwhile runs right after. The
+// form's redirect is not followed: it would make the receiver render the whole page only
+// to discard it. Choosing a found broker fills in the address and port without reloading,
+// so what was typed stays, and moves on to the username. Without JavaScript the forms and
+// links reload the page as before.
 constexpr char LiveScript[] =
     "<script>(function(){if(!window.fetch)return;function live(id,url){var box=document."
-    "getElementById(id);if(!box)return null;function load(){fetch(url,{cache:'no-store'}).then("
-    "function(r){return r.ok?r.text():null}).then(function(t){if(t!==null)box.innerHTML=t})."
-    "catch(function(){})}box.addEventListener('submit',function(e){var f=e.target;if(!f."
-    "hasAttribute('data-live-form'))return;e.preventDefault();var b=f.querySelector('button');"
-    "if(b)b.disabled=true;fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f"
-    "))}).then(load,load)});setInterval(function(){if(box.querySelector('[data-live]'))load()},"
-    "1000);return box}live('transmitters','/transmitters');var found=live('brokers','/brokers');"
-    "if(found)found.addEventListener('click',function(e){var a=e.target;var h=document."
-    "getElementById('host');var p=document.getElementById('port');if(!a.getAttribute||!a."
-    "getAttribute('data-host')||!h||!p)return;e.preventDefault();h.value=a.getAttribute('data-"
-    "host');p.value=a.getAttribute('data-port');h.focus()})})();</script>";
+    "getElementById(id);if(!box)return null;var busy=false,again=false;function load(){if(busy)"
+    "{again=true;return}busy=true;fetch(url,{cache:'no-store'}).then(function(r){return r.ok?r."
+    "text():null}).then(function(t){if(t!==null)box.innerHTML=t}).catch(function(){}).then("
+    "function(){busy=false;if(again){again=false;load()}})}box.addEventListener('submit',"
+    "function(e){var f=e.target;if(!f.hasAttribute('data-live-form'))return;e.preventDefault();"
+    "var b=f.querySelector('button');if(b)b.disabled=true;fetch(f.action,{method:'POST',body:"
+    "new URLSearchParams(new FormData(f)),redirect:'manual'}).then(load,load)});setInterval("
+    "function(){if(box.querySelector('[data-live]'))load()},1000);return box}live('transmitters'"
+    ",'/transmitters');var found=live('brokers','/brokers');if(found)found.addEventListener("
+    "'click',function(e){var a=e.target;var h=document.getElementById('host');var p=document."
+    "getElementById('port');if(!a.getAttribute||!a.getAttribute('data-host')||!h||!p)return;e."
+    "preventDefault();h.value=a.getAttribute('data-host');p.value=a.getAttribute('data-port');"
+    "(document.getElementById('user')||h).focus()})})();</script>";
 void transmitters(Html& page, const SetupView& v) {
     page.format("<section id=\"transmitters\">");
     transmitterList(page, v);
