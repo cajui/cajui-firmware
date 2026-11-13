@@ -17,19 +17,23 @@ someone opened the setup page or connected a USB cable again.
 
 - The receiver can look for the broker itself: it tries a TCP connection to the broker
   port on every other address of its station's IPv4 network and lists those that accept.
-  A network larger than 254 hosts is narrowed to the /24 block around the receiver, so a
-  search always ends in about thirteen seconds.
+  A network larger than 254 hosts is narrowed to the /24 block around the receiver, so
+  trying the port takes about thirteen seconds whatever the network's size.
 - **Setup page.** The broker section lists what the search found, after any announced
   broker, with the same "Use" link. The search sends no credentials; the person still
   enters the username and password.
 - **In operation.** With the setup page closed, Wi-Fi connected to the stored network and
-  the broker unreachable for two minutes, the receiver searches. It asks each address
-  that answered whether it accepts the stored username and password, with an MQTT
-  3.1.1 CONNECT that has a clean session, no will and its own client ID. The first one
-  that accepts replaces the stored host, is saved and takes over forwarding without a
-  restart. While the broker stays unreachable the search repeats every five minutes.
-- The range, the CONNECT packet, the reading of the answer and the schedule are host
-  code in `lib/CajuiUplink` under the coverage gate. The sockets live in
+  the broker unreachable for two minutes, the receiver searches. Each address that
+  answered, the stored host first if it is among them, gets an MQTT 3.1.1 CONNECT with a
+  clean session, no will and its own client ID, first with the stored username and a
+  random control password. A broker that accepts it checks no password and is skipped.
+  Only a broker that refuses it is asked with the stored password. The first one that
+  accepts replaces the stored host, is saved and takes over forwarding without a
+  restart; when it is the stored host itself, the connection is restarted. While the
+  broker stays unreachable the search repeats every five minutes.
+- The range, the CONNECT packet, the reading of the answer, the control password, the
+  decision on each candidate and the schedule are host code in `lib/CajuiUplink` under
+  the coverage gate. The sockets live in
   `src/board/broker_scan.cpp` and run on hardware only.
 
 ## Consequences
@@ -38,20 +42,29 @@ someone opened the setup page or connected a USB cable again.
   five seconds as before, and the first search starts only after two minutes.
 - A stored host name is replaced by the address found. The next address change is
   handled by another search.
-- In operation the receiver sends the stored password to any computer on the stored
-  Wi-Fi network that accepts a connection on the broker port, not only to the host the
-  password was entered for. The uplink is already plain MQTT on a network that must be
-  trusted, and someone on that network can read the password from the forwarding
-  connection; the search makes it easier, since answering on a port is simpler than
-  intercepting traffic. The receiver searches only while its station is on the stored
-  network, and the setup page still never sends a saved password to a host the person
-  typed. Broker TLS with a pinned identity would close this and is not implemented.
+- A broker without authentication on the same network, such as Mosquitto with anonymous
+  access, never takes over forwarding and never receives the stored password: it accepts
+  the control password and is skipped.
+- In operation the receiver still sends the stored password to any computer on the stored
+  Wi-Fi network that answers on the broker port and refuses the control password, not
+  only to the host the password was entered for. Something that imitates a broker on
+  purpose gets the password and the forwarding, including the management channel. The
+  uplink is already plain MQTT on a network that must be trusted, and someone on that
+  network can read the password from the forwarding connection; the search makes it
+  easier, since answering on a port is simpler than intercepting traffic. The receiver
+  searches only while its station is on the stored network, and the setup page still
+  never sends a saved password to a host the person typed. Broker TLS with a pinned
+  identity would close this and is not implemented.
 - Only the receiver's own network is searched. A broker behind another router or on
   another subnet is not found and still needs its address typed, as does a broker on
   another port when no broker is stored yet (the page searches the staged port, or 1883).
 - At most six brokers are listed or asked per search.
-- A search opens up to six connections at a time for about thirteen seconds; each
-  address of the network sees one connection attempt per search.
+- Trying the port opens up to six connections at a time for about thirteen seconds;
+  each address of the network sees one connection attempt per search, and each that
+  answers sees up to two more for the CONNECT probes. On the setup page the mDNS query
+  adds up to about eight seconds. In operation each probe waits up to four and a half
+  seconds, so a search with six silent candidates can take about a minute; a search
+  that cannot start is tried again after ten seconds.
 
 ## Alternatives
 

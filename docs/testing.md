@@ -49,8 +49,10 @@ this Unity suite on the board is not part of validation. Setup tests cover butto
 timing, the Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host
 and origin checks, notice codes and oversized pages; the access point, DNS, HTTP server,
 scanning and mDNS discovery run only on hardware. Broker search tests cover the address
-range for each network size, the CONNECT packet byte by byte, the reading of a complete,
-partial or foreign answer and the search schedule across a timer wrap; the sockets that
+range for each network size, the CONNECT packet byte by byte and at the one-to-two-byte
+length boundary, the reading of a complete, partial or foreign answer, the control
+password, the decision on each candidate, and the search schedule across a timer wrap and
+after a search that could not start; the sockets that
 try the addresses run only on hardware. Firmware tests cover signed updates:
 installation in any chunking, every signed byte, header shape, role, downgrade, size,
 truncation and sink failures, against a fixture signed by `tools/package_firmware.py`

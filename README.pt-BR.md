@@ -139,8 +139,8 @@ regional automaticamente. Potência mínima não torna segura a transmissão sem
 
 Use a página de configuração e o broker em uma rede confiável. O ponto de acesso
 temporário fica aberto enquanto habilitado, o transporte MQTT não usa criptografia,
-uma receptora que perdeu o broker oferece as credenciais guardadas aos brokers da sua
-rede Wi-Fi e o pareamento por rádio não autentica contra um atacante ativo próximo.
+uma receptora que perdeu o broker oferece as credenciais guardadas aos brokers com
+senha da sua rede Wi-Fi e o pareamento por rádio não autentica contra um atacante ativo próximo.
 A criptografia dos quadros não elimina esses limites. Consulte
 [segurança](SECURITY.md) e [estado da implementação](docs/status.md).
 

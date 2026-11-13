@@ -137,7 +137,7 @@ transmitting without an antenna safe.
 
 Use the setup page and broker on a trusted network. The temporary setup access
 point is open while enabled, MQTT transport is plaintext, a receiver that lost its
-broker offers its stored credentials to brokers on its Wi-Fi network, and radio pairing
+broker offers its stored credentials to password-checking brokers on its Wi-Fi network, and radio pairing
 does not authenticate against an active nearby attacker. Frame encryption does not
 remove these boundaries. See [security](SECURITY.md) and [implementation status](docs/status.md).
 

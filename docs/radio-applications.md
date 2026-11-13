@@ -208,15 +208,20 @@ queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 When the broker has been unreachable for two minutes with Wi-Fi connected to the stored
 network and the setup page closed, the receiver searches that network for it
 ([ADR 0003](adr/0003-broker-search.md)): it tries the broker port on every other address
-(the /24 block around itself on a larger network), asks each one that answers whether it
-accepts the stored username and password, and moves to the first that does. The new
-address is saved and forwarding continues without a restart; queued samples are then
-published as usual. The search takes about fifteen seconds and repeats every five
-minutes while the broker stays unreachable. It logs `CJAPP UPLINK search`, then
-`CJAPP UPLINK moved host=<address> ok=<0|1>` or `CJAPP UPLINK search found=<n>
-accepted=<0|1>`. A broker on another subnet is not found. The stored password is sent to
-any host of that network that answers on the broker port, so the trusted-network
-requirement above applies to every computer on it. Observed on one Heltec WiFi LoRa 32 V3
+(the /24 block around itself on a larger network), and asks each one that answers, the
+stored host first, whether it accepts the stored username: first with a random control
+password, then, only if that was refused, with the stored password. A broker that accepts
+the control password checks no password and is skipped. The receiver moves to the first
+broker that refuses the control password and accepts the stored one. The new address is
+saved and forwarding continues without a restart; queued samples are then published as
+usual. A search with brokers that answer promptly takes about fifteen seconds, up to about
+a minute when candidates are slow, and repeats every five minutes while the broker stays
+unreachable. It logs `CJAPP UPLINK search`, then `CJAPP UPLINK moved host=<address>
+ok=<0|1>` (or `restarted` when the stored host itself accepted) or `CJAPP UPLINK search
+found=<n> open=<n> accepted=0`. A broker on another subnet is not found. The stored
+password is sent to any host of that network that answers on the broker port and refuses
+the control password, so the trusted-network requirement above applies to every computer
+on it. Observed on one Heltec WiFi LoRa 32 V3
 against Mosquitto 2.0.22 on a home network: the broker's address was changed twice and
 the receiver moved each time 136 seconds after its restart, then published its queue.
 
