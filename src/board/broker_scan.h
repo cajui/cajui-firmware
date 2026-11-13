@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
+#include "cajui_search.h"
 #include "cajui_setup.h"
 #include "cajui_uplink.h"
 #include <atomic>
@@ -14,8 +15,11 @@ namespace board {
 // early when `cancel` turns true.
 size_t findBrokers(uint16_t port, cajui::BrokerView* found, size_t known, size_t capacity,
                    const std::atomic<bool>& cancel);
-// Asks the MQTT broker at an IPv4 address whether it accepts these credentials. Sends the
-// stored password in clear, like the forwarding client: call only on the network the
-// credentials were saved for.
-bool brokerAccepts(const char* address, const cajui::UplinkConfig&, uint64_t device);
+// Asks the MQTT broker at an IPv4 address whether it accepts these credentials, with a
+// clean-session CONNECT. Incomplete when nothing usable came back in time. The password
+// travels in clear, like the forwarding client's: send the stored one only on the network
+// it was saved for, and only after the broker refused a control password
+// (cajui::judgeCandidate).
+cajui::ProbeAnswer probeBroker(const char* address, uint16_t port, const char* username,
+                               const char* password, uint64_t device);
 } // namespace board

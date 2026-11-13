@@ -15,7 +15,8 @@ constexpr unsigned CleanSession = 0x02, HasPassword = 0x40, HasUsername = 0x80;
 constexpr uint16_t KeepaliveSeconds = 10;
 constexpr size_t ConnackSize = 4, ReturnCodeAt = 3;
 constexpr unsigned ByteBits = 8, LengthBits = 7, Octet1 = 24, Octet2 = 16;
-constexpr uint8_t LengthMore = 0x80, LengthMask = 0x7f, ByteMask = 0xff;
+constexpr uint8_t LengthMore = 0x80, LengthMask = 0x7f, ByteMask = 0xff, NibbleMask = 0x0f;
+constexpr char HexDigits[] = "0123456789abcdef";
 uint8_t* text(uint8_t* at, const char* value, size_t length) {
     *at++ = uint8_t(length >> ByteBits);
     *at++ = uint8_t(length & ByteMask);
@@ -87,6 +88,23 @@ ProbeAnswer probeAnswer(const uint8_t* bytes, size_t size) {
     if (size < ConnackSize) return ProbeAnswer::Incomplete;
     return bytes[ReturnCodeAt] ? ProbeAnswer::Refused : ProbeAnswer::Accepted;
 }
+bool controlSecret(const uint8_t* random, size_t size, const char* stored, char* output,
+                   size_t capacity) {
+    if (!random || !size || !output || capacity < 2 * size + 1) return false;
+    for (size_t i = 0; i < size; ++i) {
+        output[2 * i] = HexDigits[random[i] >> 4U];
+        output[2 * i + 1] = HexDigits[random[i] & NibbleMask];
+    }
+    output[2 * size] = 0;
+    if (stored && !std::strcmp(output, stored)) output[0] = output[0] == 'a' ? 'b' : 'a';
+    return true;
+}
+BrokerMatch judgeCandidate(ProbeAnswer withControl, ProbeAnswer withStored) {
+    if (withControl == ProbeAnswer::Accepted) return BrokerMatch::Open;
+    if (withControl != ProbeAnswer::Refused) return BrokerMatch::NotBroker;
+    if (withStored == ProbeAnswer::Accepted) return BrokerMatch::Matches;
+    return withStored == ProbeAnswer::Refused ? BrokerMatch::Refuses : BrokerMatch::NotBroker;
+}
 bool SearchSchedule::due(uint32_t nowMs, bool wifiConnected, bool brokerOnline) {
     if (!wifiConnected || brokerOnline) {
         offline_ = false;
@@ -94,14 +112,18 @@ bool SearchSchedule::due(uint32_t nowMs, bool wifiConnected, bool brokerOnline) 
     }
     if (!offline_) {
         offline_ = true;
-        searched_ = false;
         since_ = nowMs;
+        wait_ = FirstDelayMs;
         return false;
     }
-    const uint32_t wait = searched_ ? uint32_t(RetryMs) : uint32_t(FirstDelayMs);
-    if (uint32_t(nowMs - since_) < wait) return false;
-    searched_ = true;
+    if (uint32_t(nowMs - since_) < wait_) return false;
     since_ = nowMs;
+    wait_ = RetryMs;
     return true;
+}
+void SearchSchedule::postpone(uint32_t nowMs) {
+    if (!offline_) return;
+    since_ = nowMs;
+    wait_ = PostponeMs;
 }
 } // namespace cajui

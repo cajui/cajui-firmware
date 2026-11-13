@@ -92,10 +92,13 @@ private:
     cajui::SearchSchedule search_;
     cajui::UplinkConfig probe_{};
     uint64_t probeDevice_ = 0;
-    // Written by the discovery task: the broker that accepted, and how many answered.
+    // Written by the discovery task: the broker that accepted, how many answered on the
+    // port and how many accepted any password.
     char movedTo_[cajui::AddressCapacity]{};
-    size_t candidates_ = 0;
-    bool rediscovering_ = false, discoverQueued_ = false;
+    size_t candidates_ = 0, openBrokers_ = 0;
+    // stale_: the page opened while a search in operation ran, so its result must not be
+    // applied. discoverQueued_: a page search was asked for while another search ran.
+    bool rediscovering_ = false, stale_ = false, discoverQueued_ = false;
     // Station GOT_IP events. A trial counts as connected only after one that follows its
     // WiFi.begin(): until the old association is torn down, status() still reads connected.
     static std::atomic<uint32_t> addresses_;

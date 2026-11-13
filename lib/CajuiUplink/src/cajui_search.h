@@ -43,17 +43,31 @@ enum class ProbeAnswer { Incomplete, Accepted, Refused, NotMqtt };
 // Reads the first bytes a candidate sent back. Only a CONNACK with return code 0 accepts.
 ProbeAnswer probeAnswer(const uint8_t* bytes, size_t size);
 
+// A broker that accepts any password checks nothing, and moving to it would hand forwarding
+// and the management channel to whoever runs it. Each candidate is first asked with a
+// control password that cannot be the stored one; only a broker that refuses it is then
+// asked with the stored password, which so never reaches a broker without authentication.
+constexpr size_t ControlRandomBytes = 8, ControlSecretCapacity = 2 * ControlRandomBytes + 1;
+// Lower-case hex of the random bytes, altered if it happens to equal `stored`.
+bool controlSecret(const uint8_t* random, size_t size, const char* stored, char* output,
+                   size_t capacity);
+enum class BrokerMatch { Matches, Open, Refuses, NotBroker };
+// `withStored` is ignored unless the control password was refused.
+BrokerMatch judgeCandidate(ProbeAnswer withControl, ProbeAnswer withStored);
+
 // When a receiver in operation searches again: after the broker has been unreachable for
 // FirstDelayMs with Wi-Fi connected, then every RetryMs while that lasts. A broker that
 // restarts comes back at the same address well before the first search.
 class SearchSchedule final {
 public:
-    static constexpr uint32_t FirstDelayMs = 120000, RetryMs = 300000;
+    static constexpr uint32_t FirstDelayMs = 120000, RetryMs = 300000, PostponeMs = 10000;
     // Call regularly; true once each time a search is due.
     bool due(uint32_t nowMs, bool wifiConnected, bool brokerOnline);
+    // The search just reported due could not start: due again after PostponeMs.
+    void postpone(uint32_t nowMs);
 
 private:
-    bool offline_ = false, searched_ = false;
-    uint32_t since_ = 0;
+    bool offline_ = false;
+    uint32_t since_ = 0, wait_ = FirstDelayMs;
 };
 } // namespace cajui

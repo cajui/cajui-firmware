@@ -96,6 +96,24 @@ void test_probe_is_a_clean_session_connect_with_the_credentials() {
     TEST_ASSERT_EQUAL_size_t(
         0, probeConnect(id.c_str(), user.c_str(), secret.c_str(), packet, sizeof(packet) - 1));
 }
+void test_probe_length_switches_to_two_bytes_after_127() {
+    uint8_t packet[ProbeCapacity]{};
+    // Remaining length = 16 + the three field lengths: 23 + 64 + 24 = 111 gives 127.
+    const std::string id(ProbeIdCapacity, 'i');
+    const std::string user(ProbeFieldCapacity, 'u');
+    const std::string longest(24, 's');
+    TEST_ASSERT_EQUAL_size_t(
+        2 + 127, probeConnect(id.c_str(), user.c_str(), longest.c_str(), packet, sizeof(packet)));
+    TEST_ASSERT_EQUAL_HEX8(0x7f, packet[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, packet[2]); // Protocol name length follows at once.
+    const std::string longer(25, 's');
+    TEST_ASSERT_EQUAL_size_t(
+        3 + 128, probeConnect(id.c_str(), user.c_str(), longer.c_str(), packet, sizeof(packet)));
+    TEST_ASSERT_EQUAL_HEX8(0x80, packet[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x01, packet[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x00, packet[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x04, packet[4]);
+}
 void test_probe_refuses_missing_empty_or_oversized_fields() {
     uint8_t packet[ProbeCapacity]{};
     const std::string longId(ProbeIdCapacity + 1, 'i');
@@ -143,6 +161,46 @@ void test_only_a_connack_with_code_zero_accepts() {
     }
     EXPECT_RESULT(ProbeAnswer::Incomplete, probeAnswer(nullptr, sizeof(accepted)));
 }
+void test_control_password_is_random_hex_and_never_the_stored_one() {
+    const uint8_t random[ControlRandomBytes] = {0x00, 0x1f, 0xa0, 0xff, 0x12, 0x34, 0xab, 0xcd};
+    char control[ControlSecretCapacity]{};
+    TEST_ASSERT_TRUE(
+        controlSecret(random, sizeof(random), "mqtt-secret", control, sizeof(control)));
+    TEST_ASSERT_EQUAL_STRING("001fa0ff1234abcd", control);
+    TEST_ASSERT_TRUE(controlSecret(random, sizeof(random), nullptr, control, sizeof(control)));
+    TEST_ASSERT_EQUAL_STRING("001fa0ff1234abcd", control);
+    // Equal to the stored password: altered, so the probe can never send the real one.
+    TEST_ASSERT_TRUE(
+        controlSecret(random, sizeof(random), "001fa0ff1234abcd", control, sizeof(control)));
+    TEST_ASSERT_EQUAL_STRING("a01fa0ff1234abcd", control);
+    const uint8_t startsWithA[ControlRandomBytes] = {0xa0};
+    TEST_ASSERT_TRUE(controlSecret(startsWithA, sizeof(startsWithA), "a000000000000000", control,
+                                   sizeof(control)));
+    TEST_ASSERT_EQUAL_STRING("b000000000000000", control);
+    TEST_ASSERT_FALSE(controlSecret(random, sizeof(random), "x", control, sizeof(control) - 1));
+    TEST_ASSERT_FALSE(controlSecret(nullptr, sizeof(random), "x", control, sizeof(control)));
+    TEST_ASSERT_FALSE(controlSecret(random, 0, "x", control, sizeof(control)));
+    TEST_ASSERT_FALSE(controlSecret(random, sizeof(random), "x", nullptr, sizeof(control)));
+}
+void test_only_a_broker_that_checks_passwords_and_accepts_the_stored_one_matches() {
+    const ProbeAnswer answers[] = {ProbeAnswer::Incomplete, ProbeAnswer::Accepted,
+                                   ProbeAnswer::Refused, ProbeAnswer::NotMqtt};
+    for (size_t i = 0; i < sizeof(answers) / sizeof(answers[0]); ++i) {
+        SCENARIO(i);
+        // Accepting the control password: open, whatever the stored one would get.
+        EXPECT_RESULT(BrokerMatch::Open, judgeCandidate(ProbeAnswer::Accepted, answers[i]));
+        // No usable answer to the control password: not a broker to ask the stored one.
+        EXPECT_RESULT(BrokerMatch::NotBroker, judgeCandidate(ProbeAnswer::Incomplete, answers[i]));
+        EXPECT_RESULT(BrokerMatch::NotBroker, judgeCandidate(ProbeAnswer::NotMqtt, answers[i]));
+    }
+    EXPECT_RESULT(BrokerMatch::Matches,
+                  judgeCandidate(ProbeAnswer::Refused, ProbeAnswer::Accepted));
+    EXPECT_RESULT(BrokerMatch::Refuses, judgeCandidate(ProbeAnswer::Refused, ProbeAnswer::Refused));
+    EXPECT_RESULT(BrokerMatch::NotBroker,
+                  judgeCandidate(ProbeAnswer::Refused, ProbeAnswer::Incomplete));
+    EXPECT_RESULT(BrokerMatch::NotBroker,
+                  judgeCandidate(ProbeAnswer::Refused, ProbeAnswer::NotMqtt));
+}
 void test_search_starts_after_two_minutes_offline_and_repeats_every_five() {
     SearchSchedule schedule;
     const uint32_t first = SearchSchedule::FirstDelayMs;
@@ -185,6 +243,24 @@ void test_search_waits_again_after_the_broker_or_wifi_came_back() {
     TEST_ASSERT_FALSE(schedule.due(now + first - 1, true, false));
     TEST_ASSERT_TRUE(schedule.due(now + first, true, false));
 }
+void test_a_search_that_could_not_start_is_due_again_soon() {
+    SearchSchedule schedule;
+    const uint32_t first = SearchSchedule::FirstDelayMs;
+    const uint32_t soon = SearchSchedule::PostponeMs;
+    uint32_t now = 5000;
+    schedule.postpone(now); // Not offline: nothing to postpone.
+    TEST_ASSERT_FALSE(schedule.due(now, true, false));
+    TEST_ASSERT_FALSE(schedule.due(now + first - 1, true, false));
+    now += first;
+    TEST_ASSERT_TRUE(schedule.due(now, true, false));
+    schedule.postpone(now);
+    TEST_ASSERT_FALSE(schedule.due(now + soon - 1, true, false));
+    now += soon;
+    TEST_ASSERT_TRUE(schedule.due(now, true, false));
+    // Started this time: the next one waits the full retry interval.
+    TEST_ASSERT_FALSE(schedule.due(now + SearchSchedule::RetryMs - 1, true, false));
+    TEST_ASSERT_TRUE(schedule.due(now + SearchSchedule::RetryMs, true, false));
+}
 } // namespace
 
 void runSearchTests() {
@@ -194,8 +270,12 @@ void runSearchTests() {
     RUN_TEST(test_search_refuses_networks_without_another_host);
     RUN_TEST(test_addresses_and_probe_ids_are_formatted_into_large_enough_buffers_only);
     RUN_TEST(test_probe_is_a_clean_session_connect_with_the_credentials);
+    RUN_TEST(test_probe_length_switches_to_two_bytes_after_127);
     RUN_TEST(test_probe_refuses_missing_empty_or_oversized_fields);
     RUN_TEST(test_only_a_connack_with_code_zero_accepts);
+    RUN_TEST(test_control_password_is_random_hex_and_never_the_stored_one);
+    RUN_TEST(test_only_a_broker_that_checks_passwords_and_accepts_the_stored_one_matches);
     RUN_TEST(test_search_starts_after_two_minutes_offline_and_repeats_every_five);
     RUN_TEST(test_search_waits_again_after_the_broker_or_wifi_came_back);
+    RUN_TEST(test_a_search_that_could_not_start_is_due_again_soon);
 }

@@ -119,12 +119,13 @@ size_t findBrokers(uint16_t port, cajui::BrokerView* found, size_t known, size_t
     }
     return count;
 }
-bool brokerAccepts(const char* address, const cajui::UplinkConfig& config, uint64_t device) {
+cajui::ProbeAnswer probeBroker(const char* address, uint16_t port, const char* username,
+                               const char* password, uint64_t device) {
     IPAddress target;
-    if (!target.fromString(address)) return false;
-    const int fd = startConnection(ntohl(uint32_t(target)), config.port);
-    if (fd < 0) return false;
-    bool accepted = false;
+    if (!target.fromString(address)) return cajui::ProbeAnswer::Incomplete;
+    const int fd = startConnection(ntohl(uint32_t(target)), port);
+    if (fd < 0) return cajui::ProbeAnswer::Incomplete;
+    auto verdict = cajui::ProbeAnswer::Incomplete;
     fd_set writable;
     FD_ZERO(&writable);
     FD_SET(fd, &writable);
@@ -134,11 +135,10 @@ bool brokerAccepts(const char* address, const cajui::UplinkConfig& config, uint6
     size_t size = 0;
     if (select(fd + 1, nullptr, &writable, nullptr, &wait) > 0 && established(fd) &&
         cajui::formatProbeId(device, id, sizeof(id)))
-        size = cajui::probeConnect(id, config.username, config.password, packet, sizeof(packet));
+        size = cajui::probeConnect(id, username, password, packet, sizeof(packet));
     if (size && send(fd, packet, size, 0) == ssize_t(size)) {
         uint8_t answer[AnswerSize]{};
         size_t received = 0;
-        auto verdict = cajui::ProbeAnswer::Incomplete;
         const uint32_t started = millis();
         while (verdict == cajui::ProbeAnswer::Incomplete) {
             const uint32_t elapsed = millis() - started;
@@ -153,14 +153,14 @@ bool brokerAccepts(const char* address, const cajui::UplinkConfig& config, uint6
             received += size_t(got);
             verdict = cajui::probeAnswer(answer, received);
         }
-        accepted = verdict == cajui::ProbeAnswer::Accepted;
-        if (accepted) send(fd, cajui::ProbeDisconnect, sizeof(cajui::ProbeDisconnect), 0);
+        if (verdict == cajui::ProbeAnswer::Accepted)
+            send(fd, cajui::ProbeDisconnect, sizeof(cajui::ProbeDisconnect), 0);
     }
     // The packet held the broker password.
     volatile uint8_t* bytes = packet;
     for (size_t i = 0; i < sizeof(packet); ++i) bytes[i] = 0;
     close(fd);
-    return accepted;
+    return verdict;
 }
 } // namespace board
 #endif
