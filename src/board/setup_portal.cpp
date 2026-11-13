@@ -117,6 +117,8 @@ void SetupPortal::open() {
     savedCurrent_ = stored_;
     scanFailures_ = 0;
     scanFailed_ = scanRetryDue_ = scanPending_ = false;
+    // Searches asked for by an earlier session belong to it; this one starts its own.
+    discoverPending_ = discoverQueued_ = false;
     trial_ = trialFailed_ = reconnect_ = closing_ = false;
     WiFi.persistent(false);
     WiFi.mode(WIFI_AP_STA);
@@ -177,7 +179,8 @@ void SetupPortal::close() {
     cancelSearch_.store(true); // Nobody is left to read the page's list.
     saveRetry_.reset();
     if (scanning_) esp_wifi_scan_stop();
-    scanning_ = scanRetryDue_ = scanPending_ = false;
+    // A search waiting for the abandoned scan would otherwise show as running for good.
+    scanning_ = scanRetryDue_ = scanPending_ = discoverPending_ = false;
     WiFi.scanDelete();
     WiFi.setAutoReconnect(true);
     server_.stop();
@@ -233,6 +236,8 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
+        // The new network gets its own search once it settles.
+        discoverPending_ = false;
         cancelSearch_.store(true); // The station leaves the network being searched.
         uplink_.suspend();
         recovery_.suspend();
@@ -604,9 +609,7 @@ void SetupPortal::home() {
     view.networkCount = networkCount_;
     view.scanning = scanning_ || scanRetryDue_ || scanPending_;
     view.scanFailed = scanFailed_ && !view.scanning;
-    view.searching = searching_.load();
-    view.brokers = brokers_;
-    view.brokerCount = view.searching ? 0 : brokerCount_.load();
+    fillBrokers(view);
     const String host = server_.arg("host");
     const long port = server_.arg("port").toInt();
     if (host.length() && host.length() <= cajui::HostCapacity && port > 0 && port <= UINT16_MAX) {
@@ -630,6 +633,24 @@ void SetupPortal::home() {
     }
     // Sent without the lock: a slow client must not hold up the radio loop.
     if (!rendered) {
+        server_.send(HttpServerError, "text/plain", "Page too large");
+        return;
+    }
+    server_.send(HttpOk, "text/html; charset=utf-8", page_);
+}
+// A search that is waiting for the station to settle, a scan or another search counts as
+// running: the page keeps refreshing until its result is there.
+void SetupPortal::fillBrokers(cajui::SetupView& view) {
+    view.wifi = wifi_;
+    view.searching = searching_.load() || settling_ || discoverPending_ || discoverQueued_;
+    view.brokers = brokers_;
+    view.brokerCount = view.searching ? 0 : brokerCount_.load();
+    view.token = session_.token();
+}
+void SetupPortal::brokers() {
+    cajui::SetupView view{};
+    fillBrokers(view);
+    if (!cajui::renderBrokers(view, page_, sizeof(page_))) {
         server_.send(HttpServerError, "text/plain", "Page too large");
         return;
     }
@@ -730,6 +751,9 @@ void SetupPortal::route() {
     });
     server_.on("/transmitters", HTTP_GET, [this] {
         if (authorize(false)) transmitters();
+    });
+    server_.on("/brokers", HTTP_GET, [this] {
+        if (authorize(false)) brokers();
     });
     server_.on("/scan", HTTP_POST, [this] {
         if (!authorize(true)) return;

@@ -165,7 +165,7 @@ struct SetupView {
     bool scanFailed = false;
     const BrokerView* brokers = nullptr;
     size_t brokerCount = 0;
-    bool searching = false;
+    bool searching = false; // A broker search runs or is about to start.
     const EnrollmentInfo* transmitters = nullptr;
     size_t transmitterCount = 0;
     const PairingView* pairing = nullptr; // Absent: new transmitters need USB.
@@ -181,6 +181,9 @@ constexpr size_t PageCapacity = 20480;
 // the list with long, escaped names): when the page does not fit, they are dropped from
 // the end of their lists before the page is refused.
 bool renderSetup(const SetupView&, char* output, size_t capacity);
+// The broker search box alone (progress, found brokers, search again), refreshed live by
+// the setup page. Uses wifi, searching, brokers, brokerCount and token.
+bool renderBrokers(const SetupView&, char* output, size_t capacity);
 // The transmitters section alone (list and pairing), refreshed live by the setup page.
 bool renderTransmitters(const SetupView&, char* output, size_t capacity);
 bool renderRevoke(uint64_t node, uint64_t generation, const char* token, char* output,
