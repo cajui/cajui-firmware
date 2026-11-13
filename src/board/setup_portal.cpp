@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #if defined(CAJUI_RUNTIME_ROLE) && CAJUI_RUNTIME_ROLE == 2
 #include "setup_portal.h"
+#include "broker_scan.h"
 #include "cajui_service.h"
 #include "display.h"
 #include "release_key.h"
@@ -32,7 +33,7 @@ constexpr uint8_t ScanRetries = 2;
 constexpr uint16_t DnsPort = 53;
 // Visible feedback on boards without a display: the LED blinks while setup is open.
 constexpr uint32_t BlinkMs = 500;
-constexpr uint32_t TaskStack = 10240, DiscoveryStack = 4096;
+constexpr uint32_t TaskStack = 10240, DiscoveryStack = 6144;
 constexpr uint32_t ActiveDelayMs = 2, IdleDelayMs = 20;
 class PortalRadioIdle final : public cajui::RadioIdleAccess {
 public:
@@ -101,6 +102,7 @@ void SetupPortal::run() {
 }
 void SetupPortal::open() {
     if (active_) return;
+    cancelSearch_.store(true); // The page now decides the network and the broker.
     saveRetry_.reset();
     cajui::setupSsid(store_.device(), ssid_, sizeof(ssid_));
     {
@@ -208,7 +210,11 @@ void SetupPortal::poll() {
         MDNS.end();
         mdns_ = mdnsEndPending_ = false;
     }
-    if (!active_) return;
+    if (rediscovering_ && !searching_.load()) finishRediscovery();
+    if (!active_) {
+        rediscover();
+        return;
+    }
     digitalWrite(Led, (millis() / BlinkMs) % 2 ? HIGH : LOW);
     dns_.processNextRequest();
     server_.handleClient();
@@ -219,6 +225,7 @@ void SetupPortal::poll() {
             WiFi.scanDelete();
             scanning_ = false;
         }
+        cancelSearch_.store(true); // The station leaves the network being searched.
         uplink_.suspend();
         recovery_.suspend();
         trialAddresses_ = addresses_.load();
@@ -364,16 +371,34 @@ void SetupPortal::discover() {
         discoverPending_ = true;
         return;
     }
+    if (wifi_ != cajui::WifiState::Connected) return; // No network to search yet.
     bool idle = false;
-    if (!mdns_ || mdnsEndPending_ || !searching_.compare_exchange_strong(idle, true)) return;
-    // mDNS queries block for seconds; run them off the page task.
-    if (xTaskCreate(discoveryTask, "cajui-mdns", DiscoveryStack, this, 1, nullptr) != pdPASS)
+    if (!searching_.compare_exchange_strong(idle, true)) {
+        discoverQueued_ = rediscovering_; // Search for the page once that one ends.
+        return;
+    }
+    searchStored_ = false;
+    searchMdns_ = mdns_ && !mdnsEndPending_;
+    searchPort_ = pending_.port ? pending_.port : cajui::DefaultMqttPort;
+    cancelSearch_.store(false);
+    // mDNS queries and the address search block for seconds; run them off the page task.
+    if (xTaskCreate(discoveryTask, "cajui-find", DiscoveryStack, this, 1, nullptr) != pdPASS)
         searching_.store(false);
 }
 void SetupPortal::discoveryTask(void* self) {
     auto* portal = static_cast<SetupPortal*>(self);
+    if (portal->searchStored_)
+        portal->searchStoredBroker();
+    else
+        portal->searchForPage();
+    portal->searching_.store(false);
+    vTaskDelete(nullptr);
+}
+// For the page: announced brokers first, then every address of the station's network that
+// accepts a connection on the broker port. No credentials are sent.
+void SetupPortal::searchForPage() {
     int found = 0;
-    for (int attempt = 0; attempt < DiscoveryAttempts && found <= 0; ++attempt) {
+    for (int attempt = 0; searchMdns_ && attempt < DiscoveryAttempts && found <= 0; ++attempt) {
         if (attempt) vTaskDelay(pdMS_TO_TICKS(DiscoveryRetryMs));
         found = MDNS.queryService("mqtt", "tcp");
     }
@@ -381,12 +406,74 @@ void SetupPortal::discoveryTask(void* self) {
     for (int i = 0; i < found && count < cajui::MaxBrokers; ++i) {
         const String host = MDNS.IP(i).toString();
         if (host.length() > cajui::HostCapacity || host == "0.0.0.0") continue;
-        std::strcpy(portal->brokers_[count].host, host.c_str());
-        portal->brokers_[count++].port = MDNS.port(i);
+        std::strcpy(brokers_[count].host, host.c_str());
+        brokers_[count++].port = MDNS.port(i);
     }
-    portal->brokerCount_.store(count);
-    portal->searching_.store(false);
-    vTaskDelete(nullptr);
+    count = findBrokers(searchPort_, brokers_, count, cajui::MaxBrokers, cancelSearch_);
+    brokerCount_.store(count);
+}
+// In operation: which address of the stored network has a broker that accepts the stored
+// credentials. The password leaves the receiver only while the station is on that network.
+void SetupPortal::searchStoredBroker() {
+    cajui::BrokerView candidates[cajui::MaxBrokers]{};
+    const size_t count = findBrokers(probe_.port, candidates, 0, cajui::MaxBrokers, cancelSearch_);
+    candidates_ = count;
+    for (size_t i = 0; i < count && !cancelSearch_.load(); ++i) {
+        if (WiFi.SSID() != probe_.ssid) break;
+        if (!brokerAccepts(candidates[i].host, probe_, probeDevice_)) continue;
+        std::strcpy(movedTo_, candidates[i].host);
+        break;
+    }
+}
+void SetupPortal::rediscover() {
+    if (rediscovering_ || !search_.due(millis(), MqttUplink::wifiConnected(), uplink_.connected()))
+        return;
+    bool loaded = false;
+    {
+        Locked held(lock_);
+        loaded = cajui::loadUplink(blob_, probe_) == cajui::ReadResult::Ok;
+    }
+    bool idle = false;
+    if (!loaded || !cajui::validUplink(probe_) || WiFi.SSID() != probe_.ssid ||
+        !searching_.compare_exchange_strong(idle, true)) {
+        cajui::wipe(probe_);
+        return;
+    }
+    searchStored_ = true;
+    probeDevice_ = store_.device();
+    movedTo_[0] = 0;
+    cancelSearch_.store(false);
+    if (xTaskCreate(discoveryTask, "cajui-find", DiscoveryStack, this, 1, nullptr) != pdPASS) {
+        searching_.store(false);
+        cajui::wipe(probe_);
+        return;
+    }
+    rediscovering_ = true;
+    Serial.println("CJAPP UPLINK search");
+}
+// The search ended: move to the broker it found, unless the page opened, the station
+// changed network or the stored broker came back meanwhile.
+void SetupPortal::finishRediscovery() {
+    rediscovering_ = false;
+    const bool current = !active_ && !cancelSearch_.load() && MqttUplink::wifiConnected() &&
+                         WiFi.SSID() == probe_.ssid && !uplink_.connected();
+    if (current && movedTo_[0] && std::strcmp(movedTo_, probe_.host) != 0) {
+        std::strcpy(probe_.host, movedTo_); // An IPv4 address always fits a host.
+        bool written = false;
+        const auto access = whileRadioIdle([&] { written = cajui::saveUplink(blob_, probe_); });
+        const bool moved =
+            access == cajui::RadioAccessState::Listening && written && control_.applyUplink(probe_);
+        Serial.printf("CJAPP UPLINK moved host=%s ok=%u\n", movedTo_, unsigned(moved));
+    } else if (current) {
+        Serial.printf("CJAPP UPLINK search found=%u accepted=%u\n", unsigned(candidates_),
+                      unsigned(movedTo_[0] != 0));
+    }
+    cajui::wipe(probe_);
+    movedTo_[0] = 0;
+    if (discoverQueued_) {
+        discoverQueued_ = false;
+        if (active_) discover();
+    }
 }
 // Only the access point interface, only its own address, and for a POST only the page's
 // origin with the session token. Anything else is refused without touching state.

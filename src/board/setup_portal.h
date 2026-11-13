@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "cajui_pairing.h"
+#include "cajui_search.h"
 #include "cajui_setup.h"
 #include "cajui_service.h"
 #include "common.h"
@@ -81,6 +82,20 @@ private:
     cajui::BrokerView brokers_[cajui::MaxBrokers]{};
     std::atomic<size_t> brokerCount_{0};
     std::atomic<bool> searching_{false};
+    // What the discovery task was started for; written before it starts.
+    bool searchStored_ = false, searchMdns_ = false;
+    uint16_t searchPort_ = cajui::DefaultMqttPort;
+    std::atomic<bool> cancelSearch_{false};
+    // Search in operation (docs/adr/0003-broker-search.md): with the page closed, a broker
+    // unreachable for minutes is looked for on the stored network with the stored
+    // credentials. probe_ holds them while a search runs and is wiped afterwards.
+    cajui::SearchSchedule search_;
+    cajui::UplinkConfig probe_{};
+    uint64_t probeDevice_ = 0;
+    // Written by the discovery task: the broker that accepted, and how many answered.
+    char movedTo_[cajui::AddressCapacity]{};
+    size_t candidates_ = 0;
+    bool rediscovering_ = false, discoverQueued_ = false;
     // Station GOT_IP events. A trial counts as connected only after one that follows its
     // WiFi.begin(): until the old association is torn down, status() still reads connected.
     static std::atomic<uint32_t> addresses_;
@@ -111,6 +126,10 @@ private:
     void scan();
     void scanFailed();
     void discover();
+    void searchForPage();
+    void searchStoredBroker();
+    void rediscover();
+    void finishRediscovery();
     void startMdns();
     void collectScan();
     void trackWifi();

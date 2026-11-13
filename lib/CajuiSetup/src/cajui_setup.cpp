@@ -203,7 +203,7 @@ void brokerForm(Html& page, const SetupView& v) {
         page.format("&amp;port=%u\">Use</a></p>", unsigned(v.brokers[i].port));
     }
     if (!v.searching && !v.brokerCount)
-        page.format("<p><small>No broker announced on this network. Enter its address below."
+        page.format("<p><small>No broker found on this network. Enter its address below."
                     "</small></p>");
     if (v.wifi == WifiState::Connected) {
         form(page, "/discover", v.token);
