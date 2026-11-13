@@ -31,8 +31,13 @@ field reliability. No production image is released.
 - Receiver forwarding to an MQTT broker over Wi-Fi in Cajuí Central's JSON contract,
   removing each queued sample only after its PUBACK, with USB-provisioned settings.
 - A receiver setup page on a temporary access point opened by holding the PRG button:
-  Wi-Fi, MQTT broker (with mDNS discovery), status and transmitter revocation, applied
-  without a reboot. The OLED shows a QR code to join the setup network.
+  Wi-Fi, MQTT broker (announced through mDNS or found by searching the receiver's
+  network), status and transmitter revocation, applied without a reboot. The OLED shows a
+  QR code to join the setup network.
+- A receiver that loses its broker for two minutes searches its network for one that
+  accepts the stored credentials and moves to it
+  ([ADR 0003](adr/0003-broker-search.md)). Observed on one receiver and one home
+  network; the list on the setup page has not been checked on hardware yet.
 - [Radio pairing](radio-pairing.md): add a transmitter from the setup page with an
   X25519/HKDF key exchange; the transmitter joins after a long PRG press or `CJ1 PAIR`.
 - Unity tests, Python client tests, ASan/UBSan and coverage checks.

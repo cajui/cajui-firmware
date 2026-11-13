@@ -413,7 +413,7 @@ void test_setup_page_states_and_prefill() {
     TEST_ASSERT_FALSE(contains(page, "wifi-secret"));
     view.saved = false;
     TEST_ASSERT_TRUE(contains(page, "No transmitter enrolled"));
-    TEST_ASSERT_TRUE(contains(page, "No broker announced"));
+    TEST_ASSERT_TRUE(contains(page, "No broker found"));
     TEST_ASSERT_TRUE(contains(page, "Broker: not configured"));
     TEST_ASSERT_FALSE(contains(page, "Search again")); // Not connected: no discovery link.
     view.scanning = true;

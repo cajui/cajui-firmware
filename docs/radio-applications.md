@@ -205,6 +205,26 @@ only the 14-byte queue head record.
 Diagnostic lines: `CJAPP UPLINK online|offline`, `CJAPP FORWARD puback total=<n>
 queued=<n>` and `CJAPP FORWARD retry total=<n>`.
 
+When the broker has been unreachable for two minutes with Wi-Fi connected to the stored
+network and the setup page closed, the receiver searches that network for it
+([ADR 0003](adr/0003-broker-search.md)): it tries the broker port on every other address
+(the /24 block around itself on a larger network), and asks each one that answers, the
+stored host first, whether it accepts the stored username: first with a random control
+password, then, only if that was refused, with the stored password. A broker that accepts
+the control password checks no password and is skipped. The receiver moves to the first
+broker that refuses the control password and accepts the stored one. The new address is
+saved and forwarding continues without a restart; queued samples are then published as
+usual. A search takes about 35 seconds, with Wi-Fi power saving off while the port is tried, and
+up to about a minute and a half when candidates answer slowly, and repeats every five minutes while the broker stays
+unreachable. It logs `CJAPP UPLINK search`, then `CJAPP UPLINK moved host=<address>
+ok=<0|1>` (or `restarted` when the stored host itself accepted) or `CJAPP UPLINK search
+found=<n> open=<n> accepted=0`. A broker on another subnet is not found. The stored
+password is sent to any host of that network that answers on the broker port and refuses
+the control password, so the trusted-network requirement above applies to every computer
+on it. Observed on one Heltec WiFi LoRa 32 V3
+against Mosquitto 2.0.22 on a home network: the broker's address was changed twice and
+the receiver moved each time 136 seconds after its restart, then published its queue.
+
 The same connection carries the [management channel](management-v1.md): a retained
 `online`/`offline` availability (the last will, plus an explicit `offline` before new
 broker settings or an update restart) and retained state for the receiver and each of its
@@ -242,7 +262,8 @@ GPIO with a pull-up by changing `board::SetupButton`.
 
 The page configures Wi-Fi (an explicit selector of scanned 2.4 GHz networks, with signal
 strength and a manual form for hidden networks) and the MQTT broker
-(address discovered through mDNS `_mqtt._tcp`, or typed, plus username and password),
+(address announced through mDNS `_mqtt._tcp`, found by trying the broker port on the
+addresses of the receiver's network, or typed, plus username and password),
 shows Wi-Fi, broker and queue status, and lists enrolled transmitters with their last
 accepted counter and a confirmed revoke action. Wi-Fi settings are saved independently
 to the uplink record once the
@@ -314,8 +335,8 @@ reports the actual save result instead of always reporting unchanged settings. R
 a transmitter remains a manual operation and reports busy/stopped directly, without a
 synthetic generation-conflict result.
 
-Wi-Fi scans and mDNS discovery never overlap, because a scan
-hops channels and drops mDNS traffic; a scan that starts while the station connects
+Wi-Fi scans and the broker search (mDNS query and address search) never overlap, because a
+scan hops channels and drops traffic; a scan that starts while the station connects
 aborts the connection, so scans wait for it. With the access point active, a scan takes
 longer than the Arduino library's 6-second limit, so results are awaited up to 15 seconds.
 The Wi-Fi scan behavior was observed on a Heltec WiFi LoRa 32 V3. The bounded idle

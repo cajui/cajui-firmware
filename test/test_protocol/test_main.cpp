@@ -485,6 +485,7 @@ void runCommandTests();
 void runDiscoveryTests();
 void runSensorTests();
 void runServiceTests();
+void runSearchTests();
 int runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_roundtrip_multiple_metrics_and_zero);
@@ -518,6 +519,7 @@ int runTests() {
     runDiscoveryTests();
     runSensorTests();
     runServiceTests();
+    runSearchTests();
     return UNITY_END();
 }
 #ifdef ARDUINO
