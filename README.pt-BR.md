@@ -52,6 +52,8 @@ confiabilidade de longo prazo em campo não foram estabelecidos. Consulte o
 - Mantém uma fila persistente de até 128 amostras enquanto o MQTT está indisponível
   e remove cada amostra após a confirmação do broker. Uma fila cheia descarta a mais antiga.
 - Oferece uma página na receptora para Wi-Fi, broker, pareamento e revogação.
+- Encontra o broker na rede da receptora, na página de configuração e de novo quando o
+  endereço dele muda.
 - Informa tensão da bateria onde há suporte e sinal do rádio junto das medições e publica
   definições de MQTT Discovery para o Home Assistant.
 
@@ -101,8 +103,9 @@ um broker MQTT acessível. As duas placas transmitem: a receptora envia confirma
    uma imagem publicada; ela pode ser anterior ao código de desenvolvimento
    descrito aqui. Stick Lite e XIAO exigem compilação do código e instalação por USB.
 3. **Configure a receptora.** Segure PRG por três segundos, conecte à rede Wi-Fi
-   temporária e abra `http://192.168.4.1`. Salve o Wi-Fi e depois informe o endereço
-   do broker e as credenciais dedicadas de produtor. Confira as duas conexões.
+   temporária e abra `http://192.168.4.1`. Salve o Wi-Fi, depois escolha o broker que
+   a página encontrou, ou digite o endereço dele, e informe as credenciais dedicadas
+   de produtor. Confira as duas conexões.
 4. **Pareie o transmissor.** Abra uma janela de pareamento na receptora e segure
    PRG no transmissor por três segundos para pedir entrada (na XIAO, use o botão
    da expansão Wio). Aprove o candidato
@@ -135,8 +138,9 @@ regional automaticamente. Potência mínima não torna segura a transmissão sem
 ## Segurança e validação
 
 Use a página de configuração e o broker em uma rede confiável. O ponto de acesso
-temporário fica aberto enquanto habilitado, o transporte MQTT não usa criptografia
-e o pareamento por rádio não autentica contra um atacante ativo próximo.
+temporário fica aberto enquanto habilitado, o transporte MQTT não usa criptografia,
+uma receptora que perdeu o broker oferece as credenciais guardadas aos brokers da sua
+rede Wi-Fi e o pareamento por rádio não autentica contra um atacante ativo próximo.
 A criptografia dos quadros não elimina esses limites. Consulte
 [segurança](SECURITY.md) e [estado da implementação](docs/status.md).
 

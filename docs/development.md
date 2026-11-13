@@ -85,7 +85,8 @@ directory on the include path (`-Isrc/board/boards/<board>`), and `src/board/pro
 includes it and checks that the full set of names is defined. Every driver under
 `src/board/sensors/` is built into every transmitter image; the profile's `Sensor*` pins
 say which ones the board can carry and the transmitter detects which are attached
-([ADR 0002](adr/0002-sensors-detected-at-run-time.md)). Decisions
+([ADR 0002](adr/0002-sensors-detected-at-run-time.md)). The receiver's search for its
+broker is recorded in [ADR 0003](adr/0003-broker-search.md). Decisions
 that depend on a capability stay in `src/board/` (`power.cpp` prepares the pins at
 startup and sleep and sets up and releases the pairing-button wake source). The
 applications use the profile's named pins but never branch on the board, and `lib/`

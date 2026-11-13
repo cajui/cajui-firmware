@@ -51,6 +51,8 @@ before choosing it for an installation.
 - Keeps a persistent queue of up to 128 samples while MQTT is unavailable, then
   removes each sample after the broker acknowledges it. A full queue drops the oldest sample.
 - Offers a receiver setup page for Wi-Fi, broker configuration, pairing and revocation.
+- Finds the broker on the receiver's network, on the setup page and again when its
+  address changes.
 - Reports battery voltage where supported and radio signal alongside measurements, and publishes
   MQTT Discovery definitions for Home Assistant.
 
@@ -100,8 +102,9 @@ the receiver sends acknowledgements.
    using a published image; it can be older than the development code described here.
    The Stick Lite and XIAO targets require a source build and USB installation.
 3. **Configure the receiver.** Hold PRG for three seconds, join its temporary Wi-Fi
-   network, and open `http://192.168.4.1`. Save your Wi-Fi settings, then enter the
-   broker address and dedicated producer credentials. Check both connection states.
+   network, and open `http://192.168.4.1`. Save your Wi-Fi settings, then choose the
+   broker the page found, or type its address, and enter the dedicated producer
+   credentials. Check both connection states.
 4. **Pair the transmitter.** Open a pairing window on the receiver and hold PRG on
    the transmitter for three seconds to request joining (use the Wio button on XIAO).
    Approve the candidate as described in [radio pairing](docs/radio-pairing.md). [USB enrollment](docs/provisioning.md)
@@ -133,8 +136,9 @@ transmitting without an antenna safe.
 ## Security and validation
 
 Use the setup page and broker on a trusted network. The temporary setup access
-point is open while enabled, MQTT transport is plaintext, and radio pairing does
-not authenticate against an active nearby attacker. Frame encryption does not
+point is open while enabled, MQTT transport is plaintext, a receiver that lost its
+broker offers its stored credentials to brokers on its Wi-Fi network, and radio pairing
+does not authenticate against an active nearby attacker. Frame encryption does not
 remove these boundaries. See [security](SECURITY.md) and [implementation status](docs/status.md).
 
 Host tests cover protocol, storage failure handling and sensor decoding. CI also

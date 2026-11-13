@@ -32,7 +32,7 @@ can specify a custom OpenSSL installation. PlatformIO/Unity versions are pinned.
 The coverage gate applies **to each file on its own**, never to an aggregate: every host
 implementation file listed in `GATED_FILES` of `scripts/check_protocol.py` (codec,
 delivery, runtime, application, crypto, storage, records, v1 snapshot, CRC32,
-provisioning, uplink, setup, pairing, firmware updates, SHT4x, DHT22 decoding, sensor
+provisioning, uplink, broker search, setup, pairing, firmware updates, SHT4x, DHT22 decoding, sensor
 detection, the metric registry, device decisions and service safety and setup-save retries) needs 95%
 lines and 85% branches. One exception
 is documented in the script: the host branch coverage of `crypto.cpp` needs 60%, because its remaining branches are OpenSSL
@@ -48,7 +48,10 @@ were checked against the same vectors with a separate probe program on a board. 
 this Unity suite on the board is not part of validation. Setup tests cover button
 timing, the Wi-Fi QR code, field staging, HTML escaping, session tokens and limits, host
 and origin checks, notice codes and oversized pages; the access point, DNS, HTTP server,
-scanning and mDNS discovery run only on hardware. Firmware tests cover signed updates:
+scanning and mDNS discovery run only on hardware. Broker search tests cover the address
+range for each network size, the CONNECT packet byte by byte, the reading of a complete,
+partial or foreign answer and the search schedule across a timer wrap; the sockets that
+try the addresses run only on hardware. Firmware tests cover signed updates:
 installation in any chunking, every signed byte, header shape, role, downgrade, size,
 truncation and sink failures, against a fixture signed by `tools/package_firmware.py`
 with a throwaway key; the OTA adapter is only compiled. Service-safety tests inject
