@@ -214,8 +214,8 @@ password, then, only if that was refused, with the stored password. A broker tha
 the control password checks no password and is skipped. The receiver moves to the first
 broker that refuses the control password and accepts the stored one. The new address is
 saved and forwarding continues without a restart; queued samples are then published as
-usual. A search with brokers that answer promptly takes about fifteen seconds, up to about
-a minute when candidates are slow, and repeats every five minutes while the broker stays
+usual. A search takes about 35 seconds, with Wi-Fi power saving off while the port is tried, and
+up to about a minute and a half when candidates answer slowly, and repeats every five minutes while the broker stays
 unreachable. It logs `CJAPP UPLINK search`, then `CJAPP UPLINK moved host=<address>
 ok=<0|1>` (or `restarted` when the stored host itself accepted) or `CJAPP UPLINK search
 found=<n> open=<n> accepted=0`. A broker on another subnet is not found. The stored

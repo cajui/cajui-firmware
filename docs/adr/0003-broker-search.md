@@ -18,7 +18,9 @@ someone opened the setup page or connected a USB cable again.
 - The receiver can look for the broker itself: it tries a TCP connection to the broker
   port on every other address of its station's IPv4 network and lists those that accept.
   A network larger than 254 hosts is narrowed to the /24 block around the receiver, so
-  trying the port takes about thirteen seconds whatever the network's size.
+  trying the port takes about 35 seconds whatever the network's size. Wi-Fi power saving
+  is off while the port is tried: on one home network it delayed answers to the receiver
+  past the waiting window, and a broker was missed.
 - **Setup page.** The broker section lists what the search found, after any announced
   broker, with the same "Use" link. The search sends no credentials; the person still
   enters the username and password.
@@ -59,12 +61,12 @@ someone opened the setup page or connected a USB cable again.
   another subnet is not found and still needs its address typed, as does a broker on
   another port when no broker is stored yet (the page searches the staged port, or 1883).
 - At most six brokers are listed or asked per search.
-- Trying the port opens up to six connections at a time for about thirteen seconds;
+- Trying the port opens up to six connections at a time for about 35 seconds;
   each address of the network sees one connection attempt per search, and each that
   answers sees up to two more for the CONNECT probes. On the setup page the mDNS query
   adds up to about eight seconds. In operation each probe waits up to four and a half
-  seconds, so a search with six silent candidates can take about a minute; a search
-  that cannot start is tried again after ten seconds.
+  seconds, so a search with six silent candidates can take about a minute and a half; a
+  search that cannot start is tried again after ten seconds.
 
 ## Alternatives
 

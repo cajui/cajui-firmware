@@ -3,6 +3,7 @@
 #include "broker_scan.h"
 #include "cajui_search.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <lwip/sockets.h>
 #include <cerrno>
 #include <cstring>
@@ -12,9 +13,11 @@ namespace {
 // Connections attempted at once. lwIP offers 16 sockets; the setup page, its DNS, mDNS and
 // the MQTT client keep some.
 constexpr size_t Batch = 6;
-// A host on the local network answers a connection within a few milliseconds; an unused
-// address never does. 254 addresses take about thirteen seconds.
-constexpr uint32_t ConnectWaitMs = 300;
+// An unused address never answers, so every batch waits this long. Measured on one home
+// network with the receiver's Wi-Fi power saving off: hosts answered within 202 ms. With it
+// on, answers took up to 610 ms and a broker at 256 ms was missed by a 300 ms window.
+// 254 addresses take about 35 seconds.
+constexpr uint32_t ConnectWaitMs = 800;
 constexpr uint32_t ProbeConnectMs = 1500, ProbeAnswerMs = 3000;
 constexpr uint32_t MsPerSecond = 1000, UsPerMs = 1000;
 constexpr size_t AnswerSize = 4;
@@ -62,6 +65,11 @@ size_t findBrokers(uint16_t port, cajui::BrokerView* found, size_t known, size_t
     const uint32_t own = ntohl(uint32_t(WiFi.localIP()));
     cajui::SearchRange range{};
     if (!cajui::searchRange(own, ntohl(uint32_t(WiFi.subnetMask())), range)) return count;
+    // In power saving the station receives only at beacons, which delays each ARP reply and
+    // SYN-ACK by up to a beacon interval. Restored when the sweep ends.
+    wifi_ps_type_t saving = WIFI_PS_MIN_MODEM;
+    const bool restore = esp_wifi_get_ps(&saving) == ESP_OK;
+    esp_wifi_set_ps(WIFI_PS_NONE);
     uint32_t next = range.first;
     while (next <= range.last && count < capacity && !cancel.load()) {
         int sockets[Batch];
@@ -117,6 +125,7 @@ size_t findBrokers(uint16_t port, cajui::BrokerView* found, size_t known, size_t
         for (size_t i = 0; i < open; ++i) close(sockets[i]);
         if (exhausted && !open) break; // Nothing could be tried at all.
     }
+    if (restore) esp_wifi_set_ps(saving);
     return count;
 }
 cajui::ProbeAnswer probeBroker(const char* address, uint16_t port, const char* username,
