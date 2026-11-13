@@ -190,25 +190,50 @@ void wifiForm(Html& page, const SetupView& v) {
     }
     page.format("</section>");
 }
+// Inner content of the broker search box; also served alone for live updates. It says what
+// the receiver is doing and what the person can do meanwhile, since the form below is
+// usable at any time.
+void brokerSearch(Html& page, const SetupView& v) {
+    if (v.wifi != WifiState::Connected) {
+        page.format("<p><small>Once Wi-Fi is connected, the receiver looks for MQTT brokers on "
+                    "that network. You can also type the broker's address below.</small></p>");
+        return;
+    }
+    if (v.searching) {
+        // data-live keeps the page script refreshing this box until the search ends.
+        page.format("<p data-live><span class=\"spin\"></span>Looking for MQTT brokers on this "
+                    "network. This can take up to a minute; the result appears here.</p><p><small>"
+                    "If you already know the broker's address, type it below without waiting."
+                    "</small></p>");
+        return;
+    }
+    if (v.brokerCount) {
+        page.format("<p>MQTT brokers found on this network:</p>");
+        for (size_t i = 0; i < v.brokerCount; ++i) {
+            page.format("<p><b>");
+            page.text(v.brokers[i].host);
+            page.format(":%u</b> <a data-host=\"", unsigned(v.brokers[i].port));
+            page.text(v.brokers[i].host);
+            page.format("\" data-port=\"%u\" href=\"/?host=", unsigned(v.brokers[i].port));
+            page.query(v.brokers[i].host);
+            page.format("&amp;port=%u\">Use this broker</a></p>", unsigned(v.brokers[i].port));
+        }
+        page.format("<p><small>Choosing one fills in the address and port below. Then enter the "
+                    "username and password given by your monitoring application.</small></p>");
+    } else {
+        page.format("<p>No MQTT broker found on this network.</p><p><small>Check that the "
+                    "broker's computer is on and connected to this same network, then search "
+                    "again, or type its address below.</small></p>");
+    }
+    form(page, "/discover", v.token, true);
+    page.format("<button>Search again</button></form>");
+}
 void brokerForm(Html& page, const SetupView& v) {
     const char* host = v.prefillHost ? v.prefillHost : v.staged ? v.staged->host : "";
     const unsigned port = v.prefillHost ? v.prefillPort : v.staged ? v.staged->port : 0;
-    page.format("<section><h2>MQTT broker</h2>");
-    if (v.searching) page.format("<p><small>Searching the network&hellip;</small></p>");
-    for (size_t i = 0; i < v.brokerCount; ++i) {
-        page.format("<p>Found <b>");
-        page.text(v.brokers[i].host);
-        page.format(":%u</b> <a href=\"/?host=", unsigned(v.brokers[i].port));
-        page.query(v.brokers[i].host);
-        page.format("&amp;port=%u\">Use</a></p>", unsigned(v.brokers[i].port));
-    }
-    if (!v.searching && !v.brokerCount)
-        page.format("<p><small>No broker found on this network. Enter its address below."
-                    "</small></p>");
-    if (v.wifi == WifiState::Connected) {
-        form(page, "/discover", v.token);
-        page.format("<button>Search again</button></form>");
-    }
+    page.format("<section><h2>MQTT broker</h2><div id=\"brokers\">");
+    brokerSearch(page, v);
+    page.format("</div>");
     form(page, "/broker", v.token);
     page.format("<label for=\"host\">Address</label>"
                 "<input id=\"host\" name=\"host\" maxlength=\"64\" required value=\"");
@@ -320,21 +345,27 @@ void firmware(Html& page, const SetupView& v) {
                 "update does not run correctly. Samples keep queueing during the upload."
                 "</small></p></section>");
 }
-// Refreshes the transmitters section every second while it is live, and submits the pairing
-// forms in place. Without JavaScript the forms reload the page as before.
+// Refreshes the broker search box and the transmitters section every second while each is
+// live, and submits their forms in place. Choosing a found broker fills in the address and
+// port without reloading, so what was typed in the form stays. Without JavaScript the forms
+// and links reload the page as before.
 constexpr char LiveScript[] =
-    "<script>(function(){var box=document.getElementById('transmitters');if(!box||!window.fetch)"
-    "return;function load(){fetch('/transmitters',{cache:'no-store'}).then(function(r){return "
-    "r.ok?r.text():null}).then(function(t){if(t!==null)box.innerHTML=t}).catch(function(){})}"
-    "box.addEventListener('submit',function(e){var f=e.target;if(!f.hasAttribute('data-live-"
-    "form'))return;e.preventDefault();var b=f.querySelector('button');if(b)b.disabled=true;"
-    "fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f))}).then(load,load)});"
-    "setInterval(function(){if(box.querySelector('[data-live]'))load()},1000)})();</script>";
+    "<script>(function(){if(!window.fetch)return;function live(id,url){var box=document."
+    "getElementById(id);if(!box)return null;function load(){fetch(url,{cache:'no-store'}).then("
+    "function(r){return r.ok?r.text():null}).then(function(t){if(t!==null)box.innerHTML=t})."
+    "catch(function(){})}box.addEventListener('submit',function(e){var f=e.target;if(!f."
+    "hasAttribute('data-live-form'))return;e.preventDefault();var b=f.querySelector('button');"
+    "if(b)b.disabled=true;fetch(f.action,{method:'POST',body:new URLSearchParams(new FormData(f"
+    "))}).then(load,load)});setInterval(function(){if(box.querySelector('[data-live]'))load()},"
+    "1000);return box}live('transmitters','/transmitters');var found=live('brokers','/brokers');"
+    "if(found)found.addEventListener('click',function(e){var a=e.target;var h=document."
+    "getElementById('host');var p=document.getElementById('port');if(!a.getAttribute||!a."
+    "getAttribute('data-host')||!h||!p)return;e.preventDefault();h.value=a.getAttribute('data-"
+    "host');p.value=a.getAttribute('data-port');h.focus()})})();</script>";
 void transmitters(Html& page, const SetupView& v) {
     page.format("<section id=\"transmitters\">");
     transmitterList(page, v);
     page.format("</section>");
-    if (v.pairing) page.format("%s", LiveScript);
 }
 } // namespace
 
@@ -558,7 +589,7 @@ bool renderPage(const SetupView& v, char* output, size_t capacity) {
     transmitters(page, v);
     if (v.updates) firmware(page, v);
     form(page, "/close", v.token);
-    page.format("<button>Close setup</button></form></html>");
+    page.format("<button>Close setup</button></form>%s</html>", LiveScript);
     return page.ok();
 }
 } // namespace
@@ -576,6 +607,12 @@ bool renderSetup(const SetupView& v, char* output, size_t capacity) {
         }
     }
     return true;
+}
+bool renderBrokers(const SetupView& v, char* output, size_t capacity) {
+    if (!output || !capacity) return false;
+    Html page(output, capacity);
+    brokerSearch(page, v);
+    return page.ok();
 }
 bool renderTransmitters(const SetupView& v, char* output, size_t capacity) {
     if (!output || !capacity) return false;

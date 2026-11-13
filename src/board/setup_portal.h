@@ -120,6 +120,8 @@ private:
     bool authorize(bool post);
     void redirect(cajui::Notice);
     void home();
+    void brokers();
+    void fillBrokers(cajui::SetupView&);
     void transmitters();
     void fillPairing(cajui::PairingView&) const;
     void fillTransmitters(cajui::SetupView&);

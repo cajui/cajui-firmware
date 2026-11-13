@@ -291,6 +291,13 @@ JavaScript, the transmitters section refreshes itself every second while the win
 open (spinners while searching and while waiting for confirmation) and the pairing buttons
 act in place; without it, the forms reload the page.
 
+The broker section works the same way. While the receiver looks for brokers, the section
+says so, says that the form below can be filled in without waiting, and refreshes itself
+every second until the result appears. "Use this broker" fills in the address and port
+without reloading, keeping anything already typed; "Search again" starts a new search in
+place. Without JavaScript, reload the page to see the result; the link then reloads it
+with the address and port filled in.
+
 The page answers only on the access point interface and only for its own address: a
 request through the receiver's station address on the home network gets 404, for any
 path, and a

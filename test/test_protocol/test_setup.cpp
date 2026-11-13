@@ -332,7 +332,8 @@ void test_setup_page_escapes_input_and_never_shows_passwords() {
     static char page[PageCapacity];
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
     const std::string html = page;
-    TEST_ASSERT_FALSE(contains(html, "<script>"));
+    // The page's own script only: the network named "<script>" is escaped.
+    TEST_ASSERT_EQUAL_size_t(1, count(html, "<script>"));
     TEST_ASSERT_TRUE(contains(html, "&lt;script&gt;"));
     TEST_ASSERT_TRUE(contains(html, "Cafe &quot;&amp;&quot; bar"));
     TEST_ASSERT_TRUE(contains(html, "Saved &lt;now&gt;"));
@@ -413,9 +414,10 @@ void test_setup_page_states_and_prefill() {
     TEST_ASSERT_FALSE(contains(page, "wifi-secret"));
     view.saved = false;
     TEST_ASSERT_TRUE(contains(page, "No transmitter enrolled"));
-    TEST_ASSERT_TRUE(contains(page, "No broker found"));
+    TEST_ASSERT_TRUE(contains(page, "Once Wi-Fi is connected, the receiver looks for MQTT"));
     TEST_ASSERT_TRUE(contains(page, "Broker: not configured"));
-    TEST_ASSERT_FALSE(contains(page, "Search again")); // Not connected: no discovery link.
+    TEST_ASSERT_FALSE(contains(page, "Search again")); // Not connected: no network to search.
+    view.wifi = WifiState::Connected;
     view.scanning = true;
     view.searching = true;
     view.prefillHost = "a b&c";
@@ -425,7 +427,8 @@ void test_setup_page_states_and_prefill() {
     view.saved = true;
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "Scanning for networks"));
-    TEST_ASSERT_TRUE(contains(page, "Searching the network"));
+    TEST_ASSERT_TRUE(contains(page, "Looking for MQTT brokers on this network"));
+    TEST_ASSERT_FALSE(contains(page, "Search again")); // One search at a time.
     TEST_ASSERT_TRUE(contains(page, "value=\"a b&amp;c\""));
     TEST_ASSERT_TRUE(contains(page, "value=\"1884\""));
     TEST_ASSERT_FALSE(contains(page, "Changes are not saved yet"));
@@ -434,9 +437,11 @@ void test_setup_page_states_and_prefill() {
     odd[0].port = 1;
     view.brokers = odd;
     view.brokerCount = 1;
-    view.wifi = WifiState::Connected;
+    view.searching = false;
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
-    TEST_ASSERT_TRUE(contains(page, "/?host=host%20name&amp;port=1"));
+    TEST_ASSERT_TRUE(contains(page, "MQTT brokers found on this network"));
+    TEST_ASSERT_TRUE(contains(page, "data-host=\"host name\" data-port=\"1\" "
+                                    "href=\"/?host=host%20name&amp;port=1\">Use this broker"));
     TEST_ASSERT_TRUE(contains(page, "Search again"));
     EnrollmentInfo prepared[1]{};
     prepared[0] = enrollment(Enrollment::Prepared, 4, 12, 0);
@@ -536,11 +541,12 @@ void test_transmitters_section_refreshes_live_only_while_pairing() {
     SetupView view{};
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
     TEST_ASSERT_TRUE(contains(page, "<section id=\"transmitters\">"));
-    TEST_ASSERT_FALSE(contains(page, "<script>")); // No pairing: nothing to refresh.
+    TEST_ASSERT_TRUE(contains(page, "live('transmitters','/transmitters')"));
+    TEST_ASSERT_FALSE(contains(page, "data-live>")); // Nothing running: no polling.
     PairingView pairing{};
     view.pairing = &pairing;
     TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
-    TEST_ASSERT_TRUE(contains(page, "fetch('/transmitters'"));
+    TEST_ASSERT_EQUAL_size_t(1, count(page, "<script>"));
     TEST_ASSERT_TRUE(contains(page, "action=\"/pair/open\" data-live-form"));
     TEST_ASSERT_FALSE(contains(page, "data-live>")); // Closed window: no polling.
     pairing.open = true;
@@ -558,6 +564,69 @@ void test_transmitters_section_refreshes_live_only_while_pairing() {
     TEST_ASSERT_FALSE(contains(html, "<script>")); // The page script replaces this content.
     TEST_ASSERT_FALSE(renderTransmitters(view, fragment, 20));
     TEST_ASSERT_FALSE(renderTransmitters(view, nullptr, 0));
+}
+void test_broker_search_box_says_what_happens_and_refreshes_only_while_searching() {
+    static char page[PageCapacity];
+    static char fragment[PageCapacity];
+    SetupView view{};
+    view.token = "tok";
+    BrokerView found[2]{};
+    std::strcpy(found[0].host, "192.168.1.20");
+    found[0].port = 1883;
+    std::strcpy(found[1].host, "a\"b");
+    found[1].port = 1884;
+    view.brokers = found;
+    view.brokerCount = 2;
+    // Without Wi-Fi there is no network to search: nothing found is shown, nothing polls.
+    TEST_ASSERT_TRUE(renderBrokers(view, fragment, sizeof(fragment)));
+    std::string html = fragment;
+    TEST_ASSERT_TRUE(contains(html, "Once Wi-Fi is connected"));
+    TEST_ASSERT_FALSE(contains(html, "192.168.1.20"));
+    TEST_ASSERT_FALSE(contains(html, "data-live"));
+    TEST_ASSERT_FALSE(contains(html, "/discover"));
+    // Searching: says what for and how long, polls, and offers no second search.
+    view.wifi = WifiState::Connected;
+    view.searching = true;
+    TEST_ASSERT_TRUE(renderBrokers(view, fragment, sizeof(fragment)));
+    html = fragment;
+    TEST_ASSERT_TRUE(contains(html, "<p data-live><span class=\"spin\"></span>Looking for MQTT "
+                                    "brokers on this network"));
+    TEST_ASSERT_TRUE(contains(html, "up to a minute"));
+    TEST_ASSERT_TRUE(contains(html, "type it below without waiting"));
+    TEST_ASSERT_FALSE(contains(html, "192.168.1.20"));
+    TEST_ASSERT_FALSE(contains(html, "/discover"));
+    // Found: each broker fills the form in place, with a link that works without scripts.
+    view.searching = false;
+    TEST_ASSERT_TRUE(renderBrokers(view, fragment, sizeof(fragment)));
+    html = fragment;
+    TEST_ASSERT_FALSE(contains(html, "data-live>"));
+    TEST_ASSERT_TRUE(contains(html, "MQTT brokers found on this network"));
+    TEST_ASSERT_TRUE(contains(html, "<b>192.168.1.20:1883</b> <a data-host=\"192.168.1.20\" "
+                                    "data-port=\"1883\" href=\"/?host=192.168.1.20&amp;port=1883\">"
+                                    "Use this broker</a>"));
+    TEST_ASSERT_TRUE(contains(html, "data-host=\"a&quot;b\" data-port=\"1884\" "
+                                    "href=\"/?host=a%22b&amp;port=1884\""));
+    TEST_ASSERT_TRUE(contains(html, "fills in the address and port below"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/discover\" data-live-form"));
+    TEST_ASSERT_TRUE(contains(html, "name=\"token\" value=\"tok\""));
+    TEST_ASSERT_FALSE(contains(html, "<section")); // Inner content only.
+    TEST_ASSERT_FALSE(contains(html, "<script>"));
+    // None: says what to check, and still offers the search and the form below.
+    view.brokerCount = 0;
+    TEST_ASSERT_TRUE(renderBrokers(view, fragment, sizeof(fragment)));
+    html = fragment;
+    TEST_ASSERT_TRUE(contains(html, "No MQTT broker found on this network"));
+    TEST_ASSERT_TRUE(contains(html, "connected to this same network"));
+    TEST_ASSERT_TRUE(contains(html, "action=\"/discover\" data-live-form"));
+    TEST_ASSERT_FALSE(renderBrokers(view, fragment, 20));
+    TEST_ASSERT_FALSE(renderBrokers(view, nullptr, 0));
+    // In the page the box sits above the form, and one script serves both live sections.
+    TEST_ASSERT_TRUE(renderSetup(view, page, sizeof(page)));
+    html = page;
+    TEST_ASSERT_TRUE(html.find("<div id=\"brokers\">") < html.find("action=\"/broker\""));
+    TEST_ASSERT_TRUE(contains(html, "live('brokers','/brokers')"));
+    TEST_ASSERT_TRUE(contains(html, "getAttribute('data-host')"));
+    TEST_ASSERT_EQUAL_size_t(1, count(html, "<script>"));
 }
 void test_confirmation_and_closed_pages() {
     static char page[PageCapacity];
@@ -697,6 +766,7 @@ void runSetupTests() {
     RUN_TEST(test_hostile_network_names_never_break_the_page);
     RUN_TEST(test_pairing_section_states);
     RUN_TEST(test_transmitters_section_refreshes_live_only_while_pairing);
+    RUN_TEST(test_broker_search_box_says_what_happens_and_refreshes_only_while_searching);
     RUN_TEST(test_confirmation_and_closed_pages);
     RUN_TEST(test_store_lists_enrollments_with_last_received_counter);
 }
